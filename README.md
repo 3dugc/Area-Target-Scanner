@@ -95,7 +95,7 @@ if (result.State == TrackingState.TRACKING) {
 |------|-------------|------|
 | **Input Validation** | Verify scan ZIP contains mesh, poses, images | — |
 | **Model Optimization** | Simplify & optimize the 3D mesh | [3D-Model-Optimizer](https://github.com/3dugc/3D-Model-Optimizer) |
-| **Feature Extraction** | Extract ORB features, build BoW vocabulary, compute 3D-2D correspondences | OpenCV, scikit-learn |
+| **Feature Extraction** | Extract ORB + AKAZE features, build BoW vocabulary, compute 3D-2D correspondences | OpenCV, scikit-learn |
 | **Asset Bundling** | Package mesh + texture + feature DB + manifest into a deployable bundle | SQLite, trimesh |
 
 ### The Tracker (runs in Unity at 60fps)
@@ -105,7 +105,9 @@ The Unity plugin performs visual localization each frame:
 1. Extract ORB features from the camera image
 2. Retrieve candidate keyframes via Bag-of-Words similarity
 3. Match descriptors and solve PnP for 6DoF pose
-4. Smooth with a Kalman filter for stable tracking
+4. If ORB matching fails, fall back to AKAZE feature matching for robustness
+5. Apply temporal consistency filter to reject outlier poses
+6. Smooth with a Kalman filter for stable tracking
 
 No GPU compute shaders. No ML models. Just good old-fashioned computer vision that works on a potato.
 
@@ -158,13 +160,15 @@ asset_bundle/
 
 ## Unity Plugin
 
-A UPM package (`com.areatarget.tracking` v1.2.0) that provides:
+A UPM package (`com.areatarget.tracking` v1.3.0) that provides:
 
 - `AreaTargetTracker` — main tracking interface
-- `VisualLocalizationEngine` — ORB + BoW + PnP pipeline
+- `VisualLocalizationEngine` — ORB + AKAZE + BoW + PnP pipeline
 - `KalmanPoseFilter` — 6DoF pose smoothing
 - `AssetBundleLoader` — loads and validates asset bundles
 - `FeatureDatabaseReader` — reads the SQLite feature DB
+- `AlignmentTransformCalculator` — coordinate system alignment between scan and AR session
+- `ExtendedDebugInfo` — real-time pipeline diagnostics (feature counts, match stats, AKAZE fallback status)
 - AR Foundation integration for iOS/Android
 
 **Requirements:** Unity 6000.0+, AR Foundation 6.0+
@@ -173,9 +177,19 @@ A UPM package (`com.areatarget.tracking` v1.2.0) that provides:
 
 For production performance, the plugin includes an optional C++ native library (`libvisual_localizer`) that replaces the managed C# localization path. Built with CMake, supports macOS/Windows/Linux/iOS/Android.
 
+Key capabilities:
+- ORB + BoW visual localization with PnP RANSAC
+- AKAZE fallback when ORB matching is insufficient
+- Temporal consistency filter to reject outlier frames
+- Coordinate system alignment transform support
+- Debug diagnostics API (`vl_get_debug_info`) for real-time pipeline introspection
+
 ```bash
 # Build on macOS
 cd native_visual_localizer && bash build_macos.sh
+
+# Build for iOS (produces libvisual_localizer.a)
+cd native_visual_localizer && bash build_ios.sh
 ```
 
 ## Web UI
@@ -206,7 +220,13 @@ python -m pytest tests/ -v
 # Product → Test (⌘U)
 ```
 
-The test suite includes unit tests, integration tests, property-based tests (Hypothesis), and performance benchmarks.
+The test suite includes unit tests, integration tests, property-based tests (Hypothesis), cross-session localization tests, and performance benchmarks.
+
+## Documentation
+
+- [Async Localization Design](docs/async-localization-design.md) — architecture for non-blocking localization
+- [Cross-Session Comparison Report](docs/cross-session-comparison-report.md) — localization accuracy across different scan sessions
+- [iOS Device Test Guide](docs/ios-device-test-guide.md) — step-by-step guide for on-device testing
 
 ## Project Structure
 
@@ -214,11 +234,12 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 .
 ├── ios_scanner/              # Swift — LiDAR scanning app
 ├── processing_pipeline/      # Python — scan → asset bundle
-├── native_visual_localizer/  # C++ — high-perf visual localization
+├── native_visual_localizer/  # C++ — high-perf visual localization (macOS/iOS/Android)
 ├── unity_plugin/             # C# — Unity AR tracking package
 ├── unity_project/            # Unity test project
 ├── web_service/              # Flask — drag-and-drop web UI
-├── tests/                    # Python test suite
+├── tests/                    # Python test suite (unit + property-based + cross-session)
+├── docs/                     # Design docs & test reports
 ├── docker-compose.yml        # One-command deployment
 └── GUIDE.md                  # Detailed setup & usage guide (中文)
 ```
@@ -234,6 +255,8 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 | LiDAR scanning | Via Vuforia app | Native Swift app included |
 | Unity integration | Proprietary SDK | Open UPM package |
 | Tracking quality | Production-grade | Good enough™ (and improving) |
+| Multi-feature fallback | ORB only | ORB + AKAZE dual-feature pipeline |
+| Cross-session support | Limited | Built-in cross-session localization |
 
 ## Contributing
 
