@@ -1,60 +1,62 @@
-# 异步定位 Pipeline 设计方案
+# Async Localization Pipeline Design
 
-## 背景
+## Background
 
-当前 `vl_process_frame` 在 Unity 主线程同步调用，ORB pipeline ~10ms，AKAZE fallback 额外 ~30-60ms（仅 ORB 失败时触发）。虽然同 session tracking 时 AKAZE 几乎不触发，但为了彻底消除主线程阻塞，可以将整个定位 pipeline 移到后台线程。
+Currently `vl_process_frame` runs synchronously on Unity's main thread. The ORB pipeline takes ~10ms, and the AKAZE fallback adds another ~30-60ms (only when ORB fails, which is its way of saying "I give up, tag in the big guy"). While AKAZE rarely triggers during same-session tracking, moving the entire localization pipeline to a background thread eliminates any chance of main-thread stutter. Because nothing says "immersive AR experience" like a frozen frame.
 
-## AKAZE 开销分析
+## AKAZE Cost Analysis
 
-### 离线（一次性）
-- `build_feature_database()` 阶段提取 AKAZE 描述子，写入 `akaze_features` 表
-- AKAZE 提取比 ORB 慢 3-5 倍，但只在建库时跑一次
-- 存储在 features.db 中，运行时通过 `vl_add_keyframe_akaze` 加载
+### Offline (one-time)
+- `build_feature_database()` extracts AKAZE descriptors and writes them to the `akaze_features` table
+- AKAZE extraction is 3-5x slower than ORB, but it only runs once during database creation — patience is a virtue
+- Stored in features.db, loaded at runtime via `vl_add_keyframe_akaze`
 
-### 运行期
-- ORB 成功时：AKAZE 完全不参与，零开销
-- ORB 失败时触发 fallback：
+### Runtime
+- When ORB succeeds: AKAZE sits on the bench, zero overhead
+- When ORB fails (fallback triggered):
   - `akaze_->detectAndCompute()`: ~20-40ms (ARM64)
-  - BFMatcher knnMatch × N 候选 KF: ~5-15ms
+  - BFMatcher knnMatch x N candidate keyframes: ~5-15ms
   - PnP RANSAC + refinement: ~1-2ms
-  - 单次 fallback 总计: ~30-60ms
+  - Total per fallback: ~30-60ms (the price of ORB's incompetence)
 
-### 触发频率
-- 同 session tracking: ORB 成功率 > 95%，AKAZE 几乎不触发
-- 跨 session 重定位: ORB 失败率 ~60%，这些帧触发 AKAZE
-- 跨 session 定位成功后: 后续帧 ORB 靠 nearby KF 搜索成功，AKAZE 又不触发
+### Trigger Frequency
+- Same-session tracking: ORB success rate > 95%, AKAZE almost never triggers
+- Cross-session relocalization: ORB failure rate ~60%, those frames trigger AKAZE (ORB really doesn't handle change well)
+- After cross-session lock-on: subsequent frames succeed via ORB nearby-KF search, AKAZE goes back to sleep
 
-## 方案：后台线程定位
+## Design: Background Thread Localization
 
-### 架构
+### Architecture
 
 ```
-Unity 主线程（每帧 Update）:
-  1. 拷贝当前相机灰度图 + intrinsics + AR camera pose
-  2. 提交给后台线程（替换待处理数据，丢弃旧帧）
-  3. 读取后台线程的最新结果（如果有）
-  4. 用结果更新 tracking 状态和 pose
+Unity Main Thread (every frame Update):
+  1. Copy current grayscale image + intrinsics + AR camera pose
+  2. Submit to background thread (replace pending data, drop stale frames)
+  3. Read latest result from background thread (if available)
+  4. Update tracking state and pose
 
-后台线程（独立循环）:
-  1. 等待新帧数据
-  2. vl_process_frame（ORB → AKAZE fallback → 一致性过滤 → AT）
-  3. 将结果写入共享变量
-  4. 回到 1
+Background Thread (independent loop):
+  1. Wait for new frame data
+  2. vl_process_frame (ORB → AKAZE fallback → consistency filter → AT)
+  3. Write result to shared variable
+  4. Go to 1
 ```
 
-### C# 端伪代码
+Like a restaurant kitchen — the waiter (main thread) takes orders and serves food, the chef (background thread) does the actual cooking. Nobody wants the chef blocking the dining room door.
+
+### C# Pseudocode
 
 ```csharp
 class AsyncLocalizationRunner : IDisposable
 {
-    // 共享数据（主线程写，后台线程读）
+    // Shared input (main thread writes, background thread reads)
     private byte[] _pendingImage;
     private float _pendingFx, _pendingFy, _pendingCx, _pendingCy;
     private float[] _pendingPose;
     private bool _hasPendingFrame;
     private readonly object _inputLock = new object();
 
-    // 共享结果（后台线程写，主线程读）
+    // Shared output (background thread writes, main thread reads)
     private VLResult _latestResult;
     private bool _hasNewResult;
     private readonly object _outputLock = new object();
@@ -62,24 +64,25 @@ class AsyncLocalizationRunner : IDisposable
     private Thread _workerThread;
     private volatile bool _running;
 
-    public void SubmitFrame(byte[] grayImage, float fx, float fy, 
+    public void SubmitFrame(byte[] grayImage, float fx, float fy,
                             float cx, float cy, float[] arPose)
     {
         lock (_inputLock)
         {
-            // 深拷贝图像（主线程的 buffer 下一帧会被覆盖）
+            // Deep copy — the main thread's camera buffer gets overwritten next frame,
+            // and we'd rather not localize against yesterday's news
             if (_pendingImage == null || _pendingImage.Length != grayImage.Length)
                 _pendingImage = new byte[grayImage.Length];
             Buffer.BlockCopy(grayImage, 0, _pendingImage, 0, grayImage.Length);
-            
+
             _pendingFx = fx; _pendingFy = fy;
             _pendingCx = cx; _pendingCy = cy;
-            
+
             if (_pendingPose == null) _pendingPose = new float[16];
             Array.Copy(arPose, _pendingPose, 16);
-            
+
             _hasPendingFrame = true;
-            Monitor.Pulse(_inputLock); // 唤醒后台线程
+            Monitor.Pulse(_inputLock); // Wake up the background thread
         }
     }
 
@@ -103,14 +106,14 @@ class AsyncLocalizationRunner : IDisposable
         while (_running)
         {
             byte[] image; float fx, fy, cx, cy; float[] pose;
-            
+
             lock (_inputLock)
             {
                 while (!_hasPendingFrame && _running)
                     Monitor.Wait(_inputLock);
                 if (!_running) break;
-                
-                // 取走最新帧（跳过排队中的旧帧）
+
+                // Grab the latest frame (skip any queued stale frames — they had their chance)
                 image = _pendingImage;
                 fx = _pendingFx; fy = _pendingFy;
                 cx = _pendingCx; cy = _pendingCy;
@@ -118,7 +121,7 @@ class AsyncLocalizationRunner : IDisposable
                 _hasPendingFrame = false;
             }
 
-            // 后台执行完整定位 pipeline
+            // Run the full localization pipeline on the background thread
             var result = NativeBridge.vl_process_frame(
                 _handle, image, width, height, fx, fy, cx, cy, 1, pose);
 
@@ -132,15 +135,15 @@ class AsyncLocalizationRunner : IDisposable
 }
 ```
 
-### 主线程调用
+### Main Thread Usage
 
 ```csharp
 void Update()
 {
-    // 1. 提交当前帧
+    // 1. Submit current frame
     _asyncRunner.SubmitFrame(currentGrayImage, fx, fy, cx, cy, arCameraPose);
-    
-    // 2. 读取上一次结果
+
+    // 2. Read the previous result (living in the past, but only by 1-2 frames)
     if (_asyncRunner.TryGetResult(out var result))
     {
         if (result.state == 1) // TRACKING
@@ -156,34 +159,34 @@ void Update()
 }
 ```
 
-## 注意事项
+## Important Considerations
 
-### 图像数据
-- 必须深拷贝，主线程的 camera buffer 下一帧会被覆盖
-- 考虑用 double buffer 避免每帧 alloc
+### Image Data
+- Must deep-copy the image buffer — the main thread's camera buffer gets overwritten next frame
+- Consider double-buffering to avoid per-frame allocation (because the GC has enough problems already)
 
-### 帧跳过
-- 后台线程只处理最新帧，跳过排队中的旧帧
-- 避免定位结果积压导致延迟越来越大
+### Frame Skipping
+- The background thread only processes the latest frame, skipping any queued stale frames
+- This prevents localization results from piling up and introducing ever-growing latency (a queue that only grows is just a memory leak with extra steps)
 
-### 线程安全
-- `vl_process_frame` 内部只读 keyframe 数据，线程安全
-- `vl_add_keyframe` / `vl_add_keyframe_akaze` / `vl_build_index` 在初始化阶段调用，与 processFrame 不并发
-- `vl_set_alignment_transform` 可能运行时调用，需要加锁或用 atomic flag
+### Thread Safety
+- `vl_process_frame` only reads keyframe data internally — thread-safe
+- `vl_add_keyframe` / `vl_add_keyframe_akaze` / `vl_build_index` are called during initialization, never concurrent with processFrame
+- `vl_set_alignment_transform` may be called at runtime — needs a lock or atomic flag
 
-### 结果延迟
-- 定位结果延迟 1-2 帧（~16-33ms @60fps）
-- 对 AR 体验影响很小，ARKit/ARCore 本身的 tracking 也有类似延迟
-- 可以用 Kalman filter 或插值平滑 pose 过渡
+### Result Latency
+- Localization results are delayed by 1-2 frames (~16-33ms @60fps)
+- Minimal impact on AR experience — ARKit/ARCore tracking has similar latency anyway
+- Can use Kalman filter or interpolation to smooth pose transitions
 
-### 不需要 ORB/AKAZE 分线程
-- ORB 和 AKAZE 是串行关系（ORB 失败才跑 AKAZE）
-- 放同一个后台线程即可
-- 分两个线程增加同步复杂度，收益不大
+### No Need to Split ORB/AKAZE Across Threads
+- ORB and AKAZE are sequential (AKAZE only runs when ORB fails — it's a fallback, not a parallel universe)
+- Keeping them on the same background thread is simpler
+- Splitting into two threads adds synchronization complexity for negligible benefit
 
-## 实施建议
+## Implementation Roadmap
 
-1. 先用当前同步方案验证 AKAZE 精度效果
-2. 确认有用后，在 C# 端做异步改造（C++ native 端不需要改）
-3. 异步改造主要改 `LocalizationPipeline.cs` 或新建 `AsyncLocalizationRunner.cs`
-4. 如果需要进一步优化，可以考虑限制 AKAZE fallback 频率（每 N 帧触发一次）
+1. First validate AKAZE accuracy with the current synchronous approach
+2. Once confirmed useful, implement async on the C# side (C++ native side needs no changes — it doesn't care who calls it)
+3. Async changes mainly affect `LocalizationPipeline.cs` or a new `AsyncLocalizationRunner.cs`
+4. For further optimization, consider throttling AKAZE fallback to every N frames (because even fallbacks need a cooldown)

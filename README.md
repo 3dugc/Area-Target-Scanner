@@ -244,19 +244,20 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 └── GUIDE.md                  # Detailed setup & usage guide (中文)
 ```
 
-## vs. Vuforia Area Targets
+## vs. Vuforia / Immersal
 
-| | Vuforia | This Project |
-|---|---------|-------------|
-| Pricing | 💰 Commercial license | Free (Apache 2.0) |
-| Cloud dependency | Required for scan processing | Fully offline |
-| Data ownership | Uploaded to PTC servers | Stays on your machine |
-| Customizable | Nope | Fork it, break it, fix it |
-| LiDAR scanning | Via Vuforia app | Native Swift app included |
-| Unity integration | Proprietary SDK | Open UPM package |
-| Tracking quality | Production-grade | Good enough™ (and improving) |
-| Multi-feature fallback | ORB only | ORB + AKAZE dual-feature pipeline |
-| Cross-session support | Limited | Built-in cross-session localization |
+| | Vuforia | Immersal | This Project |
+|---|---------|---------|-------------|
+| Pricing | 💰 Commercial license | 💰 Free tier + paid plans | Free (Apache 2.0) |
+| Cloud dependency | Required for scan processing | Required (cloud mapping) | Fully offline |
+| Data ownership | Uploaded to PTC servers | Uploaded to Immersal cloud | Stays on your machine |
+| Customizable | Nope | Nope | Fork it, break it, fix it |
+| LiDAR scanning | Via Vuforia app | Via Immersal SDK | Native Swift app included |
+| Unity integration | Proprietary SDK | Proprietary SDK | Open UPM package |
+| Tracking quality | Production-grade | Production-grade | Good enough™ (and improving) |
+| Multi-feature fallback | ORB only | Proprietary | ORB + AKAZE dual-feature pipeline |
+| Cross-session support | Limited | Yes (cloud-merged maps) | Built-in cross-session localization |
+| Offline mapping | No | No | Yes |
 
 ## Contributing
 

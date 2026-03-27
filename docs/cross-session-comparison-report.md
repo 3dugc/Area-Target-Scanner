@@ -1,18 +1,18 @@
-# 跨 Session 定位三方对比报告（Python / C++ Raw / C++ + AT 对齐）
+# Cross-Session Localization: Three-Way Comparison Report (Python / C++ Raw / C++ + AT Alignment)
 
-日期: 2026-03-26（更新）
+Date: 2026-03-26 (updated)
 
-## 测试配置
+## Test Configuration
 
-- 数据集: 5 个扫描（data1-3 区域 A，data4-5 区域 B），25 组全排列
-- **Python**: test_cross_session_matrix.py（ORB + AKAZE fallback + 一致性过滤 + AT 对齐 + 离群帧救回）
-- **C++ Raw**: test_cross_session_native.py → libvisual_localizer.dylib（ORB + BoW + AKAZE fallback + PnP refinement，无后处理）
-- **C++ + AT**: test_cross_session_native_parallel.py（C++ 定位 + Python 后处理：一致性过滤 + AT 对齐 + 离群帧救回）
-- features.db: 含 AKAZE 数据（akaze_features 表）
+- Dataset: 5 scans (data1-3 Area A, data4-5 Area B), 25 full permutations
+- **Python**: test_cross_session_matrix.py (ORB + AKAZE fallback + consistency filter + AT alignment + outlier rescue)
+- **C++ Raw**: test_cross_session_native.py → libvisual_localizer.dylib (ORB + BoW + AKAZE fallback + PnP refinement, no post-processing — raw and unfiltered, like sushi)
+- **C++ + AT**: test_cross_session_native_parallel.py (C++ localization + Python post-processing: consistency filter + AT alignment + outlier rescue)
+- features.db: includes AKAZE data (akaze_features table)
 
-## 成功率矩阵对比
+## Success Rate Matrix Comparison
 
-### Python 版（ORB + AKAZE + 一致性过滤 + AT + rescue）
+### Python (ORB + AKAZE + consistency filter + AT + rescue)
 
 | query↓ db→ | data1 | data2 | data3 | data4 | data5 |
 |---|---|---|---|---|---|
@@ -22,7 +22,7 @@
 | data4 | 0.0% | 0.0% | 2.6% | 100.0% | 77.9% |
 | data5 | 0.0% | 0.0% | 1.9% | 67.9% | 98.1% |
 
-### C++ Raw（BoW + AKAZE fallback，无后处理）
+### C++ Raw (BoW + AKAZE fallback, no post-processing)
 
 | query↓ db→ | data1 | data2 | data3 | data4 | data5 |
 |---|---|---|---|---|---|
@@ -32,7 +32,7 @@
 | data4 | 1.3% | 0.0% | 0.0% | 97.4% | 87.0% |
 | data5 | 0.0% | 0.0% | 3.8% | 58.5% | 98.1% |
 
-### C++ + AT（BoW + AKAZE + 一致性过滤 + AT 对齐 + rescue）
+### C++ + AT (BoW + AKAZE + consistency filter + AT alignment + rescue)
 
 | query↓ db→ | data1 | data2 | data3 | data4 | data5 |
 |---|---|---|---|---|---|
@@ -42,20 +42,20 @@
 | data4 | 1.3% | 0.0% | 0.0% | 97.4% | 79.2% |
 | data5 | 0.0% | 0.0% | 3.8% | 49.1% | 98.1% |
 
-## 区域汇总对比
+## Regional Summary
 
-| 指标 | Python | C++ Raw | C++ + AT | 备注 |
+| Metric | Python | C++ Raw | C++ + AT | Notes |
 |---|---|---|---|---|
-| 同 session 平均成功率 | 97.0% | 97.3% | 96.5% | 三者基本一致 |
-| 同区域跨 session 平均成功率 | 67.9% | 73.7% | 65.8% | C++ Raw 最高（无过滤） |
-| 跨区域误识别率 | 0.4% | 0.4% | 0.4% | 三者一致 |
-| 耗时 | 1993s | 3395s | 2429s | 并行版快 1.4x |
+| Same-session avg success | 97.0% | 97.3% | 96.5% | All three basically identical — hard to mess up when you're matching against yourself |
+| Cross-session avg success (same area) | 67.9% | 73.7% | 65.8% | C++ Raw highest (no filtering = no rejection = blissful ignorance) |
+| Cross-area false positive rate | 0.4% | 0.4% | 0.4% | All three consistent — at least nobody's hallucinating |
+| Runtime | 1993s | 3395s | 2429s | Parallel version 1.4x faster |
 
-> 注：C++ + AT 的成功率低于 C++ Raw，是因为一致性过滤剔除了 outlier 帧（status 从 ok 变为 pnp_outlier）。这些帧虽然 PnP 求解成功，但位姿偏差大，过滤后整体精度更高。
+> Note: C++ + AT has lower success rate than C++ Raw because the consistency filter rejects outlier frames (status changes from `ok` to `pnp_outlier`). These frames technically solved PnP, but their poses were way off. Filtering them out trades quantity for quality — a deal most people should take more often.
 
-## 同 session 精度对比（s2a_err）
+## Same-Session Accuracy (s2a_err)
 
-| 测试对 | Python | C++ Raw | C++ + AT aligned |
+| Test Pair | Python | C++ Raw | C++ + AT aligned |
 |---|---|---|---|
 | data1→data1 | 0.0024 | 0.0004 | 0.0004 |
 | data2→data2 | 0.0029 | 0.0006 | 0.0007 |
@@ -63,13 +63,13 @@
 | data4→data4 | 0.0027 | 0.0031 | 0.0032 |
 | data5→data5 | 0.0140 | 0.0010 | 0.0011 |
 
-> 同 session 下 AT 对齐几乎不影响精度（因为 s2a 本身就接近单位矩阵）。C++ PnP refinement 精度始终高于 Python 4-14 倍。
+> Same-session AT alignment barely affects accuracy (the alignment transform is near-identity anyway — solving a problem that doesn't exist). C++ PnP refinement is consistently 4-14x more accurate than Python. The C++ code doesn't try harder, it just tries smarter.
 
-## 跨 session 精度对比（s2a_err → aligned s2a_err）
+## Cross-Session Accuracy (s2a_err → aligned s2a_err)
 
-这是 AT 对齐的核心价值所在——跨 session 时两次扫描的坐标系不同，raw s2a_err 很大，对齐后大幅降低。
+This is where AT alignment earns its keep. Different scan sessions have different coordinate systems, so raw s2a_err is huge. Alignment fixes that.
 
-| 测试对 | Python raw | Python aligned | C++ raw | C++ aligned | C++ 对齐提升 |
+| Test Pair | Python raw | Python aligned | C++ raw | C++ aligned | C++ alignment gain |
 |---|---|---|---|---|---|
 | data1→data2 | 0.2519 | 0.1634 | 0.3403 | 0.1226 | 2.8x |
 | data1→data3 | 0.2483 | 0.0941 | 0.2541 | 0.0952 | 2.7x |
@@ -80,12 +80,13 @@
 | data4→data5 | 1.6137 | 0.4823 | 1.6567 | 0.5091 | 3.3x |
 | data5→data4 | 1.5663 | 0.1490 | 1.9725 | 0.1555 | 12.7x |
 
-> C++ + AT 对齐后，跨 session 精度提升 2.5-12.7 倍。data5→data4 提升最大（12.7x），从 1.97 降到 0.16。
-> C++ aligned 精度普遍优于或接近 Python aligned，说明 C++ PnP refinement 的基础精度更高。
+> C++ + AT alignment improves cross-session accuracy by 2.5-12.7x. The data5→data4 pair improved 12.7x (from 1.97 down to 0.16) — that's the difference between "the couch is on the ceiling" and "the couch is where it should be."
+>
+> C++ aligned accuracy is generally better than or equal to Python aligned, confirming that C++ PnP refinement provides a stronger foundation to build on.
 
-## ORB vs AKAZE 贡献对比（同区域跨 session）
+## ORB vs AKAZE Contribution (same-area cross-session)
 
-| 测试对 | Python ORB | Python AKAZE | C++ ORB | C++ AKAZE |
+| Test Pair | Python ORB | Python AKAZE | C++ ORB | C++ AKAZE |
 |---|---|---|---|---|
 | data1→data2 | 10 | 9 | 11 | 11 |
 | data1→data3 | 17 | 13 | 19 | 9 |
@@ -96,41 +97,41 @@
 | data4→data5 | 42 | 18 | 37 | 24 |
 | data5→data4 | 28 | 8 | 19 | 7 |
 
-> C++ + AT 版的 ORB/AKAZE 帧数比 C++ Raw 略少，因为一致性过滤剔除了部分 outlier。
+> C++ + AT has slightly fewer ORB/AKAZE frames than C++ Raw because the consistency filter culls outliers. Think of it as natural selection for pose estimates.
 
-## 关键发现
+## Key Findings
 
-1. **AT 对齐大幅提升跨 session 精度**：C++ aligned s2a_err 比 raw 降低 2.5-12.7 倍，跨 session 定位从"能用"变为"精准"
-2. **一致性过滤是精度-成功率的 tradeoff**：过滤后成功率从 73.7% 降到 65.8%（-7.9pp），但剩余帧的精度更高、更可靠
-3. **C++ 基础精度优于 Python**：即使都做了 AT 对齐，C++ aligned 精度普遍优于 Python（PnP refinement 的优势）
-4. **同 session 不受影响**：AT 对齐对同 session 精度几乎无影响（本来就很准）
-5. **跨区域区分能力一致**：三个版本的跨区域误识别率都 < 1%
-6. **并行版速度提升**：4 worker 并行从 3395s 降到 2429s（快 1.4x），但受限于 ctypes 加载开销
+1. **AT alignment dramatically improves cross-session accuracy**: C++ aligned s2a_err drops 2.5-12.7x vs raw. Cross-session localization goes from "technically working" to "actually useful."
+2. **Consistency filter is an accuracy-vs-success tradeoff**: Success rate drops from 73.7% to 65.8% (-7.9pp), but surviving frames are more accurate and reliable. Quality over quantity — a concept lost on most social media platforms.
+3. **C++ base accuracy beats Python**: Even with identical AT alignment, C++ aligned accuracy is better (PnP refinement advantage). The rewrite was worth it.
+4. **Same-session unaffected**: AT alignment has near-zero impact on same-session accuracy (it was already good — don't fix what isn't broken).
+5. **Cross-area discrimination is solid**: All three versions keep false positive rate below 1%. The system knows Area A from Area B, which is more than can be said for some GPS units.
+6. **Parallel speedup**: 4-worker parallel drops runtime from 3395s to 2429s (1.4x faster), bottlenecked by ctypes loading overhead.
 
-## 结论
+## Conclusion
 
-三方对比验证了完整 pipeline 的效果：
+The three-way comparison validates the full pipeline:
 
-- **C++ Raw**（73.7% 跨 session 成功率）：BoW + PnP refinement 提供了最高的原始成功率
-- **C++ + AT**（65.8% 成功率 + 高精度）：一致性过滤 + AT 对齐牺牲了部分成功率，但精度提升 2.5-12.7 倍，是实际部署的推荐配置
-- **Python**（67.9% 成功率）：作为 baseline 验证，确认 C++ 端已全面超越
+- **C++ Raw** (73.7% cross-session success): BoW + PnP refinement delivers the highest raw success rate. No filter, no mercy, no regrets.
+- **C++ + AT** (65.8% success + high accuracy): Consistency filter + AT alignment sacrifices some success rate for 2.5-12.7x accuracy improvement. This is the recommended production configuration — because being right matters more than being fast.
+- **Python** (67.9% success): Served as the baseline. The C++ pipeline has now surpassed it in every metric. The student has become the master.
 
-实际部署建议：先用 C++ Raw 模式做重定位（成功率优先），积累足够帧后计算 AT，切换到对齐模式（精度优先）。这样兼顾了冷启动的成功率和稳态的精度。
+**Deployment recommendation**: Start with C++ Raw mode for relocalization (prioritize success rate), accumulate enough frames to compute AT, then switch to aligned mode (prioritize accuracy). This balances cold-start success with steady-state precision. Best of both worlds — unlike most compromises.
 
-## 后期优化建议（按优先级排序）
+## Future Optimization Roadmap (by priority)
 
-### 短期（1-2 周）
-1. **Unity 端集成验证**: 在真机上跑 C++ native localizer，验证实际 fps 和定位效果
-2. **C# 端加载 AKAZE 数据**: FeatureDatabaseReader.cs 扩展读取 akaze_features 表，调用 vl_add_keyframe_akaze
-3. **AT 预计算**: 离线计算 AT 并存储，运行时通过 vl_set_alignment_transform 设置
+### Short-term (1-2 weeks)
+1. **Unity on-device validation**: Run C++ native localizer on real hardware, verify actual fps and localization quality
+2. **C# AKAZE data loading**: Extend FeatureDatabaseReader.cs to read akaze_features table, call vl_add_keyframe_akaze
+3. **AT pre-computation**: Compute AT offline and store it, load at runtime via vl_set_alignment_transform
 
-### 中期（2-4 周）
-4. **异步定位**: 把 vl_process_frame 移到后台线程（参考 docs/async-localization-design.md）
-5. **多 DB 加载**: 支持同时加载多个扫描的 features.db，扩大覆盖范围
-6. **AKAZE fallback 频率限制**: 跨 session 重定位阶段每 N 帧触发一次，减少开销
+### Mid-term (2-4 weeks)
+4. **Async localization**: Move vl_process_frame to background thread (see [async-localization-design.md](async-localization-design.md))
+5. **Multi-DB loading**: Support loading multiple scan feature databases simultaneously for wider coverage
+6. **AKAZE fallback throttling**: Trigger every N frames during cross-session relocalization to reduce overhead
 
-### 长期（1-3 月）
-7. **SuperPoint 替代 ORB/AKAZE**: 引入学习型特征，进一步提升跨 session 鲁棒性
-8. **mesh 边缘对齐**: 利用 3D mesh 轮廓线辅助定位，减少对纹理特征的依赖
-9. **离线地图合并**: ICP 点云配准 + keyframe/features 合并，支持大空间
-10. **NetVLAD 替代 BoW**: 学习型全局检索，候选质量更高
+### Long-term (1-3 months)
+7. **SuperPoint replacing ORB/AKAZE**: Learned features for better cross-session robustness (because hand-crafted features can only take you so far)
+8. **Mesh edge alignment**: Use 3D mesh silhouettes to assist localization, reducing dependence on texture features
+9. **Offline map merging**: ICP point cloud registration + keyframe/feature merging for large-space support
+10. **NetVLAD replacing BoW**: Learned global retrieval for higher-quality candidates (BoW had a good run)

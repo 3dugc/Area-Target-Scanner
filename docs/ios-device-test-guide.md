@@ -1,64 +1,66 @@
-# iOS 实机测试指引
+# iOS On-Device Test Guide
 
-## 前置条件
+Because the simulator can only pretend so hard.
 
-- macOS + Xcode 已安装
-- Unity 6000.3.11f1（已安装在 `/Applications/Unity/Hub/Editor/6000.3.11f1/`）
-- iPhone/iPad 通过 USB 连接，iOS 16.0+
-- Apple 开发者账号已在 Xcode 中登录
+## Prerequisites
 
-## 当前状态检查清单
+- macOS + Xcode installed
+- Unity 6000.3.11f1 (installed at `/Applications/Unity/Hub/Editor/6000.3.11f1/`)
+- iPhone/iPad connected via USB, iOS 16.0+
+- Apple Developer account signed in to Xcode
 
-| 项目 | 状态 |
-|------|------|
-| SLAMTestAssets（features.db, manifest.json, optimized.glb） | ✅ 已就绪 |
-| ARTestSceneManager 默认路径 → SLAMTestAssets | ✅ 已修正 |
-| ARTestSceneManager 资产预检查 | ✅ 已添加 |
-| ARTestSceneManager 调试 UI（Quality/Mode/AKAZE/一致性） | ✅ 已添加 |
-| InternalsVisibleTo("Assembly-CSharp") | ✅ 已添加 |
-| BuildiOS.cs 场景列表含 ARTestScene | ✅ 已确认 |
-| iOSPostProcess.cs（OpenCV/Bitcode/系统框架） | ✅ 已确认 |
-| build_ios.sh 11 个符号验证 | ✅ 已完善 |
-| **iOS 静态库 libvisual_localizer.a** | ⚠️ **需要重编** |
+## Pre-flight Checklist
 
-> 当前 `libvisual_localizer.a` 是 3 月 24 日的旧版本，缺少 `vl_add_keyframe_akaze` 和 `vl_set_alignment_transform`。
+| Item | Status |
+|------|--------|
+| SLAMTestAssets (features.db, manifest.json, optimized.glb) | ✅ Ready |
+| ARTestSceneManager default path → SLAMTestAssets | ✅ Fixed |
+| ARTestSceneManager asset pre-check | ✅ Added |
+| ARTestSceneManager debug UI (Quality/Mode/AKAZE/Consistency) | ✅ Added |
+| InternalsVisibleTo("Assembly-CSharp") | ✅ Added |
+| BuildiOS.cs scene list includes ARTestScene | ✅ Confirmed |
+| iOSPostProcess.cs (OpenCV/Bitcode/system frameworks) | ✅ Confirmed |
+| build_ios.sh 11-symbol verification | ✅ Complete |
+| **iOS static library libvisual_localizer.a** | ⚠️ **Needs rebuild** |
+
+> The current `libvisual_localizer.a` is from March 24 and is missing `vl_add_keyframe_akaze` and `vl_set_alignment_transform`. It's living in the past.
 
 ---
 
-## 步骤 1：重编 iOS 静态库
+## Step 1: Rebuild the iOS Static Library
 
 ```bash
 cd native_visual_localizer
 bash build_ios.sh
 ```
 
-预期输出：
-- 自动下载 OpenCV iOS framework（首次约 200MB，已有则跳过）
-- 编译 arm64 静态库
-- 验证全部 11 个导出符号（无 WARNING）
-- 备份旧库为 `.bak`，复制新库到 `unity_project/Assets/Plugins/iOS/`
+Expected behavior:
+- Auto-downloads OpenCV iOS framework (~200MB first time, cached after that — go grab a coffee)
+- Compiles arm64 static library
+- Verifies all 11 exported symbols (no WARNINGs)
+- Backs up old library as `.bak`, copies new one to `unity_project/Assets/Plugins/iOS/`
 
-验证：
+Verify:
 ```bash
 nm unity_project/Assets/Plugins/iOS/libvisual_localizer.a | grep " T _vl_"
 ```
-应看到 11 个 `_vl_` 开头的符号。
+You should see 11 symbols starting with `_vl_`. If you see fewer, something went wrong. If you see more, something went very wrong.
 
 ---
 
-## 步骤 2：查找 iOS 设备
+## Step 2: Find Your iOS Device
 
 ```bash
 xcrun xctrace list devices
 ```
 
-记下你的设备 UDID（括号中的十六进制字符串），后续步骤用 `<DEVICE_UDID>` 代替。
+Note your device UDID (the hex string in parentheses). Replace `<DEVICE_UDID>` in subsequent steps.
 
 ---
 
-## 步骤 3：Unity 导出 Xcode 项目
+## Step 3: Export Xcode Project from Unity
 
-确保没有其他 Unity Editor 实例打开 `unity_project`，然后：
+Make sure no other Unity Editor instance has `unity_project` open (Unity doesn't share well with others):
 
 ```bash
 /Applications/Unity/Hub/Editor/6000.3.11f1/Unity.app/Contents/MacOS/Unity \
@@ -68,18 +70,18 @@ xcrun xctrace list devices
   -logFile /tmp/unity_ios_build.log
 ```
 
-耗时约 2-5 分钟。查看进度：
+Takes about 2-5 minutes. Watch progress:
 ```bash
 tail -f /tmp/unity_ios_build.log
 ```
 
-成功标志：日志末尾出现 `Exiting batchmode successfully now!`
+Success indicator: `Exiting batchmode successfully now!` at the end of the log. If you see anything else, it didn't exit successfully, and neither will your good mood.
 
-> 如果想用 Development 模式（支持调试），把 `BuildiOS.Build` 改为 `BuildiOS.BuildDevelopment`。
+> For Development builds (with debugging support), replace `BuildiOS.Build` with `BuildiOS.BuildDevelopment`.
 
 ---
 
-## 步骤 4：Xcode 编译并安装
+## Step 4: Build with Xcode
 
 ```bash
 xcodebuild \
@@ -91,17 +93,17 @@ xcodebuild \
   build 2>&1 | tee /tmp/xcode_build.log
 ```
 
-耗时约 2-5 分钟。成功标志：`** BUILD SUCCEEDED **`
+Takes about 2-5 minutes. Success indicator: `** BUILD SUCCEEDED **`
 
-如果签名失败，用 Xcode 打开项目手动设置一次 Team：
+If code signing fails (it will, at least once — it's a rite of passage), open the project in Xcode and set the Team manually:
 ```bash
 open unity_project/Builds/iOS/Unity-iPhone.xcodeproj
 ```
-在 Signing & Capabilities 中选择你的开发者 Team，然后重新执行上面的命令。
+Go to Signing & Capabilities, select your developer Team, then re-run the command above.
 
 ---
 
-## 步骤 5：安装到设备
+## Step 5: Install on Device
 
 ```bash
 APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData \
@@ -114,7 +116,7 @@ xcrun devicectl device install app \
 
 ---
 
-## 步骤 6：启动 App
+## Step 6: Launch the App
 
 ```bash
 xcrun devicectl device process launch \
@@ -123,54 +125,55 @@ xcrun devicectl device process launch \
 
 ---
 
-## 实机测试时观察什么
+## What to Look For During Testing
 
-App 启动后会进入 ARTestScene，屏幕上会显示：
+After launch, the app enters ARTestScene. Here's what you'll see on screen:
 
-1. **状态栏**：初始化 → 正在定位 → 跟踪中 / 跟踪丢失
-2. **调试面板**（trackingInfoText）：
-   - 置信度：匹配置信度百分比
-   - 特征点：当前帧匹配的特征点数
-   - 帧：已处理帧数
-   - 模式：Raw（初始）→ Aligned（AT 计算完成后）
-   - 质量：NONE → RECOGNIZED → LOCALIZED
-   - AKAZE：触发 / 未触发（ORB 失败时才触发）
-   - 一致性：通过 / 拒绝
-3. **质量指示器**（qualityText）：
-   - 红色 = NONE（未识别）
-   - 黄色 = RECOGNIZED（Raw 模式识别到）
-   - 绿色 = LOCALIZED（Aligned 模式高精度定位）
-4. **3D 内容**：蓝色立方体 + RGB 坐标轴，跟踪成功时会叠加在真实场景上
+1. **Status bar**: Initializing → Localizing → Tracking / Lost
+2. **Debug panel** (trackingInfoText):
+   - Confidence: match confidence percentage
+   - Features: matched feature count for current frame
+   - Frames: total processed frames
+   - Mode: Raw (initial) → Aligned (after AT computation)
+   - Quality: NONE → RECOGNIZED → LOCALIZED
+   - AKAZE: Triggered / Not triggered (only fires when ORB gives up)
+   - Consistency: Passed / Rejected
+3. **Quality indicator** (qualityText):
+   - 🔴 Red = NONE (not recognized — the room is a stranger)
+   - 🟡 Yellow = RECOGNIZED (Raw mode match found)
+   - 🟢 Green = LOCALIZED (Aligned mode, high-accuracy pose — the good stuff)
+4. **3D content**: Blue cube + RGB axes, overlaid on the real scene when tracking succeeds
 
-### 正常流程预期
+### Expected Normal Flow
 
-1. 启动 → "初始化完成，正在定位..."
-2. 对准扫描过的区域 → 质量从 NONE 变为 RECOGNIZED（黄色）
-3. 持续跟踪 10+ 帧 → 质量变为 LOCALIZED（绿色），模式从 Raw 变为 Aligned
-4. 3D 立方体稳定叠加在场景中
+1. Launch → "Initialization complete, localizing..."
+2. Point at the scanned area → Quality changes from NONE to RECOGNIZED (yellow)
+3. Sustained tracking for 10+ frames → Quality becomes LOCALIZED (green), Mode switches from Raw to Aligned
+4. 3D cube stably overlaid on the scene (if it's floating in mid-air, something went wrong — or you scanned a very unusual room)
 
-### 异常情况
+### Troubleshooting
 
-| 现象 | 可能原因 |
-|------|----------|
-| "资产目录不存在: SLAMTestAssets" | StreamingAssets 中缺少 SLAMTestAssets 目录 |
-| "缺少 features.db" | features.db 文件未包含在构建中 |
-| 一直 NONE 不变 | 没有对准扫描过的区域，或 features.db 数据不匹配 |
-| AKAZE 频繁触发 | ORB 匹配困难（光照变化大或视角差异大） |
-| 一致性频繁拒绝 | 定位结果不稳定，可能需要更多特征点 |
+| Symptom | Likely Cause |
+|---------|-------------|
+| "Asset directory not found: SLAMTestAssets" | SLAMTestAssets directory missing from StreamingAssets |
+| "Missing features.db" | features.db not included in build |
+| Stuck on NONE forever | Not pointing at the scanned area, or features.db doesn't match the environment. Try pointing at something you actually scanned. |
+| AKAZE triggers frequently | ORB struggling (major lighting changes or large viewpoint differences). Not a bug, just ORB being dramatic. |
+| Consistency frequently rejects | Localization results are unstable, may need more feature points or a better scan |
 
 ---
 
-## 查看设备日志
+## Viewing Device Logs
 
 ```bash
-# 实时查看 App 日志（过滤 ARTestScene 标签）
+# Real-time app logs (filtered to ARTestScene)
 xcrun devicectl device info log --device <DEVICE_UDID> 2>&1 | grep "ARTestScene"
 ```
 
 ---
 
-## 快速重建流程（代码修改后）
+## Quick Rebuild Workflow (after code changes)
 
-如果只改了 C# 代码（不涉及 native 库），跳过步骤 1，从步骤 3 开始。
-如果改了 C++ native 代码，从步骤 1 开始。
+- Changed only C# code (no native library changes): Skip Step 1, start from Step 3
+- Changed C++ native code: Start from Step 1 (the full tour)
+- Changed nothing but want to rebuild anyway: Seek help. Or just start from Step 3, we don't judge.
