@@ -152,6 +152,26 @@ final class ScanViewModelTests: XCTestCase {
             "USDZ should be preferred over USDA and OBJ")
     }
 
+    func testModelURL_texturedObjPreferredOverUntexturedUSDA() throws {
+        try Data("usda".utf8).write(to: tempDir.appendingPathComponent("model.usda"))
+        try Data("obj".utf8).write(to: tempDir.appendingPathComponent("model.obj"))
+        try Data("mtl".utf8).write(to: tempDir.appendingPathComponent("model.mtl"))
+        try Data("texture".utf8).write(to: tempDir.appendingPathComponent("texture.jpg"))
+
+        let url = viewModel.modelURL(for: tempDir.path)
+        XCTAssertEqual(url?.lastPathComponent, "model.obj",
+            "Textured OBJ should be preferred over untextured USDA")
+    }
+
+    func testModelURL_untexturedUsdaPreferredOverUntexturedOBJ() throws {
+        try Data("usda".utf8).write(to: tempDir.appendingPathComponent("model.usda"))
+        try Data("obj".utf8).write(to: tempDir.appendingPathComponent("model.obj"))
+
+        let url = viewModel.modelURL(for: tempDir.path)
+        XCTAssertEqual(url?.lastPathComponent, "model.usda",
+            "USDA should remain the fallback before untextured OBJ")
+    }
+
     // MARK: - exportedFiles
 
     func testExportedFiles_nonexistentDir_returnsPlaceholder() {

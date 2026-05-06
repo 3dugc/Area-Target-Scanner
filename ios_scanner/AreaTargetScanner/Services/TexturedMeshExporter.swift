@@ -44,7 +44,16 @@ final class TexturedMeshExporter {
         try jpegData.write(to: URL(fileURLWithPath: texturePath))
 
         // 2. Write model.mtl
-        let mtlContent = "newmtl textured_material\nKa 1.0 1.0 1.0\nKd 1.0 1.0 1.0\nmap_Kd texture.jpg\n"
+        let mtlContent = """
+        newmtl textured_material
+        Ka 1.0 1.0 1.0
+        Kd 1.0 1.0 1.0
+        Ks 0.0 0.0 0.0
+        Ns 1.0
+        illum 2
+        map_Kd texture.jpg
+
+        """
         try mtlContent.write(toFile: mtlPath, atomically: true, encoding: .utf8)
 
         // 3. Write model.obj
