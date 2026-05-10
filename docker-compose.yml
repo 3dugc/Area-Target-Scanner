@@ -12,6 +12,21 @@ services:
       - UPLOAD_DIR=/tmp/pipeline_uploads
       - OUTPUT_DIR=/tmp/pipeline_outputs
       - MODEL_OPTIMIZER_URL=http://model_optimizer:3000
+      - PIPELINE_MAX_WORKERS=1
+      - PIPELINE_MAX_QUEUE_SIZE=3
+      - STATUS_DB_READ_TTL_SECONDS=1
+      - UV_WORKER_NICE=10
+      - UV_XATLAS_NATIVE=1
+      - UV_XATLAS_HELPER_PATH=/app/bin/xatlas_helper
+      - UV_FAST_TARGET_FACES=50000
+      - UV_FAST_DECIMATE_THRESHOLD_FACES=60000
+      - UV_ALLOW_QUALITY_DEGRADE=0
+      - JOB_RETENTION_HOURS=24
+      - FAILED_JOB_RETENTION_HOURS=6
+      - OMP_NUM_THREADS=1
+      - OPENBLAS_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
     depends_on:
       - model_optimizer
     restart: unless-stopped

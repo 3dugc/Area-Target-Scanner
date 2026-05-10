@@ -12,6 +12,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY processing_pipeline/ /app/processing_pipeline/
 COPY web_service/ /app/web_service/
+COPY native/ /app/native/
+COPY ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.h /app/native/xatlas/xatlas.h
+COPY ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.cpp /app/native/xatlas/xatlas.cpp
+
+RUN mkdir -p /app/bin && \
+    g++ -std=c++17 -O2 -DNDEBUG -I/app/native/xatlas \
+        /app/native/xatlas_helper.cpp /app/native/xatlas/xatlas.cpp \
+        -o /app/bin/xatlas_helper
 
 RUN useradd --create-home --shell /bin/bash appuser
 

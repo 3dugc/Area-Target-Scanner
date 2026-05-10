@@ -211,7 +211,8 @@ This project is thoroughly tested because we believe in sleeping well at night.
 
 ```bash
 # Python pipeline tests
-python -m pytest tests/ -v
+pip install -r requirements-dev.txt
+python -m pytest tests/ -v --tb=short
 
 # Unity plugin tests (in Unity Editor)
 # Window → General → Test Runner → EditMode → Run All

@@ -4,6 +4,12 @@
 .kiro
 data
 ios_scanner
+!ios_scanner/
+!ios_scanner/AreaTargetScanner/
+!ios_scanner/AreaTargetScanner/ThirdParty/
+!ios_scanner/AreaTargetScanner/ThirdParty/xatlas/
+!ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.h
+!ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.cpp
 unity_plugin
 tests
 __pycache__

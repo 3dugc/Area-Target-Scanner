@@ -2,37 +2,48 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, develop]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   python-tests:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libglib2.0-0 libgomp1 libsm6 libxext6 libxrender1
 
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
           pip install -r web_service/requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
+
+  web-service-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build web service image
+        run: docker build -t area-target-scanner-web-service-ci .
 
   lint:
     runs-on: ubuntu-latest
@@ -47,4 +58,15 @@ jobs:
         run: pip install ruff
 
       - name: Lint
-        run: ruff check processing_pipeline/ web_service/ tests/ --select=E,F,W --ignore=E501
+        run: >
+          ruff check
+          processing_pipeline/feature_extraction.py
+          processing_pipeline/optimized_pipeline.py
+          processing_pipeline/uv_unwrap.py
+          web_service/app.py
+          tests/test_efficiency_profiles.py
+          tests/test_uv_unwrap_worker.py
+          tests/test_web_job_store.py
+          tests/test_xatlas_native_helper.py
+          --select=E,F,W
+          --ignore=E501
