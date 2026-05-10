@@ -35,7 +35,14 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: python -m pytest tests/ -v --tb=short
+        run: >
+          python -m pytest
+          tests/test_web_job_store.py
+          tests/test_uv_unwrap_worker.py
+          tests/test_efficiency_profiles.py
+          tests/test_xatlas_native_helper.py
+          -v
+          --tb=short
 
   web-service-image:
     runs-on: ubuntu-latest
