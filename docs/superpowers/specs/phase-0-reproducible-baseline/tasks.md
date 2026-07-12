@@ -23,7 +23,7 @@
 
 ## 任务 1：统一包元数据和版本
 
-> 进度：进行中。步骤 1–7 已验证完成，正在执行步骤 8 提交。
+> 进度：已完成。提交：`53aa72b`。
 
 **对应需求：** R0.2、R0.3
 
@@ -195,7 +195,7 @@ python3 -m pytest tests/phase0/test_package_metadata.py -v
 
 预期结果：全部测试通过，检查器标准输出为 `1.2.1`。
 
-- [ ] **步骤 8：提交任务 1**
+- [x] **步骤 8：提交任务 1**
 
 ```bash
 git add tools/phase0/check_package_metadata.py tests/phase0/test_package_metadata.py unity_plugin/AreaTargetPlugin/package.json unity_plugin/AreaTargetPlugin/CHANGELOG.md unity_project/Assets/Editor/PackageExporter.cs docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -203,6 +203,8 @@ git commit -m "chore: establish canonical package version"
 ```
 
 ## 任务 2：仓库卫生与测试夹具归属
+
+> 进度：进行中。步骤 1–7 已验证完成，正在执行步骤 8 提交。
 
 **对应需求：** R0.1
 
@@ -213,7 +215,7 @@ git commit -m "chore: establish canonical package version"
 - 修改：`.gitignore`
 - 删除：下文列出的 XML、崩溃和备份生成物
 
-- [ ] **步骤 1：添加预期失败的仓库卫生测试**
+- [x] **步骤 1：添加预期失败的仓库卫生测试**
 
 新建 `tests/phase0/test_repository_hygiene.py`：
 
@@ -239,7 +241,7 @@ def test_generated_artifacts_are_not_tracked():
     assert violations == []
 ```
 
-- [ ] **步骤 2：运行仓库卫生测试并确认其列出现有生成物**
+- [x] **步骤 2：运行仓库卫生测试并确认其列出现有生成物**
 
 运行：
 
@@ -249,7 +251,7 @@ python3 -m pytest tests/phase0/test_repository_hygiene.py -v
 
 预期结果：失败，并列出当前受 Git 跟踪的崩溃、XML 和备份路径。
 
-- [ ] **步骤 3：清理前证明保留夹具仍被使用**
+- [x] **步骤 3：清理前证明保留夹具仍被使用**
 
 运行：
 
@@ -259,7 +261,7 @@ rg -n "SLAMTestAssets|StreamingAssets/ScanData" unity_plugin unity_project tests
 
 预期结果：现有测试引用 `SLAMTestAssets` 和已录制扫描序列；保留这些规范文件。
 
-- [ ] **步骤 4：从 Git 中移除生成物**
+- [x] **步骤 4：从 Git 中移除生成物**
 
 移除以下明确的生成物分组：
 
@@ -273,7 +275,7 @@ git rm unity_project/Assets/StreamingAssets/SLAMTestAssets/*.bak2*
 git rm unity_project/Assets/StreamingAssets/SLAMTestAssets/*.data1_bak*
 ```
 
-- [ ] **步骤 5：扩展 `.gitignore`**
+- [x] **步骤 5：扩展 `.gitignore`**
 
 添加：
 
@@ -296,7 +298,7 @@ dist/
 phase0-results/
 ```
 
-- [ ] **步骤 6：记录保留的测试夹具**
+- [x] **步骤 6：记录保留的测试夹具**
 
 新建 `unity_project/Assets/StreamingAssets/README.md`，列出：
 
@@ -304,7 +306,7 @@ phase0-results/
 - `ScanData` 和 `ScanData_data1`：回放及跨会话测试使用的录制序列。
 - 替换这些夹具时，必须同步更新相关测试并记录来源和日期。
 
-- [ ] **步骤 7：运行仓库卫生测试和完整仓库搜索**
+- [x] **步骤 7：运行仓库卫生测试和完整仓库搜索**
 
 ```bash
 python3 -m pytest tests/phase0/test_repository_hygiene.py -v
