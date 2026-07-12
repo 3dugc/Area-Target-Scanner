@@ -325,7 +325,7 @@ git commit -m "chore: remove generated repository artifacts"
 
 ## 任务 3：原生符号契约与占位文件清理
 
-> 进度：进行中。步骤 1–7 已验证完成，正在执行步骤 8 提交。macOS 默认构建当前主机 `arm64` 架构；可通过 `MACOS_ARCHITECTURES` 覆盖，避免使用仅含 arm64 的 Homebrew OpenCV 伪造通用二进制。
+> 进度：已完成。提交：`82fe5dc`。macOS 默认构建当前主机 `arm64` 架构；可通过 `MACOS_ARCHITECTURES` 覆盖，避免使用仅含 arm64 的 Homebrew OpenCV 伪造通用二进制。
 
 **对应需求：** R0.4
 
@@ -455,7 +455,7 @@ tools/phase0/check_native_symbols.sh native_visual_localizer/build/libvisual_loc
 
 预期结果：全部测试通过，iOS 和 macOS 制品均报告包含所有必需符号。
 
-- [ ] **步骤 8：提交任务 3**
+- [x] **步骤 8：提交任务 3**
 
 ```bash
 git add tools/phase0 native_visual_localizer tests/phase0 docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -464,6 +464,8 @@ git commit -m "build: enforce native artifact contract"
 ```
 
 ## 任务 4：可重复生成的 UPM 包
+
+> 进度：进行中。步骤 1–6 已验证完成，正在执行步骤 7 提交。
 
 **对应需求：** R0.5
 
@@ -474,7 +476,7 @@ git commit -m "build: enforce native artifact contract"
 - 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
 - 删除：受 Git 跟踪的过期 `1.2.0` 归档
 
-- [ ] **步骤 1：添加预期失败的包内容测试**
+- [x] **步骤 1：添加预期失败的包内容测试**
 
 新建 `tests/phase0/test_upm_package.py`，包含以下断言：
 
@@ -515,7 +517,7 @@ def test_package_content_and_reproducibility():
     assert not any(name.endswith((".unitypackage", ".tgz", ".bak2")) for name in names)
 ```
 
-- [ ] **步骤 2：运行测试并确认因缺少打包器而失败**
+- [x] **步骤 2：运行测试并确认因缺少打包器而失败**
 
 ```bash
 python3 -m pytest tests/phase0/test_upm_package.py -v
@@ -523,7 +525,7 @@ python3 -m pytest tests/phase0/test_upm_package.py -v
 
 预期结果：失败，因为打包器尚不存在。
 
-- [ ] **步骤 3：实现确定性的包暂存流程**
+- [x] **步骤 3：实现确定性的包暂存流程**
 
 新建 `tools/phase0/build_upm_package.py`，实现以下必需操作：
 
@@ -596,7 +598,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **步骤 4：移除受跟踪的过期归档**
+- [x] **步骤 4：移除受跟踪的过期归档**
 
 ```bash
 git rm unity_plugin/AreaTargetPlugin/AreaTargetPlugin-1.2.0.unitypackage
@@ -605,7 +607,7 @@ git rm unity_plugin/AreaTargetPlugin/com.areatarget.tracking-1.2.0.tgz
 
 历史版本仍可从 Git 历史恢复。
 
-- [ ] **步骤 5：更新打包文档**
+- [x] **步骤 5：更新打包文档**
 
 重写 `BUILD_PACKAGE.md`，将以下命令设为主要打包入口：
 
@@ -615,7 +617,7 @@ python3 tools/phase0/build_upm_package.py
 
 记录输出路径、包含/排除规则以及 Unity 干净安装验证。保留 `.unitypackage` 导出作为旧版可选路径，但不再作为发布事实来源。
 
-- [ ] **步骤 6：连续运行两次包测试**
+- [x] **步骤 6：连续运行两次包测试**
 
 ```bash
 python3 -m pytest tests/phase0/test_upm_package.py -v

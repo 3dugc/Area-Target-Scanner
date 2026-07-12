@@ -1,79 +1,66 @@
 # AreaTargetPlugin 打包流程
 
-## 前置条件
+## 规范发布包
 
-- Unity 6000.x（当前使用 6000.3.11f1）
-- 开发项目 `unity_project/` 已配置好，`Packages/manifest.json` 中通过 `file:` 引用了插件
+阶段 0 的发布事实来源是由当前源码生成的 UPM 压缩包，不再使用仓库中预先提交的二进制归档。
 
-## 打包内容
+### 前置条件
 
-`.unitypackage` 包含以下内容，确保用户导入后即可编译运行：
+- Python 3.11
+- 已通过 `native_visual_localizer/build_macos.sh`
+- `unity_project/Assets/Plugins/iOS/libvisual_localizer.a` 已通过原生符号检查
+- Unity 6000.3.11f1（仅干净安装验证时需要）
 
-| 路径 | 说明 |
-|------|------|
-| `Packages/com.areatarget.tracking/Runtime/` | 插件 C# 源码 |
-| `Packages/com.areatarget.tracking/Editor/` | 编辑器扩展 |
-| `Packages/com.areatarget.tracking/package.json` | UPM 包描述 |
-| `Packages/com.areatarget.tracking/CHANGELOG.md` | 变更日志 |
-| `Packages/com.areatarget.tracking/LICENSE.md` | 许可证 |
-| `Packages/com.areatarget.tracking/README.md` | 说明文档 |
-| `Assets/Plugins/macOS/*.dylib` | macOS 原生库（visual_localizer） |
-| `Assets/Plugins/x86_64/*.so` | Linux 原生库 |
-| `Assets/Plugins/x86_64-win/*.dll` | Windows 原生库 |
-| `Assets/Plugins/Managed/*.dll` | 托管 DLL（FsCheck 等测试依赖） |
-| `Assets/link.xml` | IL2CPP 防裁剪配置 |
-
-## 不包含的内容
-
-- `Tests/` — 测试代码依赖 `com.unity.test-framework` 和 FsCheck，属于开发依赖，不分发给用户
-- `Samples~/` — Unity 约定 `Samples~` 目录不会被导入，需通过 UPM 的 Package Manager UI 安装示例
-
-## 打包步骤
-
-### 方法一：Unity 菜单（推荐）
-
-1. 用 Unity 打开 `unity_project/`
-2. 菜单栏 → `Tools` → `Export AreaTargetPlugin Package`
-3. 输出文件：`unity_plugin/AreaTargetPlugin/AreaTargetPlugin-{VERSION}.unitypackage`
-
-### 方法二：命令行（CI/自动化）
+### 生成命令
 
 ```bash
-UNITY_PATH="/Applications/Unity/Hub/Editor/6000.3.11f1/Unity.app/Contents/MacOS/Unity"
-PROJECT_PATH="$(pwd)/unity_project"
-
-$UNITY_PATH -batchmode -nographics \
-  -projectPath "$PROJECT_PATH" \
-  -executeMethod PackageExporter.Export \
-  -logFile - \
-  -quit
+python3 tools/phase0/build_upm_package.py
 ```
 
-输出文件位于 `unity_plugin/AreaTargetPlugin/AreaTargetPlugin-{VERSION}.unitypackage`。
+版本从 `unity_plugin/AreaTargetPlugin/package.json` 读取。阶段 0 输出为：
 
-## 版本升级检查清单
+```text
+dist/com.areatarget.tracking-1.2.1.tgz
+```
 
-1. 更新 `unity_plugin/AreaTargetPlugin/package.json` 中的 `version` 字段
-2. 更新 `unity_plugin/AreaTargetPlugin/CHANGELOG.md`
-3. 更新 `unity_project/Assets/Editor/PackageExporter.cs` 中的 `Version` 常量
-4. 执行打包
-5. 在空 Unity 项目中导入验证（无编译错误）
-6. 提交 git 并推送
+`dist/` 是生成目录，不进入 Git。
 
-## 验证方法
+## 包内容规则
+
+生成包包含：
+
+- `Runtime/`、`Editor/`、`Samples~/` 和包根元数据。
+- `AlignmentTransformCalculator.cs`、`ExtendedDebugInfo.cs`、`GLBMeshLoader.cs` 和当前 AKAZE 集成代码。
+- Apache-2.0 许可证。
+- 已验证的 iOS 静态库和 macOS 动态库，位于 `Runtime/Plugins/`。
+
+生成包排除：
+
+- `Tests/`、`PropertyTests/` 和 FsCheck 测试依赖。
+- `.unitypackage`、旧 `.tgz`、备份资产及生成物。
+- Windows/Linux 空占位二进制。
+
+连续两次生成的压缩包必须具有相同 SHA-256。内容和可重复性由以下命令验证：
 
 ```bash
-# 创建空项目
-$UNITY_PATH -batchmode -nographics -createProject /tmp/test_project -quit
+python3 -m pytest tests/phase0/test_upm_package.py -v
+tar -tzf dist/com.areatarget.tracking-1.2.1.tgz
+```
 
-# 导入包并编译
-$UNITY_PATH -batchmode -nographics \
-  -projectPath /tmp/test_project \
-  -importPackage "$(pwd)/unity_plugin/AreaTargetPlugin/AreaTargetPlugin-{VERSION}.unitypackage" \
-  -logFile - \
-  -quit
+## Unity 干净安装验证
 
-# 检查输出中无 "error CS" 或 "Scripts have compiler errors"
-# 清理
-rm -rf /tmp/test_project
-``` 
+发布前必须执行：
+
+```bash
+tools/phase0/validate_unity_package.sh
+```
+
+该脚本会运行现有 EditMode 测试，并在临时 Unity 项目中通过本地 `.tgz` 安装包。临时项目的 `manifest.json` 同时固定 SQLite Git 依赖：
+
+```text
+https://github.com/gilzoide/unity-sqlite-net.git#1.3.2
+```
+
+## 旧版 `.unitypackage` 导出
+
+Unity 菜单 `Tools > Export AreaTargetPlugin Package` 仅作为兼容旧项目的可选路径。它从 `package.json` 读取版本，但不是阶段 0 的发布事实来源，也不得提交其生成物。
