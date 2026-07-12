@@ -303,7 +303,10 @@ public class DownloadTestSceneManager : MonoBehaviour
         // 5. Destroy OriginCube if it exists
         if (_originCube != null)
         {
-            Destroy(_originCube);
+            if (Application.isPlaying)
+                Destroy(_originCube);
+            else
+                DestroyImmediate(_originCube);
             _originCube = null;
         }
 

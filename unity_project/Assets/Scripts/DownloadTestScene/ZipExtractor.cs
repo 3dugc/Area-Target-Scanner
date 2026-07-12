@@ -9,7 +9,7 @@ using System.IO.Compression;
 /// </summary>
 public class ZipExtractor
 {
-    private static readonly string[] RequiredFiles = { "features.db", "manifest.json" };
+    private static readonly string[] RequiredFiles = { "optimized.glb", "features.db", "manifest.json" };
 
     public string LastError { get; private set; }
 

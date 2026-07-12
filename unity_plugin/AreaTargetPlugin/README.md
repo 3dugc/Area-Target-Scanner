@@ -7,16 +7,29 @@
 - 6DoF 视觉定位（ORB 特征 + BoW 检索 + PnP RANSAC）
 - Kalman 滤波姿态平滑
 - 原生 C++ 引擎，无 OpenCV C# 依赖
-- 支持 iOS / Android / macOS / Windows / Linux
+- 阶段 0 验证 macOS 开发构建和 iOS 基线；其他平台见下方支持范围
 - AR Foundation 集成
 - SQLite 特征数据库
 - 完整的测试套件（100+ 单元测试 + 属性测试）
 
 ## 系统要求
 
-- Unity 6000.0+（Unity 6）
+- Unity 6000.4.6f1（阶段 0 验证版本）
 - AR Foundation 6.0.0+
-- iOS 16.0+ / Android API 24+
+- iOS 16.0+
+
+## 阶段 0 支持范围
+
+| 目标平台 | 阶段 0 状态 |
+|---|---|
+| macOS 开发构建 | 已验证基线 |
+| iOS 扫描器通用设备构建 | 已验证基线 |
+| iOS 定位器归档 | 仅完成 arm64 架构和静态符号验证 |
+| Rokid AR Studio | 计划在阶段 2 实施；阶段 0 不支持 |
+| Android ARM64 | 计划在阶段 2 实施；阶段 0 不支持 |
+| Windows/Linux 运行时 | 不支持；已移除空占位文件 |
+
+阶段 0 使用 Python 3.11.12、OpenCV 4.13.0、Unity 6000.4.6f1 和 Xcode 26.2 完成本地验证。回滚基线为 `81d815f`。
 - 支持 ARKit 或 ARCore 的设备
 
 ## 安装
@@ -32,19 +45,9 @@
 }
 ```
 
-### 方式二：Git URL
+### 方式二：阶段 0 UPM 包
 
-```json
-{
-  "dependencies": {
-    "com.areatarget.tracking": "https://github.com/area-target-scanner/unity-plugin.git#v1.1.0"
-  }
-}
-```
-
-### 方式三：.unitypackage
-
-从 Releases 页面下载 `AreaTargetPlugin-1.1.0.unitypackage`，双击导入。
+在仓库根目录运行 `python3 tools/phase0/build_upm_package.py`，然后通过 Unity Package Manager 安装 `dist/com.areatarget.tracking-1.2.1.tgz`。
 
 ## 快速开始
 
@@ -213,9 +216,9 @@ public class ARAreaTarget : MonoBehaviour
 | 平台 | 文件 | 位置 |
 |------|------|------|
 | macOS | libvisual_localizer.dylib | Plugins/macOS/ |
-| Windows | visual_localizer.dll | Plugins/x86_64-win/ |
-| Linux | libvisual_localizer.so | Plugins/x86_64/ |
-| iOS | 静态链接 (__Internal) | 编译时链接 |
+| iOS | libvisual_localizer.a（静态检查基线） | Plugins/iOS/ |
+
+阶段 0 不提供 Android ARM64、Rokid、Windows 或 Linux 运行时原生库。
 
 ### 从源码编译原生库
 
@@ -225,6 +228,14 @@ cd native_visual_localizer
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/path/to/opencv
 make -j$(sysctl -n hw.ncpu)
+```
+
+### 阶段 0 验证
+
+```bash
+tools/phase0/verify.sh local
+python3 tools/phase0/build_upm_package.py
+tools/phase0/validate_unity_package.sh
 ```
 
 ## 目录结构

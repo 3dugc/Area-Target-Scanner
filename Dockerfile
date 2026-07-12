@@ -19,9 +19,8 @@ COPY ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.cpp /app/native/xatl
 RUN mkdir -p /app/bin && \
     g++ -std=c++17 -O2 -DNDEBUG -I/app/native/xatlas \
         /app/native/xatlas_helper.cpp /app/native/xatlas/xatlas.cpp \
-        -o /app/bin/xatlas_helper
-
-RUN useradd --create-home --shell /bin/bash appuser
+        -o /app/bin/xatlas_helper && \
+    useradd --create-home --shell /bin/bash appuser
 
 ENV PYTHONPATH=/app
 

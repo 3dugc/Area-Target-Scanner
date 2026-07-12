@@ -453,11 +453,10 @@ class TestDeploymentConfig:
         assert "PYTHONPATH" in content
 
     def test_ci_runs_on_supported_python_versions(self):
-        """CI should test on Python 3.10+."""
+        """Phase 0 CI should use the specified Python 3.11 baseline."""
         with open(".github/workflows/ci.yml") as f:
             content = f.read()
-        assert "3.10" in content
-        assert "3.11" in content
+        assert 'python-version: "3.11"' in content
 
 
 # ===========================================================================

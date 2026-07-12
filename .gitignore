@@ -50,3 +50,20 @@ build/
 /tmp/xcode_build*.log
 /debug
 /data
+
+# Generated verification reports
+unity_project/*test_results*.xml
+unity_project/TestResults-*.xml
+unity_project/pbt_*.xml
+unity_project/mono_crash.*.json
+unity_project/unity_project/
+
+# Asset backup variants
+*.bak2
+*.bak2.meta
+*.data1_bak
+*.data1_bak.meta
+
+# Phase 0 build products
+dist/
+phase0-results/

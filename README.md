@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"/>
-  <img src="https://img.shields.io/badge/unity-6000.0%2B-green" alt="Unity 6+"/>
+  <img src="https://img.shields.io/badge/python-3.11-blue" alt="Python 3.11"/>
+  <img src="https://img.shields.io/badge/unity-6000.4-green" alt="Unity 6000.4"/>
   <img src="https://img.shields.io/badge/iOS-16%2B-orange" alt="iOS 16+"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-lightgrey" alt="License"/>
   <img src="https://github.com/area-target-scanner/area-target-scanner/actions/workflows/ci.yml/badge.svg" alt="CI"/>
@@ -37,6 +37,21 @@ You know how Vuforia lets you scan a physical space and then do AR stuff relativ
 3. **Track** the area in real-time inside Unity with 6DoF pose estimation
 
 No cloud uploads. No API keys. No "please contact sales." Just code.
+
+## Phase 0 verified support
+
+The repository contains work for more platforms than the Phase 0 commercial baseline actually verifies. Version `1.2.1` has the following support boundary:
+
+| Target | Phase 0 status |
+|---|---|
+| macOS development build | Verified baseline |
+| iOS Scanner generic-device build | Verified baseline |
+| iOS localizer archive | Static architecture and symbol verification only |
+| Rokid AR Studio | Planned for Phase 2; not supported in Phase 0 |
+| Android ARM64 | Planned for Phase 2; not supported in Phase 0 |
+| Windows/Linux runtime | Not supported; empty placeholders were removed |
+
+The local baseline was verified with Python 3.11.12, OpenCV 4.13.0, Unity 6000.4.6f1, Xcode 26.2, CMake and Docker Desktop. The rollback baseline is commit `81d815f`.
 
 ## Quickstart
 
@@ -156,11 +171,11 @@ asset_bundle/
 └── features.db        # SQLite DB with ORB features + BoW vocabulary
 ```
 
-**Dependencies:** Python 3.10+, Open3D, OpenCV, NumPy, scikit-learn, trimesh
+**Dependencies:** Python 3.11, Open3D, OpenCV 4.x, NumPy, scikit-learn, trimesh
 
 ## Unity Plugin
 
-A UPM package (`com.areatarget.tracking` v1.3.0) that provides:
+A UPM package (`com.areatarget.tracking` v1.2.1) that provides:
 
 - `AreaTargetTracker` — main tracking interface
 - `VisualLocalizationEngine` — ORB + AKAZE + BoW + PnP pipeline
@@ -169,13 +184,13 @@ A UPM package (`com.areatarget.tracking` v1.3.0) that provides:
 - `FeatureDatabaseReader` — reads the SQLite feature DB
 - `AlignmentTransformCalculator` — coordinate system alignment between scan and AR session
 - `ExtendedDebugInfo` — real-time pipeline diagnostics (feature counts, match stats, AKAZE fallback status)
-- AR Foundation integration for iOS/Android
+- AR Foundation integration; Phase 0 validates the iOS baseline only
 
 **Requirements:** Unity 6000.0+, AR Foundation 6.0+
 
 ### Native Visual Localizer
 
-For production performance, the plugin includes an optional C++ native library (`libvisual_localizer`) that replaces the managed C# localization path. Built with CMake, supports macOS/Windows/Linux/iOS/Android.
+For production performance, the plugin includes an optional C++ native library (`libvisual_localizer`) that replaces the managed C# localization path. Phase 0 verifies the macOS arm64 build and statically checks the existing iOS arm64 archive. Android ARM64, Rokid, Windows, and Linux runtime support are not part of this baseline.
 
 Key capabilities:
 - ORB + BoW visual localization with PnP RANSAC
@@ -210,9 +225,18 @@ The web service runs Flask + the processing pipeline in Docker, with a separate 
 This project is thoroughly tested because we believe in sleeping well at night.
 
 ```bash
+# Complete release gate (Python, Docker, native, Xcode, Unity and UPM)
+tools/phase0/verify.sh local
+
 # Python pipeline tests
 pip install -r requirements-dev.txt
 python -m pytest tests/ -v --tb=short
+
+# Reproducible UPM package
+python3 tools/phase0/build_upm_package.py
+
+# Unity EditMode plus clean UPM installation
+tools/phase0/validate_unity_package.sh
 
 # Unity plugin tests (in Unity Editor)
 # Window → General → Test Runner → EditMode → Run All
@@ -235,7 +259,7 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 .
 ├── ios_scanner/              # Swift — LiDAR scanning app
 ├── processing_pipeline/      # Python — scan → asset bundle
-├── native_visual_localizer/  # C++ — high-perf visual localization (macOS/iOS/Android)
+├── native_visual_localizer/  # C++ — macOS build + iOS archive baseline
 ├── unity_plugin/             # C# — Unity AR tracking package
 ├── unity_project/            # Unity test project
 ├── web_service/              # Flask — drag-and-drop web UI

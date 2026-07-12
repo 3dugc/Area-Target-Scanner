@@ -1,12 +1,9 @@
 {
   "name": "com.areatarget.tracking",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "displayName": "Area Target Tracking Plugin",
   "description": "Open-source area target scanning and AR tracking plugin for Unity. Loads area target asset bundles and provides 6DoF visual localization using ORB feature matching and PnP pose estimation.",
   "unity": "6000.0",
-  "dependencies": {
-    "com.unity.xr.arfoundation": "6.0.0"
-  },
   "keywords": [
     "ar",
     "area-target",

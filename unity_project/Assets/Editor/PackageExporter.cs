@@ -10,14 +10,29 @@ using System.Collections.Generic;
 /// </summary>
 public static class PackageExporter
 {
-    private const string Version = "1.2.0";
+    [System.Serializable]
+    private class PackageManifest
+    {
+        public string version;
+    }
+
+    private static string ReadPackageVersion()
+    {
+        const string manifestPath = "Packages/com.areatarget.tracking/package.json";
+        var json = File.ReadAllText(Path.GetFullPath(manifestPath));
+        var manifest = JsonUtility.FromJson<PackageManifest>(json);
+        if (manifest == null || string.IsNullOrWhiteSpace(manifest.version))
+            throw new InvalidDataException($"Missing version in {manifestPath}");
+        return manifest.version;
+    }
 
     [MenuItem("Tools/Export AreaTargetPlugin Package")]
     public static void Export()
     {
+        var version = ReadPackageVersion();
         var outputPath = Path.GetFullPath(
             Path.Combine(Application.dataPath,
-                $"../../unity_plugin/AreaTargetPlugin/AreaTargetPlugin-{Version}.unitypackage")
+                $"../../unity_plugin/AreaTargetPlugin/AreaTargetPlugin-{version}.unitypackage")
         );
 
         var assetPaths = new List<string>();

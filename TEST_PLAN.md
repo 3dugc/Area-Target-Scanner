@@ -1,5 +1,20 @@
 # 全栈测试方案
 
+## 阶段 0 本地发布门禁
+
+发布前必须在开发 Mac 上执行以下两个命令：
+
+```bash
+tools/phase0/verify_ios_scanner.sh
+UNITY_PATH="/Applications/Unity/Hub/Editor/6000.4.6f1/Unity.app/Contents/MacOS/Unity" \
+  PYTHON_BIN=venv/bin/python \
+  tools/phase0/validate_unity_package.sh
+```
+
+- iOS 命令面向 `generic/platform=iOS` 编译扫描器，结果写入 `phase0-results/xcode/build.log`。模拟器运行不能认证 LiDAR 扫描能力。
+- Unity 命令必须生成至少包含一个测试且失败数为零的 EditMode XML，然后在临时项目中安装当前生成的 UPM `.tgz` 并完成无编译错误的包解析。
+- 阶段 0 不得在 Unity 或 Xcode 未实际执行时把门禁记录为通过。
+
 ## 一、测试现状总览
 
 | 组件 | 测试文件数 | 测试用例数 | 可本地运行 |
