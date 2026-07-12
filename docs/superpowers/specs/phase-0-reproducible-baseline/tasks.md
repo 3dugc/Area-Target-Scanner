@@ -204,7 +204,7 @@ git commit -m "chore: establish canonical package version"
 
 ## 任务 2：仓库卫生与测试夹具归属
 
-> 进度：进行中。步骤 1–7 已验证完成，正在执行步骤 8 提交。
+> 进度：已完成。提交：`ae3f7c4`。
 
 **对应需求：** R0.1
 
@@ -315,7 +315,7 @@ git ls-files | rg 'mono_crash|test_results|TestResults|\.bak2|data1_bak' && exit
 
 预期结果：仓库卫生测试通过；搜索不输出任何受跟踪的匹配项。
 
-- [ ] **步骤 8：提交任务 2**
+- [x] **步骤 8：提交任务 2**
 
 ```bash
 git add .gitignore tests/phase0/test_repository_hygiene.py unity_project/Assets/StreamingAssets/README.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -324,6 +324,8 @@ git commit -m "chore: remove generated repository artifacts"
 ```
 
 ## 任务 3：原生符号契约与占位文件清理
+
+> 进度：进行中。步骤 1–7 已验证完成，正在执行步骤 8 提交。macOS 默认构建当前主机 `arm64` 架构；可通过 `MACOS_ARCHITECTURES` 覆盖，避免使用仅含 arm64 的 Homebrew OpenCV 伪造通用二进制。
 
 **对应需求：** R0.4
 
@@ -336,7 +338,7 @@ git commit -m "chore: remove generated repository artifacts"
 - 修改：`native_visual_localizer/build_ios.sh`
 - 删除：空的 Windows/Linux 占位二进制及对应 `.meta`
 
-- [ ] **步骤 1：定义必需的原生 API**
+- [x] **步骤 1：定义必需的原生 API**
 
 新建 `tools/phase0/required_native_symbols.txt`：
 
@@ -354,7 +356,7 @@ vl_set_alignment_transform
 vl_get_debug_info
 ```
 
-- [ ] **步骤 2：添加预期失败的原生契约测试**
+- [x] **步骤 2：添加预期失败的原生契约测试**
 
 新建 `tests/phase0/test_native_contract.py`：
 
@@ -380,7 +382,7 @@ def test_empty_library_is_rejected(tmp_path):
     assert "empty" in (result.stdout + result.stderr).lower()
 ```
 
-- [ ] **步骤 3：运行测试并确认因缺少检查器而失败**
+- [x] **步骤 3：运行测试并确认因缺少检查器而失败**
 
 ```bash
 python3 -m pytest tests/phase0/test_native_contract.py -v
@@ -388,7 +390,7 @@ python3 -m pytest tests/phase0/test_native_contract.py -v
 
 预期结果：失败，因为检查器尚不存在。
 
-- [ ] **步骤 4：实现原生检查器**
+- [x] **步骤 4：实现原生检查器**
 
 新建可执行文件 `tools/phase0/check_native_symbols.sh`：
 
@@ -424,7 +426,7 @@ echo "PASS native contract: $LIB"
 
 运行 `chmod +x tools/phase0/check_native_symbols.sh`。
 
-- [ ] **步骤 5：两个构建脚本复用同一契约**
+- [x] **步骤 5：两个构建脚本复用同一契约**
 
 将重复的 `nm | grep` 列表替换为：
 
@@ -434,7 +436,7 @@ echo "PASS native contract: $LIB"
 
 确保每个脚本都能正确解析仓库根目录。macOS 部署改为通过 `--deploy` 显式启用；默认构建只验证构建目录中的输出，不修改受 Git 跟踪的插件二进制。
 
-- [ ] **步骤 6：移除不受支持的空占位文件**
+- [x] **步骤 6：移除不受支持的空占位文件**
 
 ```bash
 git rm unity_project/Assets/Plugins/x86_64/libvisual_localizer.so
@@ -443,7 +445,7 @@ git rm unity_project/Assets/Plugins/x86_64-win/visual_localizer.dll
 git rm unity_project/Assets/Plugins/x86_64-win/visual_localizer.dll.meta
 ```
 
-- [ ] **步骤 7：运行原生契约测试和 macOS 构建**
+- [x] **步骤 7：运行原生契约测试和 macOS 构建**
 
 ```bash
 python3 -m pytest tests/phase0/test_native_contract.py -v

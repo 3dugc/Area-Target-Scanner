@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Build script for iOS arm64 static library
 # Downloads OpenCV iOS framework if not present, then cross-compiles
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build_ios"
@@ -67,22 +67,7 @@ ar rcs "$BUILD_DIR/libvisual_localizer.a" \
 
 # Step 4: Verify
 echo "=== Verifying ==="
-file "$BUILD_DIR/libvisual_localizer.a"
-lipo -info "$BUILD_DIR/libvisual_localizer.a"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep " T _vl_" | head -20
-echo ""
-echo "--- Checking all 11 exported symbols ---"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_create" || echo "WARNING: vl_create NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_destroy" || echo "WARNING: vl_destroy NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_add_vocabulary_word" || echo "WARNING: vl_add_vocabulary_word NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_add_keyframe" || echo "WARNING: vl_add_keyframe NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_add_keyframe_akaze" || echo "WARNING: vl_add_keyframe_akaze NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_build_index" || echo "WARNING: vl_build_index NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_process_frame" || echo "WARNING: vl_process_frame NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_process_frame_out" || echo "WARNING: vl_process_frame_out NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_reset" || echo "WARNING: vl_reset NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_set_alignment_transform" || echo "WARNING: vl_set_alignment_transform NOT found!"
-nm "$BUILD_DIR/libvisual_localizer.a" | grep "vl_get_debug_info" || echo "WARNING: vl_get_debug_info NOT found!"
+"$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$BUILD_DIR/libvisual_localizer.a"
 
 # Step 5: Copy to Unity
 echo ""

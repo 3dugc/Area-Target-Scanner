@@ -1,0 +1,11 @@
+vl_create
+vl_destroy
+vl_add_vocabulary_word
+vl_add_keyframe
+vl_add_keyframe_akaze
+vl_build_index
+vl_process_frame
+vl_process_frame_out
+vl_reset
+vl_set_alignment_transform
+vl_get_debug_info
