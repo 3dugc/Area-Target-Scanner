@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Globalization;
 using NUnit.Framework;
 using UnityEngine;
 using VideoPlaybackTestScene;
@@ -34,7 +35,8 @@ namespace AreaTargetPlugin.Tests
         private void WriteIntrinsics(string dir, float fx = 1113.5f, float fy = 1113.5f,
             float cx = 480f, float cy = 640f, int width = 960, int height = 1280)
         {
-            string json = $"{{\"fx\":{fx},\"fy\":{fy},\"cx\":{cx},\"cy\":{cy},\"width\":{width},\"height\":{height}}}";
+            string json = FormattableString.Invariant(
+                $"{{\"fx\":{fx},\"fy\":{fy},\"cx\":{cx},\"cy\":{cy},\"width\":{width},\"height\":{height}}}");
             File.WriteAllText(Path.Combine(dir, "intrinsics.json"), json);
         }
 
@@ -46,8 +48,9 @@ namespace AreaTargetPlugin.Tests
             {
                 if (i > 0) sb.Append(",");
                 // 单位矩阵（列优先）
-                sb.Append($"{{\"index\":{i},\"timestamp\":{i * 0.033},\"imageFile\":\"images/frame_{i:D4}.jpg\"," +
-                           "\"transform\":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]}}");
+                string timestamp = (i * 0.033).ToString(CultureInfo.InvariantCulture);
+                sb.Append($"{{\"index\":{i},\"timestamp\":{timestamp},\"imageFile\":\"images/frame_{i:D4}.jpg\"," +
+                           $"\"transform\":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]}}");
             }
             sb.Append("]}");
             File.WriteAllText(Path.Combine(dir, "poses.json"), sb.ToString());

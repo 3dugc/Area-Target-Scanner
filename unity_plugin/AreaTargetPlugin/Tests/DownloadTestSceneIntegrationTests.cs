@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.UI;
 using AreaTargetPlugin;
 
@@ -330,6 +331,8 @@ namespace AreaTargetPlugin.Tests
             var (isValid, _) = extractor.ValidateRequiredFiles(extractDir);
             Assert.IsTrue(isValid, "All files present, validation should pass");
 
+            LogAssert.Expect(LogType.Error,
+                "[AreaTargetPlugin] Unsupported asset format: 'obj' (expected: 'glb').");
             bool loadResult = loader.Load(extractDir);
             Assert.IsFalse(loadResult, "Loader should reject unsupported format");
             Assert.IsNotNull(loader.LastError);

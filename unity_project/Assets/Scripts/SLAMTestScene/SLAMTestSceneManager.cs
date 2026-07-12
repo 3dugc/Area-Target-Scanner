@@ -367,6 +367,20 @@ public class SLAMTestSceneManager : MonoBehaviour
 
     private void HandleTrackingResult(TrackingResult result, Matrix4x4 arCameraPose)
     {
+        switch (result.State)
+        {
+            case AreaTargetPlugin.TrackingState.TRACKING:
+                debugPanel?.SetStatus("跟踪中", Color.green);
+                debugPanel?.SetTrackingInfo(result.MatchedFeatures, result.Confidence);
+                break;
+            case AreaTargetPlugin.TrackingState.LOST:
+                debugPanel?.SetStatus("跟踪丢失", Color.red);
+                break;
+            default:
+                debugPanel?.SetStatus("正在初始化", Color.yellow);
+                break;
+        }
+
         bool toTracking = result.State == AreaTargetPlugin.TrackingState.TRACKING
             && _previousState != AreaTargetPlugin.TrackingState.TRACKING;
         bool toLost = result.State == AreaTargetPlugin.TrackingState.LOST
@@ -552,6 +566,8 @@ public class SLAMTestSceneManager : MonoBehaviour
         {
             audioFeedback?.PlayTrackingLost();
             SetCubeColor(Color.red);
+            if (_originCube != null)
+                _originCube.SetActive(false);
             if (_wireMaterial != null)
                 _wireMaterial.color = new Color(1f, 0f, 0f, 0.8f);
         }
@@ -565,7 +581,7 @@ public class SLAMTestSceneManager : MonoBehaviour
         var renderer = _originCube.GetComponent<Renderer>();
         if (renderer != null)
         {
-            renderer.material.color = color;
+            renderer.sharedMaterial.color = color;
         }
     }
 
@@ -573,6 +589,8 @@ public class SLAMTestSceneManager : MonoBehaviour
     {
         var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
         cube.name = "TrackingOriginCube";
+        if (areaTargetOrigin != null)
+            cube.transform.SetParent(areaTargetOrigin, false);
         cube.transform.localScale = Vector3.one * 0.1f; // 10cm
         return cube;
     }

@@ -123,9 +123,9 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void BuildShell_VerifiesArm64Architecture()
         {
-            // Requirement 4.9: lipo -info 验证 arm64
-            Assert.That(_buildShellSource, Does.Contain("lipo -info"),
-                "build_ios.sh should use lipo -info to verify arm64 architecture");
+            // Requirement 4.9: 通过统一的原生库契约脚本验证 arm64 和导出符号
+            Assert.That(_buildShellSource, Does.Contain("check_native_symbols.sh"),
+                "build_ios.sh should invoke the centralized native contract check");
         }
 
         #endregion

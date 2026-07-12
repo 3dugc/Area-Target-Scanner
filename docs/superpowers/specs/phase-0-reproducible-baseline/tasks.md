@@ -744,7 +744,7 @@ git commit -m "build: add phase 0 verification driver"
 
 ## 任务 6：Xcode 与 Unity 本地门禁
 
-> 进度：部分完成。步骤 1–4 已完成；步骤 5 被本机 Unity 许可证阻塞。Unity 6000.4.6f1 日志明确报告 `No valid Unity Editor license found`，尚未生成测试 XML，因此不得标记通过。
+> 进度：已完成。Unity 6000.4.6f1 EditMode 测试 `944/944` 通过，`1.2.1` UPM 包已在全新临时工程中成功安装和编译；iOS 通用设备构建日志包含 `** BUILD SUCCEEDED **`。
 
 **对应需求：** R0.5、R0.6、R0.7
 
@@ -857,9 +857,7 @@ tools/phase0/verify_ios_scanner.sh
 
 预期结果：`phase0-results/xcode/build.log` 中出现 `** BUILD SUCCEEDED **`。
 
-- [ ] **步骤 5：运行 Unity 测试和包的干净安装验证**
-
-  阻塞：Unity 6000.4.6f1 未激活有效 Editor 许可证，批处理退出码为 198；激活后必须重跑本步骤。
+- [x] **步骤 5：运行 Unity 测试和包的干净安装验证**
 
 ```bash
 tools/phase0/validate_unity_package.sh
@@ -867,7 +865,7 @@ tools/phase0/validate_unity_package.sh
 
 预期结果：EditMode XML 报告的测试数大于零、失败数为零；临时项目编译时没有 `error CS` 或包解析错误。
 
-- [ ] **步骤 6：提交任务 6**
+- [x] **步骤 6：提交任务 6**
 
 ```bash
 git add tools/phase0/verify_ios_scanner.sh tools/phase0/validate_unity_package.sh TEST_PLAN.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md

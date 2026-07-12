@@ -42,7 +42,9 @@ package_path = Path(sys.argv[2]).resolve()
 data = json.loads(manifest_path.read_text())
 dependencies = data.setdefault("dependencies", {})
 dependencies["com.gilzoide.sqlite-net"] = "https://github.com/gilzoide/unity-sqlite-net.git#1.3.2"
-dependencies["com.areatarget.tracking"] = package_path.as_uri()
+# Unity's package manifest accepts absolute local archives as file:/absolute/path.
+# pathlib.as_uri() produces file:///absolute/path, which Unity 6000.4 rejects.
+dependencies["com.areatarget.tracking"] = "file:" + package_path.as_posix()
 manifest_path.write_text(json.dumps(data, indent=2) + "\n")
 PY
 

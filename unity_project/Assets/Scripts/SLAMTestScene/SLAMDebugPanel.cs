@@ -48,7 +48,7 @@ public class SLAMDebugPanel : MonoBehaviour
     public void SetTrackingInfo(int matchedFeatures, float confidence)
     {
         if (trackingInfoText != null)
-            trackingInfoText.text = $"匹配特征: {matchedFeatures} | 置信度: {confidence:P0}";
+            trackingInfoText.text = $"匹配特征: {matchedFeatures} | 置信度: {Mathf.RoundToInt(confidence * 100f)}%";
     }
 
     public void SetAssetInfo(string name, string version, int keyframeCount)
