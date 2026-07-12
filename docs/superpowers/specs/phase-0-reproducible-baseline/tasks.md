@@ -636,7 +636,7 @@ git commit -m "build: generate reproducible UPM package"
 
 ## 任务 5：统一验证驱动脚本
 
-> 进度：进行中。步骤 1–4 已验证完成，正在执行步骤 5 提交。
+> 进度：已完成。提交：`a38fbd9`。
 
 **对应需求：** R0.6
 
@@ -735,7 +735,7 @@ tools/phase0/verify.sh --list
 
 预期结果：测试通过，并且仅列出规定的检查项名称。
 
-- [ ] **步骤 5：提交任务 5**
+- [x] **步骤 5：提交任务 5**
 
 ```bash
 git add tools/phase0/verify.sh tests/phase0/test_verify_driver.py docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -743,6 +743,8 @@ git commit -m "build: add phase 0 verification driver"
 ```
 
 ## 任务 6：Xcode 与 Unity 本地门禁
+
+> 进度：部分完成。步骤 1–4 已完成；步骤 5 被本机 Unity 许可证阻塞。Unity 6000.4.6f1 日志明确报告 `No valid Unity Editor license found`，尚未生成测试 XML，因此不得标记通过。
 
 **对应需求：** R0.5、R0.6、R0.7
 
@@ -752,7 +754,7 @@ git commit -m "build: add phase 0 verification driver"
 - 新建：`tools/phase0/validate_unity_package.sh`
 - 修改：`TEST_PLAN.md`
 
-- [ ] **步骤 1：实现 iOS 扫描器通用设备构建验证**
+- [x] **步骤 1：实现 iOS 扫描器通用设备构建验证**
 
 新建可执行文件 `tools/phase0/verify_ios_scanner.sh`：
 
@@ -772,7 +774,7 @@ xcodebuild \
   build | tee "$RESULTS/build.log"
 ```
 
-- [ ] **步骤 2：实现 Unity 测试和 UPM 干净安装验证**
+- [x] **步骤 2：实现 Unity 测试和 UPM 干净安装验证**
 
 新建可执行文件 `tools/phase0/validate_unity_package.sh`：
 
@@ -836,7 +838,7 @@ rm -rf "$PROJECT"
 echo "PASS Unity EditMode and clean UPM install"
 ```
 
-- [ ] **步骤 3：在 `TEST_PLAN.md` 中记录准确的本地门禁**
+- [x] **步骤 3：在 `TEST_PLAN.md` 中记录准确的本地门禁**
 
 添加以下两个命令：
 
@@ -847,7 +849,7 @@ tools/phase0/validate_unity_package.sh
 
 明确说明：模拟器运行不能证明支持 LiDAR 扫描；Unity 测试 XML 必须至少包含一个测试，且失败数为零。
 
-- [ ] **步骤 4：运行 iOS 扫描器构建**
+- [x] **步骤 4：运行 iOS 扫描器构建**
 
 ```bash
 tools/phase0/verify_ios_scanner.sh
@@ -856,6 +858,8 @@ tools/phase0/verify_ios_scanner.sh
 预期结果：`phase0-results/xcode/build.log` 中出现 `** BUILD SUCCEEDED **`。
 
 - [ ] **步骤 5：运行 Unity 测试和包的干净安装验证**
+
+  阻塞：Unity 6000.4.6f1 未激活有效 Editor 许可证，批处理退出码为 198；激活后必须重跑本步骤。
 
 ```bash
 tools/phase0/validate_unity_package.sh
