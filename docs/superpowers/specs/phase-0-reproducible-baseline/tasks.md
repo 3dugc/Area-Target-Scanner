@@ -23,6 +23,8 @@
 
 ## 任务 1：统一包元数据和版本
 
+> 进度：进行中。步骤 1–7 已验证完成，正在执行步骤 8 提交。
+
 **对应需求：** R0.2、R0.3
 
 **涉及文件：**
@@ -33,7 +35,7 @@
 - 修改：`unity_plugin/AreaTargetPlugin/CHANGELOG.md`
 - 修改：`unity_project/Assets/Editor/PackageExporter.cs`
 
-- [ ] **步骤 1：添加预期失败的元数据测试**
+- [x] **步骤 1：添加预期失败的元数据测试**
 
 新建 `tests/phase0/test_package_metadata.py`：
 
@@ -81,7 +83,7 @@ def test_required_dependencies_are_enforced(tmp_path):
     assert "com.gilzoide.sqlite-net" in result.stderr
 ```
 
-- [ ] **步骤 2：运行元数据测试并确认失败**
+- [x] **步骤 2：运行元数据测试并确认失败**
 
 运行：
 
@@ -91,7 +93,7 @@ python3 -m pytest tests/phase0/test_package_metadata.py -v
 
 预期结果：失败，因为检查器尚不存在，并且 `package.json` 仍包含重复的 `dependencies` 键，版本仍为 `1.2.0`。
 
-- [ ] **步骤 3：实现严格的元数据检查器**
+- [x] **步骤 3：实现严格的元数据检查器**
 
 新建 `tools/phase0/check_package_metadata.py`：
 
@@ -138,7 +140,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **步骤 4：规范化 `package.json` 并将版本设为 `1.2.1`**
+- [x] **步骤 4：规范化 `package.json` 并将版本设为 `1.2.1`**
 
 只保留一个 `dependencies` 对象，内容必须为：
 
@@ -155,7 +157,7 @@ if __name__ == "__main__":
 "version": "1.2.1"
 ```
 
-- [ ] **步骤 5：移除 PackageExporter 中独立维护的版本常量**
+- [x] **步骤 5：移除 PackageExporter 中独立维护的版本常量**
 
 将 `PackageExporter.cs` 中的版本常量替换为包元数据读取逻辑：
 
@@ -179,11 +181,11 @@ private static string ReadPackageVersion()
 
 构造输出文件名时使用 `ReadPackageVersion()`。
 
-- [ ] **步骤 6：添加 `1.2.1` 变更日志条目**
+- [x] **步骤 6：添加 `1.2.1` 变更日志条目**
 
 只记录阶段 0 的元数据、打包、验证、CI 和仓库卫生变更，不得宣称支持 Rokid 或 Android。
 
-- [ ] **步骤 7：运行元数据测试**
+- [x] **步骤 7：运行元数据测试**
 
 运行：
 
