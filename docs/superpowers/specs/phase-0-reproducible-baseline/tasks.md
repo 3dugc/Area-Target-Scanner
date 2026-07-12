@@ -465,7 +465,7 @@ git commit -m "build: enforce native artifact contract"
 
 ## 任务 4：可重复生成的 UPM 包
 
-> 进度：进行中。步骤 1–6 已验证完成，正在执行步骤 7 提交。
+> 进度：已完成。提交：`e9193c3`。
 
 **对应需求：** R0.5
 
@@ -626,7 +626,7 @@ tar -tzf dist/com.areatarget.tracking-1.2.1.tgz | sort | sed -n '1,120p'
 
 预期结果：测试通过；可以看到必需的运行时源码和 iOS/macOS 库；测试代码和旧归档不存在。
 
-- [ ] **步骤 7：提交任务 4**
+- [x] **步骤 7：提交任务 4**
 
 ```bash
 git add tools/phase0/build_upm_package.py tests/phase0/test_upm_package.py unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -636,6 +636,8 @@ git commit -m "build: generate reproducible UPM package"
 
 ## 任务 5：统一验证驱动脚本
 
+> 进度：进行中。步骤 1–4 已验证完成，正在执行步骤 5 提交。
+
 **对应需求：** R0.6
 
 **涉及文件：**
@@ -643,7 +645,7 @@ git commit -m "build: generate reproducible UPM package"
 - 新建：`tools/phase0/verify.sh`
 - 新建：`tests/phase0/test_verify_driver.py`
 
-- [ ] **步骤 1：添加验证驱动契约测试**
+- [x] **步骤 1：添加验证驱动契约测试**
 
 新建 `tests/phase0/test_verify_driver.py`：
 
@@ -668,7 +670,7 @@ def test_invalid_mode_fails():
     assert "usage" in (result.stdout + result.stderr).lower()
 ```
 
-- [ ] **步骤 2：运行测试并确认因缺少驱动脚本而失败**
+- [x] **步骤 2：运行测试并确认因缺少驱动脚本而失败**
 
 ```bash
 python3 -m pytest tests/phase0/test_verify_driver.py -v
@@ -676,7 +678,7 @@ python3 -m pytest tests/phase0/test_verify_driver.py -v
 
 预期结果：失败，因为 `verify.sh` 尚不存在。
 
-- [ ] **步骤 3：实现快速失败的验证驱动**
+- [x] **步骤 3：实现快速失败的验证驱动**
 
 按照以下结构新建可执行文件 `tools/phase0/verify.sh`：
 
@@ -724,7 +726,7 @@ run upm-content python3 -m pytest tests/phase0/test_upm_package.py -q
 
 脚本必须保留第一个失败命令的非零退出码。
 
-- [ ] **步骤 4：运行驱动契约测试**
+- [x] **步骤 4：运行驱动契约测试**
 
 ```bash
 python3 -m pytest tests/phase0/test_verify_driver.py -v
