@@ -56,11 +56,11 @@ Every phase produces a tagged internal version. A later phase may improve a prev
 
 ## 5. Phase Roadmap
 
-### Phase 0 — Reproducible baseline (`v1.2.1`)
+### 阶段 0——可重复构建基线（`v1.2.1`）
 
 Create a clean and repeatable baseline without changing localization behavior. From a clean checkout, the scanner, Docker pipeline, native smoke test, Unity Editor test project, and UPM package must build through documented commands. Repository artifacts, package metadata, dependencies, CI coverage, and verification commands are normalized.
 
-The dedicated Phase 0 specification is in `phase-0-reproducible-baseline/requirements.md`, `design.md`, and `tasks.md`.
+阶段 0 的正式中文规范位于 `phase-0-reproducible-baseline/requirements.md`、`design.md` 和 `tasks.md`。
 
 ### Phase 1 — Complete iOS workflow (`v1.3.0`)
 

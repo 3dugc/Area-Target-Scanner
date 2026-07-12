@@ -1,41 +1,41 @@
-# Phase 0 Reproducible Baseline Implementation Plan
+# 阶段 0：可重复构建基线实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. The current user requested single-agent execution, so use `superpowers:executing-plans` unless that constraint changes.
+> **面向 AI 执行者：** 必须使用 `superpowers:subagent-driven-development` 或 `superpowers:executing-plans`，逐项实施本计划。步骤使用复选框（`- [ ]`）跟踪。当前用户要求由单一 AI 执行，因此除非该约束发生变化，否则使用 `superpowers:executing-plans`。
 
-**Goal:** Produce a clean, repeatable `v1.2.1` baseline whose scanner, Docker pipeline, Python suite, native artifacts, Unity tests, and UPM package can be verified from a clean checkout.
+**目标：** 建立干净、可重复的 `v1.2.1` 基线，使扫描器、Docker 流水线、Python 测试套件、原生制品、Unity 测试和 UPM 包都能从干净检出状态完成验证。
 
-**Architecture:** Preserve the current Swift/Python/C++/Unity architecture. Add small verification and packaging tools under `tools/phase0`, make `package.json` the version authority, remove generated repository artifacts, and orchestrate existing build/test commands through one fail-fast entry point.
+**架构：** 保留现有 Swift/Python/C++/Unity 架构。在 `tools/phase0` 下增加小型验证和打包工具，以 `package.json` 作为版本唯一来源，清理仓库中的生成物，并通过一个快速失败的统一入口编排现有构建和测试命令。
 
-**Tech Stack:** Python 3.11, Bash/zsh, Docker Compose, CMake/OpenCV, Xcode, Unity 6000.3.11f1, UPM, GitHub Actions.
+**技术栈：** Python 3.11、Bash/zsh、Docker Compose、CMake/OpenCV、Xcode、Unity 6000.3.11f1、UPM、GitHub Actions。
 
-**Source of truth:** `requirements.md` and `design.md` in this directory.
+**事实来源：** 本目录中的 `requirements.md` 和 `design.md`。
 
 ---
 
-## Progress rules
+## 进度规则
 
-- Execute tasks in numeric order.
-- Mark a child checkbox complete only after its command has produced the expected result.
-- Keep the parent task unchecked until every required child is complete.
-- Before each task commit, update this file's completed checkboxes and include `tasks.md` in the same commit.
-- Record a blocker under the affected checkbox; do not substitute a passing claim.
-- Do not implement Rokid, Android ARM64, coordinate alignment, async localization, or algorithm tuning in this plan.
+- 按编号顺序执行任务。
+- 只有在命令产生预期结果后，才能勾选对应子步骤。
+- 在所有必需子步骤完成前，父任务保持未勾选。
+- 每个任务提交前，更新本文件中的完成状态，并将 `tasks.md` 包含在同一次提交中。
+- 在受影响的复选框下记录阻塞原因，不得用“已通过”的表述替代真实结果。
+- 本计划不实施 Rokid、Android ARM64、坐标对齐、异步定位或算法调优。
 
-## Task 1: Canonical package metadata and version
+## 任务 1：统一包元数据和版本
 
-**Requirements:** R0.2, R0.3
+**对应需求：** R0.2、R0.3
 
-**Files:**
+**涉及文件：**
 
-- Create: `tools/phase0/check_package_metadata.py`
-- Create: `tests/phase0/test_package_metadata.py`
-- Modify: `unity_plugin/AreaTargetPlugin/package.json`
-- Modify: `unity_plugin/AreaTargetPlugin/CHANGELOG.md`
-- Modify: `unity_project/Assets/Editor/PackageExporter.cs`
+- 新建：`tools/phase0/check_package_metadata.py`
+- 新建：`tests/phase0/test_package_metadata.py`
+- 修改：`unity_plugin/AreaTargetPlugin/package.json`
+- 修改：`unity_plugin/AreaTargetPlugin/CHANGELOG.md`
+- 修改：`unity_project/Assets/Editor/PackageExporter.cs`
 
-- [ ] **Step 1: Add failing metadata tests**
+- [ ] **步骤 1：添加预期失败的元数据测试**
 
-Create `tests/phase0/test_package_metadata.py`:
+新建 `tests/phase0/test_package_metadata.py`：
 
 ```python
 import json
@@ -81,19 +81,19 @@ def test_required_dependencies_are_enforced(tmp_path):
     assert "com.gilzoide.sqlite-net" in result.stderr
 ```
 
-- [ ] **Step 2: Run the metadata tests and confirm failure**
+- [ ] **步骤 2：运行元数据测试并确认失败**
 
-Run:
+运行：
 
 ```bash
 python3 -m pytest tests/phase0/test_package_metadata.py -v
 ```
 
-Expected: FAIL because the checker does not exist and `package.json` still contains duplicate `dependencies` keys/version `1.2.0`.
+预期结果：失败，因为检查器尚不存在，并且 `package.json` 仍包含重复的 `dependencies` 键，版本仍为 `1.2.0`。
 
-- [ ] **Step 3: Implement the strict metadata checker**
+- [ ] **步骤 3：实现严格的元数据检查器**
 
-Create `tools/phase0/check_package_metadata.py`:
+新建 `tools/phase0/check_package_metadata.py`：
 
 ```python
 #!/usr/bin/env python3
@@ -138,9 +138,9 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Normalize `package.json` and set version `1.2.1`**
+- [ ] **步骤 4：规范化 `package.json` 并将版本设为 `1.2.1`**
 
-Keep one `dependencies` object with exactly:
+只保留一个 `dependencies` 对象，内容必须为：
 
 ```json
 "dependencies": {
@@ -149,15 +149,15 @@ Keep one `dependencies` object with exactly:
 }
 ```
 
-Set:
+设置：
 
 ```json
 "version": "1.2.1"
 ```
 
-- [ ] **Step 5: Remove the independent PackageExporter version constant**
+- [ ] **步骤 5：移除 PackageExporter 中独立维护的版本常量**
 
-Replace the constant in `PackageExporter.cs` with package metadata loading:
+将 `PackageExporter.cs` 中的版本常量替换为包元数据读取逻辑：
 
 ```csharp
 [System.Serializable]
@@ -177,43 +177,43 @@ private static string ReadPackageVersion()
 }
 ```
 
-Use `ReadPackageVersion()` when constructing the output filename.
+构造输出文件名时使用 `ReadPackageVersion()`。
 
-- [ ] **Step 6: Add the `1.2.1` changelog entry**
+- [ ] **步骤 6：添加 `1.2.1` 变更日志条目**
 
-Document only Phase 0 metadata, packaging, verification, CI, and repository-hygiene changes. Do not claim Rokid or Android support.
+只记录阶段 0 的元数据、打包、验证、CI 和仓库卫生变更，不得宣称支持 Rokid 或 Android。
 
-- [ ] **Step 7: Run metadata tests**
+- [ ] **步骤 7：运行元数据测试**
 
-Run:
+运行：
 
 ```bash
 python3 -m pytest tests/phase0/test_package_metadata.py -v
 ```
 
-Expected: all tests PASS and checker stdout is `1.2.1`.
+预期结果：全部测试通过，检查器标准输出为 `1.2.1`。
 
-- [ ] **Step 8: Commit Task 1**
+- [ ] **步骤 8：提交任务 1**
 
 ```bash
 git add tools/phase0/check_package_metadata.py tests/phase0/test_package_metadata.py unity_plugin/AreaTargetPlugin/package.json unity_plugin/AreaTargetPlugin/CHANGELOG.md unity_project/Assets/Editor/PackageExporter.cs docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
 git commit -m "chore: establish canonical package version"
 ```
 
-## Task 2: Repository hygiene and fixture ownership
+## 任务 2：仓库卫生与测试夹具归属
 
-**Requirements:** R0.1
+**对应需求：** R0.1
 
-**Files:**
+**涉及文件：**
 
-- Create: `tests/phase0/test_repository_hygiene.py`
-- Create: `unity_project/Assets/StreamingAssets/README.md`
-- Modify: `.gitignore`
-- Delete: generated XML/crash/backup artifacts enumerated below
+- 新建：`tests/phase0/test_repository_hygiene.py`
+- 新建：`unity_project/Assets/StreamingAssets/README.md`
+- 修改：`.gitignore`
+- 删除：下文列出的 XML、崩溃和备份生成物
 
-- [ ] **Step 1: Add a failing repository-hygiene test**
+- [ ] **步骤 1：添加预期失败的仓库卫生测试**
 
-Create `tests/phase0/test_repository_hygiene.py`:
+新建 `tests/phase0/test_repository_hygiene.py`：
 
 ```python
 import re
@@ -237,29 +237,29 @@ def test_generated_artifacts_are_not_tracked():
     assert violations == []
 ```
 
-- [ ] **Step 2: Run the hygiene test and confirm it lists current artifacts**
+- [ ] **步骤 2：运行仓库卫生测试并确认其列出现有生成物**
 
-Run:
+运行：
 
 ```bash
 python3 -m pytest tests/phase0/test_repository_hygiene.py -v
 ```
 
-Expected: FAIL and list tracked crash XML/backup paths.
+预期结果：失败，并列出当前受 Git 跟踪的崩溃、XML 和备份路径。
 
-- [ ] **Step 3: Prove retained fixture usage before cleanup**
+- [ ] **步骤 3：清理前证明保留夹具仍被使用**
 
-Run:
+运行：
 
 ```bash
 rg -n "SLAMTestAssets|StreamingAssets/ScanData" unity_plugin unity_project tests
 ```
 
-Expected: active tests reference `SLAMTestAssets` and recorded scan sequences. Retain their canonical files.
+预期结果：现有测试引用 `SLAMTestAssets` 和已录制扫描序列；保留这些规范文件。
 
-- [ ] **Step 4: Remove generated artifacts from Git**
+- [ ] **步骤 4：从 Git 中移除生成物**
 
-Remove the exact generated groups:
+移除以下明确的生成物分组：
 
 ```bash
 git rm unity_project/mono_crash.*.json
@@ -271,47 +271,47 @@ git rm unity_project/Assets/StreamingAssets/SLAMTestAssets/*.bak2*
 git rm unity_project/Assets/StreamingAssets/SLAMTestAssets/*.data1_bak*
 ```
 
-- [ ] **Step 5: Extend `.gitignore`**
+- [ ] **步骤 5：扩展 `.gitignore`**
 
-Add:
+添加：
 
 ```gitignore
-# Generated verification reports
+# 生成的验证报告
 unity_project/*test_results*.xml
 unity_project/TestResults-*.xml
 unity_project/pbt_*.xml
 unity_project/mono_crash.*.json
 unity_project/unity_project/
 
-# Asset backup variants
+# 资产备份变体
 *.bak2
 *.bak2.meta
 *.data1_bak
 *.data1_bak.meta
 
-# Phase 0 build products
+# 阶段 0 构建产物
 dist/
 phase0-results/
 ```
 
-- [ ] **Step 6: Document retained fixtures**
+- [ ] **步骤 6：记录保留的测试夹具**
 
-Create `unity_project/Assets/StreamingAssets/README.md` listing:
+新建 `unity_project/Assets/StreamingAssets/README.md`，列出：
 
-- `SLAMTestAssets`: deterministic packaged asset used by Unity localization regression tests.
-- `ScanData` and `ScanData_data1`: recorded sequences used by playback and cross-session tests.
-- A rule that replacements require updating the relevant tests and recording origin/date.
+- `SLAMTestAssets`：Unity 定位回归测试使用的确定性打包资产。
+- `ScanData` 和 `ScanData_data1`：回放及跨会话测试使用的录制序列。
+- 替换这些夹具时，必须同步更新相关测试并记录来源和日期。
 
-- [ ] **Step 7: Run the hygiene test and full repository search**
+- [ ] **步骤 7：运行仓库卫生测试和完整仓库搜索**
 
 ```bash
 python3 -m pytest tests/phase0/test_repository_hygiene.py -v
 git ls-files | rg 'mono_crash|test_results|TestResults|\.bak2|data1_bak' && exit 1 || true
 ```
 
-Expected: hygiene test PASS; search prints no tracked matches.
+预期结果：仓库卫生测试通过；搜索不输出任何受跟踪的匹配项。
 
-- [ ] **Step 8: Commit Task 2**
+- [ ] **步骤 8：提交任务 2**
 
 ```bash
 git add .gitignore tests/phase0/test_repository_hygiene.py unity_project/Assets/StreamingAssets/README.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -319,22 +319,22 @@ git add -u unity_project
 git commit -m "chore: remove generated repository artifacts"
 ```
 
-## Task 3: Native symbol contract and placeholder cleanup
+## 任务 3：原生符号契约与占位文件清理
 
-**Requirements:** R0.4
+**对应需求：** R0.4
 
-**Files:**
+**涉及文件：**
 
-- Create: `tools/phase0/required_native_symbols.txt`
-- Create: `tools/phase0/check_native_symbols.sh`
-- Create: `tests/phase0/test_native_contract.py`
-- Modify: `native_visual_localizer/build_macos.sh`
-- Modify: `native_visual_localizer/build_ios.sh`
-- Delete: empty Windows/Linux placeholder binaries and their `.meta`
+- 新建：`tools/phase0/required_native_symbols.txt`
+- 新建：`tools/phase0/check_native_symbols.sh`
+- 新建：`tests/phase0/test_native_contract.py`
+- 修改：`native_visual_localizer/build_macos.sh`
+- 修改：`native_visual_localizer/build_ios.sh`
+- 删除：空的 Windows/Linux 占位二进制及对应 `.meta`
 
-- [ ] **Step 1: Define the required native API**
+- [ ] **步骤 1：定义必需的原生 API**
 
-Create `tools/phase0/required_native_symbols.txt`:
+新建 `tools/phase0/required_native_symbols.txt`：
 
 ```text
 vl_create
@@ -350,9 +350,9 @@ vl_set_alignment_transform
 vl_get_debug_info
 ```
 
-- [ ] **Step 2: Add failing native-contract tests**
+- [ ] **步骤 2：添加预期失败的原生契约测试**
 
-Create `tests/phase0/test_native_contract.py`:
+新建 `tests/phase0/test_native_contract.py`：
 
 ```python
 import subprocess
@@ -376,17 +376,17 @@ def test_empty_library_is_rejected(tmp_path):
     assert "empty" in (result.stdout + result.stderr).lower()
 ```
 
-- [ ] **Step 3: Run tests and confirm checker-missing failure**
+- [ ] **步骤 3：运行测试并确认因缺少检查器而失败**
 
 ```bash
 python3 -m pytest tests/phase0/test_native_contract.py -v
 ```
 
-Expected: FAIL because the checker does not exist.
+预期结果：失败，因为检查器尚不存在。
 
-- [ ] **Step 4: Implement the native checker**
+- [ ] **步骤 4：实现原生检查器**
 
-Create executable `tools/phase0/check_native_symbols.sh`:
+新建可执行文件 `tools/phase0/check_native_symbols.sh`：
 
 ```bash
 #!/usr/bin/env bash
@@ -418,19 +418,19 @@ done < "$SYMBOLS"
 echo "PASS native contract: $LIB"
 ```
 
-Run `chmod +x tools/phase0/check_native_symbols.sh`.
+运行 `chmod +x tools/phase0/check_native_symbols.sh`。
 
-- [ ] **Step 5: Reuse the contract from both build scripts**
+- [ ] **步骤 5：两个构建脚本复用同一契约**
 
-Replace duplicated `nm | grep` lists with:
+将重复的 `nm | grep` 列表替换为：
 
 ```bash
 "$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$OUTPUT_LIBRARY"
 ```
 
-Resolve the repository root correctly from each script. Make macOS deployment opt-in via `--deploy`; the default build verifies its build-directory output without modifying tracked plugin binaries.
+确保每个脚本都能正确解析仓库根目录。macOS 部署改为通过 `--deploy` 显式启用；默认构建只验证构建目录中的输出，不修改受 Git 跟踪的插件二进制。
 
-- [ ] **Step 6: Remove empty unsupported placeholders**
+- [ ] **步骤 6：移除不受支持的空占位文件**
 
 ```bash
 git rm unity_project/Assets/Plugins/x86_64/libvisual_localizer.so
@@ -439,7 +439,7 @@ git rm unity_project/Assets/Plugins/x86_64-win/visual_localizer.dll
 git rm unity_project/Assets/Plugins/x86_64-win/visual_localizer.dll.meta
 ```
 
-- [ ] **Step 7: Run native-contract tests and macOS build**
+- [ ] **步骤 7：运行原生契约测试和 macOS 构建**
 
 ```bash
 python3 -m pytest tests/phase0/test_native_contract.py -v
@@ -447,9 +447,9 @@ native_visual_localizer/build_macos.sh
 tools/phase0/check_native_symbols.sh native_visual_localizer/build/libvisual_localizer.dylib
 ```
 
-Expected: all tests PASS and both iOS/macOS artifacts report every required symbol.
+预期结果：全部测试通过，iOS 和 macOS 制品均报告包含所有必需符号。
 
-- [ ] **Step 8: Commit Task 3**
+- [ ] **步骤 8：提交任务 3**
 
 ```bash
 git add tools/phase0 native_visual_localizer tests/phase0 docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -457,20 +457,20 @@ git add -u unity_project/Assets/Plugins
 git commit -m "build: enforce native artifact contract"
 ```
 
-## Task 4: Reproducible UPM package
+## 任务 4：可重复生成的 UPM 包
 
-**Requirements:** R0.5
+**对应需求：** R0.5
 
-**Files:**
+**涉及文件：**
 
-- Create: `tools/phase0/build_upm_package.py`
-- Create: `tests/phase0/test_upm_package.py`
-- Modify: `unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
-- Delete: tracked stale `1.2.0` archives
+- 新建：`tools/phase0/build_upm_package.py`
+- 新建：`tests/phase0/test_upm_package.py`
+- 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
+- 删除：受 Git 跟踪的过期 `1.2.0` 归档
 
-- [ ] **Step 1: Add failing package-content tests**
+- [ ] **步骤 1：添加预期失败的包内容测试**
 
-Create `tests/phase0/test_upm_package.py` with these assertions:
+新建 `tests/phase0/test_upm_package.py`，包含以下断言：
 
 ```python
 import hashlib
@@ -509,17 +509,17 @@ def test_package_content_and_reproducibility():
     assert not any(name.endswith((".unitypackage", ".tgz", ".bak2")) for name in names)
 ```
 
-- [ ] **Step 2: Run the test and confirm builder-missing failure**
+- [ ] **步骤 2：运行测试并确认因缺少打包器而失败**
 
 ```bash
 python3 -m pytest tests/phase0/test_upm_package.py -v
 ```
 
-Expected: FAIL because the builder does not exist.
+预期结果：失败，因为打包器尚不存在。
 
-- [ ] **Step 3: Implement deterministic package staging**
+- [ ] **步骤 3：实现确定性的包暂存流程**
 
-Create `tools/phase0/build_upm_package.py` with these required operations:
+新建 `tools/phase0/build_upm_package.py`，实现以下必需操作：
 
 ```python
 #!/usr/bin/env python3
@@ -590,35 +590,35 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: Remove stale tracked archives**
+- [ ] **步骤 4：移除受跟踪的过期归档**
 
 ```bash
 git rm unity_plugin/AreaTargetPlugin/AreaTargetPlugin-1.2.0.unitypackage
 git rm unity_plugin/AreaTargetPlugin/com.areatarget.tracking-1.2.0.tgz
 ```
 
-Historical recovery remains available from Git history.
+历史版本仍可从 Git 历史恢复。
 
-- [ ] **Step 5: Update package documentation**
+- [ ] **步骤 5：更新打包文档**
 
-Rewrite `BUILD_PACKAGE.md` so the primary command is:
+重写 `BUILD_PACKAGE.md`，将以下命令设为主要打包入口：
 
 ```bash
 python3 tools/phase0/build_upm_package.py
 ```
 
-Document output path, inclusion/exclusion rules, and Unity clean-install validation. Keep `.unitypackage` export as a legacy optional path, not the release source of truth.
+记录输出路径、包含/排除规则以及 Unity 干净安装验证。保留 `.unitypackage` 导出作为旧版可选路径，但不再作为发布事实来源。
 
-- [ ] **Step 6: Run package tests twice**
+- [ ] **步骤 6：连续运行两次包测试**
 
 ```bash
 python3 -m pytest tests/phase0/test_upm_package.py -v
 tar -tzf dist/com.areatarget.tracking-1.2.1.tgz | sort | sed -n '1,120p'
 ```
 
-Expected: test PASS; required runtime sources and iOS/macOS libraries are visible; tests and old archives are absent.
+预期结果：测试通过；可以看到必需的运行时源码和 iOS/macOS 库；测试代码和旧归档不存在。
 
-- [ ] **Step 7: Commit Task 4**
+- [ ] **步骤 7：提交任务 4**
 
 ```bash
 git add tools/phase0/build_upm_package.py tests/phase0/test_upm_package.py unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
@@ -626,18 +626,18 @@ git add -u unity_plugin/AreaTargetPlugin
 git commit -m "build: generate reproducible UPM package"
 ```
 
-## Task 5: Unified verification driver
+## 任务 5：统一验证驱动脚本
 
-**Requirements:** R0.6
+**对应需求：** R0.6
 
-**Files:**
+**涉及文件：**
 
-- Create: `tools/phase0/verify.sh`
-- Create: `tests/phase0/test_verify_driver.py`
+- 新建：`tools/phase0/verify.sh`
+- 新建：`tests/phase0/test_verify_driver.py`
 
-- [ ] **Step 1: Add verification-driver contract tests**
+- [ ] **步骤 1：添加验证驱动契约测试**
 
-Create `tests/phase0/test_verify_driver.py`:
+新建 `tests/phase0/test_verify_driver.py`：
 
 ```python
 import subprocess
@@ -660,17 +660,17 @@ def test_invalid_mode_fails():
     assert "usage" in (result.stdout + result.stderr).lower()
 ```
 
-- [ ] **Step 2: Run tests and confirm the missing-driver failure**
+- [ ] **步骤 2：运行测试并确认因缺少驱动脚本而失败**
 
 ```bash
 python3 -m pytest tests/phase0/test_verify_driver.py -v
 ```
 
-Expected: FAIL because `verify.sh` does not exist.
+预期结果：失败，因为 `verify.sh` 尚不存在。
 
-- [ ] **Step 3: Implement the fail-fast driver**
+- [ ] **步骤 3：实现快速失败的验证驱动**
 
-Create executable `tools/phase0/verify.sh` using this structure:
+按照以下结构新建可执行文件 `tools/phase0/verify.sh`：
 
 ```bash
 #!/usr/bin/env bash
@@ -714,37 +714,37 @@ run upm python3 tools/phase0/build_upm_package.py
 run upm-content python3 -m pytest tests/phase0/test_upm_package.py -q
 ```
 
-The script must preserve the first failing command's non-zero exit code.
+脚本必须保留第一个失败命令的非零退出码。
 
-- [ ] **Step 4: Run driver contract tests**
+- [ ] **步骤 4：运行驱动契约测试**
 
 ```bash
 python3 -m pytest tests/phase0/test_verify_driver.py -v
 tools/phase0/verify.sh --list
 ```
 
-Expected: tests PASS and exactly the required check names are listed.
+预期结果：测试通过，并且仅列出规定的检查项名称。
 
-- [ ] **Step 5: Commit Task 5**
+- [ ] **步骤 5：提交任务 5**
 
 ```bash
 git add tools/phase0/verify.sh tests/phase0/test_verify_driver.py docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
 git commit -m "build: add phase 0 verification driver"
 ```
 
-## Task 6: Xcode and Unity local gates
+## 任务 6：Xcode 与 Unity 本地门禁
 
-**Requirements:** R0.5, R0.6, R0.7
+**对应需求：** R0.5、R0.6、R0.7
 
-**Files:**
+**涉及文件：**
 
-- Create: `tools/phase0/verify_ios_scanner.sh`
-- Create: `tools/phase0/validate_unity_package.sh`
-- Modify: `TEST_PLAN.md`
+- 新建：`tools/phase0/verify_ios_scanner.sh`
+- 新建：`tools/phase0/validate_unity_package.sh`
+- 修改：`TEST_PLAN.md`
 
-- [ ] **Step 1: Implement generic iOS scanner build verification**
+- [ ] **步骤 1：实现 iOS 扫描器通用设备构建验证**
 
-Create executable `tools/phase0/verify_ios_scanner.sh`:
+新建可执行文件 `tools/phase0/verify_ios_scanner.sh`：
 
 ```bash
 #!/usr/bin/env bash
@@ -762,9 +762,9 @@ xcodebuild \
   build | tee "$RESULTS/build.log"
 ```
 
-- [ ] **Step 2: Implement Unity tests plus clean UPM install**
+- [ ] **步骤 2：实现 Unity 测试和 UPM 干净安装验证**
 
-Create executable `tools/phase0/validate_unity_package.sh`:
+新建可执行文件 `tools/phase0/validate_unity_package.sh`：
 
 ```bash
 #!/usr/bin/env bash
@@ -826,52 +826,52 @@ rm -rf "$PROJECT"
 echo "PASS Unity EditMode and clean UPM install"
 ```
 
-- [ ] **Step 3: Document exact local gates in `TEST_PLAN.md`**
+- [ ] **步骤 3：在 `TEST_PLAN.md` 中记录准确的本地门禁**
 
-Add the two commands:
+添加以下两个命令：
 
 ```bash
 tools/phase0/verify_ios_scanner.sh
 tools/phase0/validate_unity_package.sh
 ```
 
-State that simulator execution does not certify LiDAR scanning and that Unity test XML must contain at least one test with zero failures.
+明确说明：模拟器运行不能证明支持 LiDAR 扫描；Unity 测试 XML 必须至少包含一个测试，且失败数为零。
 
-- [ ] **Step 4: Run the iOS scanner build**
+- [ ] **步骤 4：运行 iOS 扫描器构建**
 
 ```bash
 tools/phase0/verify_ios_scanner.sh
 ```
 
-Expected: `** BUILD SUCCEEDED **` in `phase0-results/xcode/build.log`.
+预期结果：`phase0-results/xcode/build.log` 中出现 `** BUILD SUCCEEDED **`。
 
-- [ ] **Step 5: Run Unity tests and clean package install**
+- [ ] **步骤 5：运行 Unity 测试和包的干净安装验证**
 
 ```bash
 tools/phase0/validate_unity_package.sh
 ```
 
-Expected: EditMode XML reports non-zero tests and zero failures; temporary project compiles without `error CS` or package resolution errors.
+预期结果：EditMode XML 报告的测试数大于零、失败数为零；临时项目编译时没有 `error CS` 或包解析错误。
 
-- [ ] **Step 6: Commit Task 6**
+- [ ] **步骤 6：提交任务 6**
 
 ```bash
 git add tools/phase0/verify_ios_scanner.sh tools/phase0/validate_unity_package.sh TEST_PLAN.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
 git commit -m "test: add iOS and Unity baseline gates"
 ```
 
-## Task 7: Expand CI to the Phase 0 baseline
+## 任务 7：将 CI 扩展到阶段 0 基线
 
-**Requirements:** R0.7
+**对应需求：** R0.7
 
-**Files:**
+**涉及文件：**
 
-- Modify: `.github/workflows/ci.yml`
-- Modify: `requirements-dev.txt`
+- 修改：`.github/workflows/ci.yml`
+- 修改：`requirements-dev.txt`
 
-- [ ] **Step 1: Replace the sampled Python test command**
+- [ ] **步骤 1：替换抽样执行的 Python 测试命令**
 
-The Linux Python job must install all three requirement sets and run:
+Linux Python job 必须安装三组依赖并执行：
 
 ```yaml
 - name: Install Python dependencies
@@ -893,7 +893,7 @@ The Linux Python job must install all three requirement sets and run:
     python -m pytest tests/phase0/test_upm_package.py -v
 ```
 
-- [ ] **Step 2: Add Docker configuration validation before image build**
+- [ ] **步骤 2：在镜像构建前添加 Docker 配置验证**
 
 ```yaml
 - name: Validate Docker Compose
@@ -903,7 +903,7 @@ The Linux Python job must install all three requirement sets and run:
   run: docker build -t area-target-scanner-web-service-ci .
 ```
 
-- [ ] **Step 3: Add a macOS native job**
+- [ ] **步骤 3：添加 macOS 原生构建 job**
 
 ```yaml
 native-macos:
@@ -918,60 +918,60 @@ native-macos:
       run: tools/phase0/check_native_symbols.sh unity_project/Assets/Plugins/iOS/libvisual_localizer.a
 ```
 
-- [ ] **Step 4: Document the Unity local-gate exception in workflow comments**
+- [ ] **步骤 4：在工作流注释中记录 Unity 本地门禁例外**
 
-Add a comment explaining that Unity EditMode remains a required local release gate until repository secrets contain a valid Unity license. Do not add a fake passing Unity job.
+添加注释说明：在仓库 secrets 配置有效的 Unity 许可证前，Unity EditMode 仍是必需的本地发布门禁。不得添加虚假的绿色 Unity job。
 
-- [ ] **Step 5: Add the workflow parser dependency**
+- [ ] **步骤 5：添加工作流解析依赖**
 
-Add to `requirements-dev.txt`:
+在 `requirements-dev.txt` 中添加：
 
 ```text
 PyYAML>=6.0,<7
 ```
 
-- [ ] **Step 6: Validate workflow syntax and local CI mode**
+- [ ] **步骤 6：验证工作流语法和本地 CI 模式**
 
 ```bash
 python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml"))'
 tools/phase0/verify.sh ci
 ```
 
-Expected: YAML parses; all CI-mode checks pass and Xcode/Unity are explicitly reported as `SKIP`.
+预期结果：YAML 解析成功；所有 CI 模式检查通过，Xcode/Unity 被明确报告为 `SKIP`。
 
-- [ ] **Step 7: Commit Task 7**
+- [ ] **步骤 7：提交任务 7**
 
 ```bash
 git add .github/workflows/ci.yml requirements-dev.txt docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
 git commit -m "ci: enforce phase 0 baseline checks"
 ```
 
-## Task 8: Baseline documentation and support claims
+## 任务 8：基线文档与支持范围声明
 
-**Requirements:** R0.8
+**对应需求：** R0.8
 
-**Files:**
+**涉及文件：**
 
-- Modify: `README.md`
-- Modify: `unity_plugin/AreaTargetPlugin/README.md`
-- Modify: `unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
+- 修改：`README.md`
+- 修改：`unity_plugin/AreaTargetPlugin/README.md`
+- 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
 
-- [ ] **Step 1: Add an explicit Phase 0 support table**
+- [ ] **步骤 1：添加明确的阶段 0 支持范围表**
 
-In the root README and package README, state:
+在根 README 和包 README 中写明：
 
-| Target | Phase 0 status |
+| 目标平台 | 阶段 0 状态 |
 |---|---|
-| macOS development build | Verified baseline |
-| iOS scanner generic-device build | Verified baseline |
-| iOS localizer archive | Static symbol verification only |
-| Rokid AR Studio | Planned for Phase 2; unsupported in Phase 0 |
-| Android ARM64 | Planned for Phase 2; unsupported in Phase 0 |
-| Windows/Linux runtime | Unsupported; empty placeholders removed |
+| macOS 开发构建 | 已验证基线 |
+| iOS 扫描器通用设备构建 | 已验证基线 |
+| iOS 定位器归档 | 仅完成静态符号验证 |
+| Rokid AR Studio | 计划在阶段 2 实施；阶段 0 不支持 |
+| Android ARM64 | 计划在阶段 2 实施；阶段 0 不支持 |
+| Windows/Linux 运行时 | 不支持；已移除空占位文件 |
 
-- [ ] **Step 2: Correct build and package instructions**
+- [ ] **步骤 2：修正构建和打包说明**
 
-Document these canonical commands:
+记录以下规范命令：
 
 ```bash
 tools/phase0/verify.sh local
@@ -979,33 +979,33 @@ python3 tools/phase0/build_upm_package.py
 tools/phase0/validate_unity_package.sh
 ```
 
-Remove instructions that point to tracked `1.2.0` archives as the current release.
+删除把受 Git 跟踪的 `1.2.0` 归档作为当前版本的说明。
 
-- [ ] **Step 3: Check documentation claims**
+- [ ] **步骤 3：检查文档中的能力声明**
 
 ```bash
 rg -n "supports.*Android|Windows|Linux|Rokid|支持.*Android|支持.*Windows|支持.*Linux|支持.*Rokid" README.md unity_plugin/AreaTargetPlugin/README.md
 ```
 
-Expected: every remaining match is qualified as unsupported/planned or backed by Phase 0 evidence.
+预期结果：所有剩余匹配项都明确标注为“不支持”或“计划中”，或者有阶段 0 验证证据支撑。
 
-- [ ] **Step 4: Commit Task 8**
+- [ ] **步骤 4：提交任务 8**
 
 ```bash
 git add README.md unity_plugin/AreaTargetPlugin/README.md unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
 git commit -m "docs: document phase 0 support baseline"
 ```
 
-## Task 9: Full clean-checkout acceptance
+## 任务 9：完整的干净检出验收
 
-**Requirements:** all requirements and acceptance criteria
+**对应需求：** 全部需求和验收标准
 
-**Files:**
+**涉及文件：**
 
-- Create: `docs/phase-0-validation.md`
-- Update: this `tasks.md` as checks complete
+- 新建：`docs/phase-0-validation.md`
+- 更新：随着检查完成同步更新本 `tasks.md`
 
-- [ ] **Step 1: Run all fast tests in the working checkout**
+- [ ] **步骤 1：在当前工作目录运行全部快速测试**
 
 ```bash
 python3 -m pytest tests/ -v --tb=short
@@ -1014,17 +1014,17 @@ python3 tools/phase0/build_upm_package.py
 python3 -m pytest tests/phase0 -v
 ```
 
-Expected: all commands return zero.
+预期结果：所有命令均返回零。
 
-- [ ] **Step 2: Run the complete local gate**
+- [ ] **步骤 2：运行完整本地门禁**
 
 ```bash
 tools/phase0/verify.sh local | tee phase0-results/phase0-local.log
 ```
 
-Expected: every required row is `PASS`; no required row is `SKIP`.
+预期结果：每个必需检查项都是 `PASS`，没有必需检查项为 `SKIP`。
 
-- [ ] **Step 3: Verify reproducibility in a clean worktree**
+- [ ] **步骤 3：在干净 worktree 中验证可重复性**
 
 ```bash
 git worktree add /tmp/area-target-phase0-clean HEAD
@@ -1033,11 +1033,11 @@ git submodule update --init --recursive
 tools/phase0/verify.sh local | tee phase0-results/phase0-clean.log
 ```
 
-Expected: full gate PASS from the clean worktree.
+预期结果：完整门禁在干净 worktree 中通过。
 
-- [ ] **Step 4: Create the validation record from actual versions and results**
+- [ ] **步骤 4：根据实际版本和结果创建验证记录**
 
-Run these commands, then create `docs/phase-0-validation.md` using their literal outputs and the actual PASS/FAIL/SKIP rows from both logs:
+运行以下命令，然后使用命令原始输出以及两份日志中真实的 PASS/FAIL/SKIP 结果创建 `docs/phase-0-validation.md`：
 
 ```bash
 git rev-parse HEAD
@@ -1050,35 +1050,35 @@ docker compose version
 cmake --version
 ```
 
-Copy only the result summary, not full scan data or private device content.
+只复制结果摘要，不得复制完整扫描数据或设备隐私内容。
 
-- [ ] **Step 5: Confirm clean source state**
+- [ ] **步骤 5：确认源码状态干净**
 
 ```bash
 git status --short
 git diff --check
 ```
 
-Expected: no unexpected source changes. `dist/`, `build/`, `phase0-results/`, and temporary validation projects remain ignored or outside the repository.
+预期结果：没有意外源码变更。`dist/`、`build/`、`phase0-results/` 和临时验证项目保持被忽略或位于仓库之外。
 
-- [ ] **Step 6: Commit the final validation record and completed task state**
+- [ ] **步骤 6：提交最终验证记录和已完成任务状态**
 
 ```bash
 git add docs/phase-0-validation.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
 git commit -m "chore: validate reproducible v1.2.1 baseline"
 ```
 
-- [ ] **Step 7: Remove the temporary clean worktree**
+- [ ] **步骤 7：移除临时干净 worktree**
 
-Return to the primary worktree, then run:
+返回主 worktree，然后运行：
 
 ```bash
 git worktree remove /tmp/area-target-phase0-clean
 ```
 
-Expected: the temporary worktree is removed and the primary worktree remains unchanged.
+预期结果：临时 worktree 已移除，主 worktree 保持不变。
 
-- [ ] **Step 8: Verify acceptance before external release actions**
+- [ ] **步骤 8：执行外部发布操作前验证验收状态**
 
 ```bash
 git status --short --branch
@@ -1086,6 +1086,6 @@ git log --oneline --decorate -10
 test "$(python3 tools/phase0/check_package_metadata.py unity_plugin/AreaTargetPlugin/package.json)" = "1.2.1"
 ```
 
-Expected: clean branch, documented Phase 0 commits, and canonical version `1.2.1`.
+预期结果：分支干净、阶段 0 提交记录完整、规范版本为 `1.2.1`。
 
-Do not push, tag, create a GitHub Release, or merge to `main` without explicit user authorization after this point.
+到达此步骤后，未经用户明确授权，不得推送、打标签、创建 GitHub Release 或合并到 `main`。
