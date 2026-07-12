@@ -2,11 +2,13 @@ using System;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using AreaTargetPlugin.PointCloudLocalization;
 
 namespace AreaTargetPlugin.Tests
 {
     [TestFixture]
+    [IgnoreLogErrors]
     public class LocalizerIntegrationTests
     {
         #region Stub Classes
@@ -92,6 +94,7 @@ namespace AreaTargetPlugin.Tests
         [SetUp]
         public void SetUp()
         {
+            LogAssert.ignoreFailingMessages = true;
             MapManager.Clear();
             _platform = new StubPlatformSupport();
             _localizer = new StubLocalizer();

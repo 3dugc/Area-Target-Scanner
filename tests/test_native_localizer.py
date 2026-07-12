@@ -3,9 +3,7 @@ Integration tests for the native visual localizer library (libvisual_localizer.d
 Tests the C API via ctypes to verify correctness without Unity.
 """
 import ctypes
-import struct
 import os
-import sys
 import numpy as np
 import cv2
 import pytest

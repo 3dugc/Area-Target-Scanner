@@ -44,6 +44,19 @@ CREATE TABLE IF NOT EXISTS vocabulary (
 );
 """
 
+_AKAZE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS akaze_features (
+    id INTEGER PRIMARY KEY,
+    keyframe_id INTEGER NOT NULL REFERENCES keyframes(id),
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    x3d REAL NOT NULL,
+    y3d REAL NOT NULL,
+    z3d REAL NOT NULL,
+    descriptor BLOB NOT NULL
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -139,6 +152,26 @@ def save_feature_database(db: FeatureDatabase, db_path: str) -> None:
                     (kf.image_id, float(x), float(y), float(x3d), float(y3d), float(z3d), desc_blob),
                 )
 
+        # -- akaze_features（若有 AKAZE 数据）-------------------------------
+        has_akaze = any(
+            kf.akaze_descriptors is not None for kf in db.keyframes
+        )
+        if has_akaze:
+            cur.executescript(_AKAZE_SCHEMA_SQL)
+            for kf in db.keyframes:
+                if kf.akaze_descriptors is None:
+                    continue
+                for j in range(len(kf.akaze_keypoints)):
+                    x, y = kf.akaze_keypoints[j]
+                    x3d, y3d, z3d = kf.akaze_points_3d[j]
+                    desc_blob = kf.akaze_descriptors[j].astype(np.uint8).tobytes()
+                    cur.execute(
+                        "INSERT INTO akaze_features "
+                        "(keyframe_id, x, y, x3d, y3d, z3d, descriptor) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (kf.image_id, float(x), float(y), float(x3d), float(y3d), float(z3d), desc_blob),
+                    )
+
         # -- vocabulary ----------------------------------------------------
         if db.vocabulary is not None:
             medoids = np.asarray(db.vocabulary, dtype=np.uint8)
@@ -222,6 +255,32 @@ def load_feature_database(db_path: str) -> FeatureDatabase:
         global_descriptors: np.ndarray | None = None
         if gd_list and gd_list[0] is not None:
             global_descriptors = np.array(gd_list, dtype=np.float64)
+
+        # -- 加载 AKAZE 特征（兼容回退：表不存在则跳过）-------------------
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='akaze_features'"
+        )
+        has_akaze_table = cur.fetchone() is not None
+
+        if has_akaze_table:
+            for kf in keyframes:
+                cur.execute(
+                    "SELECT x, y, x3d, y3d, z3d, descriptor FROM akaze_features "
+                    "WHERE keyframe_id = ? ORDER BY id",
+                    (kf.image_id,),
+                )
+                akaze_rows = cur.fetchall()
+                if akaze_rows:
+                    akaze_kps: List[tuple[float, float]] = []
+                    akaze_pts3d: List[tuple[float, float, float]] = []
+                    akaze_descs: list[np.ndarray] = []
+                    for x, y, x3d, y3d, z3d, desc_blob in akaze_rows:
+                        akaze_kps.append((float(x), float(y)))
+                        akaze_pts3d.append((float(x3d), float(y3d), float(z3d)))
+                        akaze_descs.append(np.frombuffer(desc_blob, dtype=np.uint8).copy())
+                    kf.akaze_keypoints = akaze_kps
+                    kf.akaze_points_3d = akaze_pts3d
+                    kf.akaze_descriptors = np.array(akaze_descs, dtype=np.uint8)
 
         # -- Load vocabulary -----------------------------------------------
         cur.execute("SELECT word_id, descriptor, idf_weight FROM vocabulary ORDER BY word_id")

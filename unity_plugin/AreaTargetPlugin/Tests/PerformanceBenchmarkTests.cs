@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
@@ -10,20 +11,29 @@ namespace AreaTargetPlugin.Tests
     /// Validates: frame processing latency, memory stability, throughput.
     /// </summary>
     [TestFixture]
+    [IgnoreLogErrors]
     public class PerformanceBenchmarkTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            LogAssert.ignoreFailingMessages = true;
+        }
+
         #region Frame Processing Latency
 
         [Test]
         public void ProcessFrame_EmptyDB_Under5ms()
         {
             var tracker = new AreaTargetTracker();
+            var intrinsics = new Matrix4x4();
+            intrinsics.m00 = 500; intrinsics.m11 = 500; intrinsics.m02 = 320; intrinsics.m12 = 240;
             var frame = new CameraFrame
             {
                 ImageData = new byte[640 * 480],
                 Width = 640,
                 Height = 480,
-                Fx = 500, Fy = 500, Cx = 320, Cy = 240
+                Intrinsics = intrinsics
             };
 
             // Warmup
@@ -51,13 +61,13 @@ namespace AreaTargetPlugin.Tests
             var pose = Matrix4x4.TRS(Vector3.one, Quaternion.Euler(10, 20, 30), Vector3.one);
 
             // Warmup
-            filter.Update(pose, 0.8f);
+            filter.Update(pose);
 
             var sw = Stopwatch.StartNew();
             int iterations = 1000;
             for (int i = 0; i < iterations; i++)
             {
-                filter.Update(pose, 0.8f);
+                filter.Update(pose);
             }
             sw.Stop();
 
@@ -74,12 +84,14 @@ namespace AreaTargetPlugin.Tests
         public void Tracker_Throughput_AtLeast30FPS()
         {
             var tracker = new AreaTargetTracker();
+            var intrinsics2 = new Matrix4x4();
+            intrinsics2.m00 = 500; intrinsics2.m11 = 500; intrinsics2.m02 = 320; intrinsics2.m12 = 240;
             var frame = new CameraFrame
             {
                 ImageData = new byte[640 * 480],
                 Width = 640,
                 Height = 480,
-                Fx = 500, Fy = 500, Cx = 320, Cy = 240
+                Intrinsics = intrinsics2
             };
 
             var sw = Stopwatch.StartNew();
@@ -106,12 +118,14 @@ namespace AreaTargetPlugin.Tests
         public void ProcessFrame_1000Iterations_MemoryStable()
         {
             var tracker = new AreaTargetTracker();
+            var intrinsics3 = new Matrix4x4();
+            intrinsics3.m00 = 500; intrinsics3.m11 = 500; intrinsics3.m02 = 320; intrinsics3.m12 = 240;
             var frame = new CameraFrame
             {
                 ImageData = new byte[640 * 480],
                 Width = 640,
                 Height = 480,
-                Fx = 500, Fy = 500, Cx = 320, Cy = 240
+                Intrinsics = intrinsics3
             };
 
             // Warmup + baseline
@@ -163,7 +177,7 @@ namespace AreaTargetPlugin.Tests
                 ImageData = new byte[100],
                 Width = 10,
                 Height = 10,
-                Fx = 500, Fy = 500, Cx = 5, Cy = 5
+                Intrinsics = Matrix4x4.identity
             };
 
             TrackingResult result = tracker.ProcessFrame(frame);

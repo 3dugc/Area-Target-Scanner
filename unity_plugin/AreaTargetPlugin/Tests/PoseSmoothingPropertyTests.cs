@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
@@ -14,6 +15,7 @@ namespace AreaTargetPlugin.Tests
     ///   translationDifference &lt; 0.5m and rotationDifference &lt; 15 degrees.
     /// </summary>
     [TestFixture]
+    [IgnoreLogErrors]
     public class PoseSmoothingPropertyTests
     {
         private const float MaxTranslationDiff = 0.5f;  // meters

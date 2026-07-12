@@ -68,7 +68,8 @@ final class ScanDataExporter {
         intrinsics: CameraIntrinsics,
         images: [CapturedImage],
         meshAnchors: [ARMeshAnchor] = [],
-        outputPath: String
+        outputPath: String,
+        onProgress: ((String) -> Void)? = nil
     ) throws {
         let fileManager = FileManager.default
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -77,32 +78,50 @@ final class ScanDataExporter {
         try createDirectoryIfNeeded(at: outputURL, fileManager: fileManager)
 
         // Write all components
+        onProgress?("正在导出点云 (\(vertices.count) 点)...")
         try writePLY(vertices: vertices, to: outputURL.appendingPathComponent("pointcloud.ply"))
+
+        onProgress?("正在导出相机位姿 (\(poses.count) 帧)...")
         try writePosesJSON(poses: poses, to: outputURL.appendingPathComponent("poses.json"))
+
+        onProgress?("正在导出相机参数...")
         try writeIntrinsicsJSON(intrinsics: intrinsics, to: outputURL.appendingPathComponent("intrinsics.json"))
+
+        onProgress?("正在导出关键帧图像 (\(images.count) 张)...")
         try writeImages(images: images, to: outputURL.appendingPathComponent("images"))
 
         // Export 3D mesh model (OBJ + USDA) if mesh data is available
         if !meshAnchors.isEmpty {
+            onProgress?("正在导出基础网格模型 (\(meshAnchors.count) 个mesh)...")
             try? MeshExporter.export(meshAnchors: meshAnchors, to: outputPath)
         }
 
         // Textured mesh export: runs after untextured export so textured OBJ overwrites untextured one on success
         if !meshAnchors.isEmpty && !images.isEmpty {
             do {
+                onProgress?("正在合并网格...")
                 let pipeline = TextureMappingPipeline()
                 let texturedMesh = try pipeline.generateTexturedMesh(
                     meshAnchors: meshAnchors,
                     cameraPoses: poses,
                     images: images,
                     intrinsics: intrinsics,
-                    atlasSize: 4096
+                    atlasSize: 4096,
+                    onProgress: onProgress
                 )
+                onProgress?("正在导出纹理OBJ...")
                 try TexturedMeshExporter.exportOBJ(mesh: texturedMesh, to: outputPath)
-                try? TexturedMeshExporter.exportUSDZ(mesh: texturedMesh, to: outputPath)
+                onProgress?("正在导出USDZ...")
+                do {
+                    try TexturedMeshExporter.exportUSDZ(mesh: texturedMesh, to: outputPath)
+                    print("[ScanDataExporter] ✅ USDZ exported successfully")
+                } catch {
+                    print("[ScanDataExporter] ⚠️ USDZ export failed: \(error.localizedDescription), OBJ+texture still available")
+                }
+                print("[ScanDataExporter] ✅ Textured mesh exported successfully")
             } catch {
                 // Texture mapping failed — fall back to untextured mesh export (already done above)
-                print("[ScanDataExporter] Texture mapping failed: \(error.localizedDescription). Using untextured mesh.")
+                print("[ScanDataExporter] ⚠️ Texture mapping failed: \(error.localizedDescription). Using untextured mesh.")
             }
         }
     }

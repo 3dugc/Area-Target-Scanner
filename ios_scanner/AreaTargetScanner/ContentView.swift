@@ -9,6 +9,12 @@ struct ActivityView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
+/// Identifiable wrapper for immutable share payloads.
+struct SharePayload: Identifiable {
+    let id = UUID()
+    let activityItems: [Any]
+}
+
 /// Identifiable wrapper for URL so we can use fullScreenCover(item:)
 struct IdentifiableURL: Identifiable {
     let id = UUID()
@@ -17,9 +23,18 @@ struct IdentifiableURL: Identifiable {
 
 struct ContentView: View {
     @StateObject private var viewModel = ScanViewModel()
-    @State private var showShareSheet = false
-    @State private var shareItems: [Any] = []
+    @State private var sharePayload: SharePayload? = nil
     @State private var previewItem: IdentifiableURL? = nil
+
+    #if DEBUG
+    private var isDebugDiagnosticsEnabled: Bool {
+        let processInfo = ProcessInfo.processInfo
+        return processInfo.arguments.contains("-ModelPreviewDebug")
+            || processInfo.arguments.contains("-ScannerDebug")
+            || processInfo.environment["MODEL_PREVIEW_DEBUG"] == "1"
+            || processInfo.environment["SCANNER_DEBUG"] == "1"
+    }
+    #endif
 
     var body: some View {
         ZStack {
@@ -46,11 +61,13 @@ struct ContentView: View {
                 previewView(exportPath: path)
             case .error(let message):
                 errorView(message: message)
+            case .history:
+                ScanHistoryView(viewModel: viewModel)
             }
         }
         .onAppear { viewModel.checkCameraPermission() }
-        .sheet(isPresented: $showShareSheet) {
-            ActivityView(activityItems: shareItems)
+        .sheet(item: $sharePayload) { payload in
+            ActivityView(activityItems: payload.activityItems)
         }
         .fullScreenCover(item: $previewItem) { item in
             ModelPreviewView(fileURL: item.url)
@@ -89,11 +106,19 @@ struct ContentView: View {
             Text("Area Target Scanner").font(.largeTitle.weight(.semibold)).foregroundStyle(.white)
             Text("v6 — 纹理采样修复版").font(.body).foregroundStyle(.white.opacity(0.6))
             Spacer()
-            Button(action: { viewModel.startScanning() }) {
-                Label("开始扫描", systemImage: "record.circle")
-                    .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity).padding(.vertical, 14)
-            }.buttonStyle(.borderedProminent).tint(.red)
+            VStack(spacing: 12) {
+                Button(action: { viewModel.startScanning() }) {
+                    Label("开始扫描", systemImage: "record.circle")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                }.buttonStyle(.borderedProminent).tint(.red)
+
+                Button(action: { viewModel.showHistory() }) {
+                    Label("扫描历史", systemImage: "clock.arrow.circlepath")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                }.buttonStyle(.bordered).tint(.white)
+            }
             .padding(.horizontal, 40).padding(.bottom, 40)
         }
     }
@@ -136,20 +161,23 @@ struct ContentView: View {
 
                 Text("处理完成").font(.title2.weight(.semibold)).foregroundStyle(.white)
 
-                // DEBUG info
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("DEBUG 导出路径:").font(.caption.weight(.bold)).foregroundStyle(.yellow)
-                    Text(exportPath).font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.8))
-                    Text("DEBUG 文件 (\(files.count)):").font(.caption.weight(.bold)).foregroundStyle(.yellow)
-                    ForEach(files, id: \.self) { file in
-                        Text("  • \(file)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.8))
+                #if DEBUG
+                if isDebugDiagnosticsEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("DEBUG 导出路径:").font(.caption.weight(.bold)).foregroundStyle(.yellow)
+                        Text(exportPath).font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.8))
+                        Text("DEBUG 文件 (\(files.count)):").font(.caption.weight(.bold)).foregroundStyle(.yellow)
+                        ForEach(files, id: \.self) { file in
+                            Text("  • \(file)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.8))
+                        }
+                        Text("DEBUG 模型:").font(.caption.weight(.bold)).foregroundStyle(.yellow)
+                        Text(foundModel?.lastPathComponent ?? "nil")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(foundModel != nil ? .green : .red)
                     }
-                    Text("DEBUG 模型:").font(.caption.weight(.bold)).foregroundStyle(.yellow)
-                    Text(foundModel?.lastPathComponent ?? "nil")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(foundModel != nil ? .green : .red)
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
+                #endif
 
                 VStack(spacing: 12) {
                     Button(action: {
@@ -167,8 +195,7 @@ struct ContentView: View {
                     Button(action: {
                         let urls = viewModel.shareURLs(for: exportPath)
                         if !urls.isEmpty {
-                            shareItems = urls
-                            showShareSheet = true
+                            sharePayload = SharePayload(activityItems: urls)
                         }
                     }) {
                         Label("分享", systemImage: "square.and.arrow.up")

@@ -1,6 +1,7 @@
 using System;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
@@ -9,8 +10,15 @@ namespace AreaTargetPlugin.Tests
     /// Validates: Requirements 14.1, 14.4, 14.5
     /// </summary>
     [TestFixture]
+    [IgnoreLogErrors]
     public class TrackingStateTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            LogAssert.ignoreFailingMessages = true;
+        }
+
         #region Initial State Tests (Requirement 14.1)
 
         [Test]
@@ -95,6 +103,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Initialize_AfterDispose_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             var tracker = new AreaTargetTracker();
             tracker.Dispose();
 

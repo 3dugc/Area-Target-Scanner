@@ -2,7 +2,10 @@
   "name": "AreaTargetPlugin.Tests",
   "rootNamespace": "AreaTargetPlugin.Tests",
   "references": [
-    "AreaTargetPlugin.Runtime"
+    "AreaTargetPlugin.Runtime",
+    "AreaTargetTest",
+    "Gilzoide.SqliteNet",
+    "VideoPlaybackTestScene"
   ],
   "includePlatforms": [
     "Editor"
@@ -11,13 +14,7 @@
   "allowUnsafeCode": false,
   "overrideReferences": true,
   "precompiledReferences": [
-    "nunit.framework.dll",
-    "FsCheck.dll",
-    "FsCheck.NUnit.dll",
-    "Microsoft.Data.Sqlite.dll",
-    "SQLitePCLRaw.core.dll",
-    "SQLitePCLRaw.batteries_v2.dll",
-    "SQLitePCLRaw.provider.e_sqlite3.dll"
+    "nunit.framework.dll"
   ],
   "autoReferenced": false,
   "defineConstraints": [

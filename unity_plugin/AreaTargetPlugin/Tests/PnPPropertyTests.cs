@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
@@ -13,6 +14,7 @@ namespace AreaTargetPlugin.Tests
     /// validates ComposePoseMatrix output properties.
     /// </summary>
     [TestFixture]
+    [IgnoreLogErrors]
     public class PnPPropertyTests
     {
         private const float Fx = 500f;

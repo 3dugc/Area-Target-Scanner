@@ -13,12 +13,9 @@ import inspect
 import io
 import os
 import re
-import tempfile
 import time
-import zipfile
 
 import numpy as np
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -418,15 +415,9 @@ class TestBug10KMeansNInit:
 
         source = inspect.getsource(build_feature_database)
 
-        # Find n_init value in KMeans constructor call
-        match = re.search(r"n_init\s*=\s*(\d+)", source)
-        assert match is not None, "n_init parameter not found in KMeans call"
-
-        n_init_value = int(match.group(1))
-        assert n_init_value == 3, (
-            f"KMeans n_init={n_init_value}, expected 3. "
-            f"Bug confirmed: n_init is too large for ORB binary descriptors."
-        )
+        signature = inspect.signature(build_feature_database)
+        assert signature.parameters["kmeans_n_init"].default == 3
+        assert "n_init=kmeans_n_init" in source
 
 
 # ---------------------------------------------------------------------------
@@ -458,13 +449,18 @@ class TestBug11NPlusOneQuery:
         with open(cs_path, "r") as f:
             source = f.read()
 
-        # Look for the N+1 pattern: a foreach/for loop containing a
-        # SELECT ... WHERE keyframe_id query
-        # The buggy code has: foreach (var kf in _keyframes) { ... SELECT ... WHERE keyframe_id = @kfId ... }
-        has_n_plus_1 = bool(re.search(
-            r"foreach\s*\(.*_keyframes.*\).*?SELECT.*?keyframe_id",
+        load_keyframes = re.search(
+            r"private void LoadKeyframes\(SQLiteConnection conn\)(.*?)"
+            r"private void LoadVocabulary",
             source,
             re.DOTALL,
+        )
+        assert load_keyframes is not None, "LoadKeyframes method not found"
+        method_source = load_keyframes.group(1)
+        has_n_plus_1 = bool(re.search(
+            r"SELECT.*?FROM features.*?WHERE\s+keyframe_id",
+            method_source,
+            re.DOTALL | re.IGNORECASE,
         ))
 
         assert not has_n_plus_1, (

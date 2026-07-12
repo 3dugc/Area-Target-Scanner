@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"/>
-  <img src="https://img.shields.io/badge/unity-6000.0%2B-green" alt="Unity 6+"/>
+  <img src="https://img.shields.io/badge/python-3.11-blue" alt="Python 3.11"/>
+  <img src="https://img.shields.io/badge/unity-6000.4-green" alt="Unity 6000.4"/>
   <img src="https://img.shields.io/badge/iOS-16%2B-orange" alt="iOS 16+"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-lightgrey" alt="License"/>
   <img src="https://github.com/area-target-scanner/area-target-scanner/actions/workflows/ci.yml/badge.svg" alt="CI"/>
@@ -37,6 +37,21 @@ You know how Vuforia lets you scan a physical space and then do AR stuff relativ
 3. **Track** the area in real-time inside Unity with 6DoF pose estimation
 
 No cloud uploads. No API keys. No "please contact sales." Just code.
+
+## Phase 0 verified support
+
+The repository contains work for more platforms than the Phase 0 commercial baseline actually verifies. Version `1.2.1` has the following support boundary:
+
+| Target | Phase 0 status |
+|---|---|
+| macOS development build | Verified baseline |
+| iOS Scanner generic-device build | Verified baseline |
+| iOS localizer archive | Static architecture and symbol verification only |
+| Rokid AR Studio | Planned for Phase 2; not supported in Phase 0 |
+| Android ARM64 | Planned for Phase 2; not supported in Phase 0 |
+| Windows/Linux runtime | Not supported; empty placeholders were removed |
+
+The local baseline was verified with Python 3.11.12, OpenCV 4.13.0, Unity 6000.4.6f1, Xcode 26.2, CMake and Docker Desktop. The rollback baseline is commit `81d815f`.
 
 ## Quickstart
 
@@ -94,8 +109,8 @@ if (result.State == TrackingState.TRACKING) {
 | Step | What Happens | Tech |
 |------|-------------|------|
 | **Input Validation** | Verify scan ZIP contains mesh, poses, images | — |
-| **Model Optimization** | Simplify & optimize the 3D mesh | [3D-Model-Optimizer](https://github.com/nicedoc/3d-model-optimizer) |
-| **Feature Extraction** | Extract ORB features, build BoW vocabulary, compute 3D-2D correspondences | OpenCV, scikit-learn |
+| **Model Optimization** | Simplify & optimize the 3D mesh | [3D-Model-Optimizer](https://github.com/3dugc/3D-Model-Optimizer) |
+| **Feature Extraction** | Extract ORB + AKAZE features, build BoW vocabulary, compute 3D-2D correspondences | OpenCV, scikit-learn |
 | **Asset Bundling** | Package mesh + texture + feature DB + manifest into a deployable bundle | SQLite, trimesh |
 
 ### The Tracker (runs in Unity at 60fps)
@@ -105,7 +120,9 @@ The Unity plugin performs visual localization each frame:
 1. Extract ORB features from the camera image
 2. Retrieve candidate keyframes via Bag-of-Words similarity
 3. Match descriptors and solve PnP for 6DoF pose
-4. Smooth with a Kalman filter for stable tracking
+4. If ORB matching fails, fall back to AKAZE feature matching for robustness
+5. Apply temporal consistency filter to reject outlier poses
+6. Smooth with a Kalman filter for stable tracking
 
 No GPU compute shaders. No ML models. Just good old-fashioned computer vision that works on a potato.
 
@@ -154,28 +171,40 @@ asset_bundle/
 └── features.db        # SQLite DB with ORB features + BoW vocabulary
 ```
 
-**Dependencies:** Python 3.10+, Open3D, OpenCV, NumPy, scikit-learn, trimesh
+**Dependencies:** Python 3.11, Open3D, OpenCV 4.x, NumPy, scikit-learn, trimesh
 
 ## Unity Plugin
 
-A UPM package (`com.areatarget.tracking` v1.2.0) that provides:
+A UPM package (`com.areatarget.tracking` v1.2.1) that provides:
 
 - `AreaTargetTracker` — main tracking interface
-- `VisualLocalizationEngine` — ORB + BoW + PnP pipeline
+- `VisualLocalizationEngine` — ORB + AKAZE + BoW + PnP pipeline
 - `KalmanPoseFilter` — 6DoF pose smoothing
 - `AssetBundleLoader` — loads and validates asset bundles
 - `FeatureDatabaseReader` — reads the SQLite feature DB
-- AR Foundation integration for iOS/Android
+- `AlignmentTransformCalculator` — coordinate system alignment between scan and AR session
+- `ExtendedDebugInfo` — real-time pipeline diagnostics (feature counts, match stats, AKAZE fallback status)
+- AR Foundation integration; Phase 0 validates the iOS baseline only
 
 **Requirements:** Unity 6000.0+, AR Foundation 6.0+
 
 ### Native Visual Localizer
 
-For production performance, the plugin includes an optional C++ native library (`libvisual_localizer`) that replaces the managed C# localization path. Built with CMake, supports macOS/Windows/Linux/iOS/Android.
+For production performance, the plugin includes an optional C++ native library (`libvisual_localizer`) that replaces the managed C# localization path. Phase 0 verifies the macOS arm64 build and statically checks the existing iOS arm64 archive. Android ARM64, Rokid, Windows, and Linux runtime support are not part of this baseline.
+
+Key capabilities:
+- ORB + BoW visual localization with PnP RANSAC
+- AKAZE fallback when ORB matching is insufficient
+- Temporal consistency filter to reject outlier frames
+- Coordinate system alignment transform support
+- Debug diagnostics API (`vl_get_debug_info`) for real-time pipeline introspection
 
 ```bash
 # Build on macOS
 cd native_visual_localizer && bash build_macos.sh
+
+# Build for iOS (produces libvisual_localizer.a)
+cd native_visual_localizer && bash build_ios.sh
 ```
 
 ## Web UI
@@ -196,8 +225,18 @@ The web service runs Flask + the processing pipeline in Docker, with a separate 
 This project is thoroughly tested because we believe in sleeping well at night.
 
 ```bash
+# Complete release gate (Python, Docker, native, Xcode, Unity and UPM)
+tools/phase0/verify.sh local
+
 # Python pipeline tests
-python -m pytest tests/ -v
+pip install -r requirements-dev.txt
+python -m pytest tests/ -v --tb=short
+
+# Reproducible UPM package
+python3 tools/phase0/build_upm_package.py
+
+# Unity EditMode plus clean UPM installation
+tools/phase0/validate_unity_package.sh
 
 # Unity plugin tests (in Unity Editor)
 # Window → General → Test Runner → EditMode → Run All
@@ -206,7 +245,13 @@ python -m pytest tests/ -v
 # Product → Test (⌘U)
 ```
 
-The test suite includes unit tests, integration tests, property-based tests (Hypothesis), and performance benchmarks.
+The test suite includes unit tests, integration tests, property-based tests (Hypothesis), cross-session localization tests, and performance benchmarks.
+
+## Documentation
+
+- [Async Localization Design](docs/async-localization-design.md) — architecture for non-blocking localization
+- [Cross-Session Comparison Report](docs/cross-session-comparison-report.md) — localization accuracy across different scan sessions
+- [iOS Device Test Guide](docs/ios-device-test-guide.md) — step-by-step guide for on-device testing
 
 ## Project Structure
 
@@ -214,26 +259,30 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 .
 ├── ios_scanner/              # Swift — LiDAR scanning app
 ├── processing_pipeline/      # Python — scan → asset bundle
-├── native_visual_localizer/  # C++ — high-perf visual localization
+├── native_visual_localizer/  # C++ — macOS build + iOS archive baseline
 ├── unity_plugin/             # C# — Unity AR tracking package
 ├── unity_project/            # Unity test project
 ├── web_service/              # Flask — drag-and-drop web UI
-├── tests/                    # Python test suite
+├── tests/                    # Python test suite (unit + property-based + cross-session)
+├── docs/                     # Design docs & test reports
 ├── docker-compose.yml        # One-command deployment
 └── GUIDE.md                  # Detailed setup & usage guide (中文)
 ```
 
-## vs. Vuforia Area Targets
+## vs. Vuforia / Immersal
 
-| | Vuforia | This Project |
-|---|---------|-------------|
-| Pricing | 💰 Commercial license | Free (Apache 2.0) |
-| Cloud dependency | Required for scan processing | Fully offline |
-| Data ownership | Uploaded to PTC servers | Stays on your machine |
-| Customizable | Nope | Fork it, break it, fix it |
-| LiDAR scanning | Via Vuforia app | Native Swift app included |
-| Unity integration | Proprietary SDK | Open UPM package |
-| Tracking quality | Production-grade | Good enough™ (and improving) |
+| | Vuforia | Immersal | This Project |
+|---|---------|---------|-------------|
+| Pricing | 💰 Commercial license | 💰 Free tier + paid plans | Free (Apache 2.0) |
+| Cloud dependency | Required for scan processing | Required (cloud mapping) | Fully offline |
+| Data ownership | Uploaded to PTC servers | Uploaded to Immersal cloud | Stays on your machine |
+| Customizable | Nope | Nope | Fork it, break it, fix it |
+| LiDAR scanning | Via Vuforia app | Via Immersal SDK | Native Swift app included |
+| Unity integration | Proprietary SDK | Proprietary SDK | Open UPM package |
+| Tracking quality | Production-grade | Production-grade | Good enough™ (and improving) |
+| Multi-feature fallback | ORB only | Proprietary | ORB + AKAZE dual-feature pipeline |
+| Cross-session support | Limited | Yes (cloud-merged maps) | Built-in cross-session localization |
+| Offline mapping | No | No | Yes |
 
 ## Contributing
 

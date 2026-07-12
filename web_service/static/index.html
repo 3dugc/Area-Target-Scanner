@@ -22,6 +22,16 @@ input[type="file"] { display: none; }
   <h1>📐 Area Target 处理管线</h1>
   <p class="subtitle">上传扫描 ZIP 文件，自动执行点云→网格→纹理→特征→资产导出</p>
 
+  <div class="option-row" style="margin-bottom:1rem;">
+    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.9rem;color:#cbd5e1;">
+      <input type="checkbox" id="uvUnwrapCheck" style="width:18px;height:18px;accent-color:#3b82f6;cursor:pointer;">
+      启用 UV 纹理展开 (xatlas)
+    </label>
+    <p style="color:#64748b;font-size:0.75rem;margin-top:0.25rem;margin-left:1.6rem;">
+      iPad 扫描的纹理未展开时勾选此项，服务端将使用 xatlas 重新展开 UV 并投影纹理（耗时较长）
+    </p>
+  </div>
+
   <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
     <div class="upload-icon">📁</div>
     <p>点击或拖拽 ZIP 文件到此处</p>
@@ -63,11 +73,14 @@ fileInput.addEventListener('change', () => { if(fileInput.files.length) uploadFi
 async function uploadFile(file) {
   if(!file.name.endsWith('.zip')) { alert('请上传 ZIP 文件'); return; }
   dropZone.style.display = 'none';
+  document.querySelector('.option-row').style.display = 'none';
   jobPanel.style.display = 'block';
   statusMsg.textContent = '正在上传...';
 
+  const uvUnwrap = document.getElementById('uvUnwrapCheck').checked;
   const fd = new FormData();
   fd.append('file', file);
+  fd.append('uv_unwrap', uvUnwrap ? '1' : '0');
   try {
     const res = await fetch('/api/upload', { method: 'POST', body: fd });
     const data = await res.json();

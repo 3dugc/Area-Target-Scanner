@@ -1,4 +1,4 @@
-"""REST API client for the 3D-Model-Optimizer service."""
+"""REST API client for the 3D-Model-Optimizer service (https://github.com/3dugc/3D-Model-Optimizer)."""
 
 from __future__ import annotations
 

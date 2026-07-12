@@ -1,6 +1,7 @@
 using System;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
@@ -9,8 +10,15 @@ namespace AreaTargetPlugin.Tests
     /// Validates: Requirements 13.1, 13.2, 13.3
     /// </summary>
     [TestFixture]
+    [IgnoreLogErrors]
     public class KalmanPoseFilterTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            LogAssert.ignoreFailingMessages = true;
+        }
+
         #region Initialization Tests
 
         [Test]

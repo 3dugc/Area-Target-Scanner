@@ -1,6 +1,10 @@
 <linker>
-  <assembly fullname="Microsoft.Data.Sqlite" preserve="all"/>
-  <assembly fullname="SQLitePCLRaw.core" preserve="all"/>
-  <assembly fullname="SQLitePCLRaw.batteries_v2" preserve="all"/>
-  <assembly fullname="SQLitePCLRaw.provider.e_sqlite3" preserve="all"/>
+  <assembly fullname="UnityEngine.UI" preserve="all"/>
+  <assembly fullname="Unity.InputSystem" preserve="all"/>
+  <assembly fullname="UnityEngine.InputLegacyModule" preserve="all"/>
+  <assembly fullname="UnityEngine.ARFoundation" preserve="all"/>
+  <assembly fullname="Unity.XR.ARFoundation" preserve="all"/>
+  <assembly fullname="Unity.XR.ARSubsystems" preserve="all"/>
+  <assembly fullname="SQLite-net" preserve="all"/>
+  <assembly fullname="AreaTargetPlugin" preserve="all"/>
 </linker>

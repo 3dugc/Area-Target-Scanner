@@ -1,6 +1,7 @@
 using System;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
@@ -9,8 +10,15 @@ namespace AreaTargetPlugin.Tests
     /// Validates: handle lifecycle, NULL safety, struct marshalling, error recovery.
     /// </summary>
     [TestFixture]
+    [IgnoreLogErrors]
     public class NativeLocalizerBridgeTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            LogAssert.ignoreFailingMessages = true;
+        }
+
         #region Handle Lifecycle
 
         [Test]
@@ -71,7 +79,7 @@ namespace AreaTargetPlugin.Tests
         public void ProcessFrame_NullHandle_ReturnsLost()
         {
             byte[] img = new byte[100];
-            VLResult result = NativeLocalizerBridge.vl_process_frame(
+            VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 IntPtr.Zero, img, 10, 10, 500, 500, 5, 5, 0, null);
             Assert.AreEqual(2, result.state); // LOST
         }
@@ -93,7 +101,7 @@ namespace AreaTargetPlugin.Tests
             NativeLocalizerBridge.vl_build_index(handle);
 
             byte[] img = new byte[64 * 64];
-            VLResult result = NativeLocalizerBridge.vl_process_frame(
+            VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 handle, img, 64, 64, 500, 500, 32, 32, 0, null);
 
             Assert.AreEqual(2, result.state);
@@ -171,7 +179,7 @@ namespace AreaTargetPlugin.Tests
             byte[] img = new byte[320 * 240];
             for (int i = 0; i < 50; i++)
             {
-                VLResult result = NativeLocalizerBridge.vl_process_frame(
+                VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                     handle, img, 320, 240, 500, 500, 160, 120, 0, null);
                 Assert.AreEqual(2, result.state);
             }
@@ -186,9 +194,9 @@ namespace AreaTargetPlugin.Tests
             NativeLocalizerBridge.vl_build_index(handle);
 
             byte[] img = new byte[64 * 64];
-            NativeLocalizerBridge.vl_process_frame(handle, img, 64, 64, 500, 500, 32, 32, 0, null);
+            NativeLocalizerBridge.ProcessFrameSafe(handle, img, 64, 64, 500, 500, 32, 32, 0, null);
             NativeLocalizerBridge.vl_reset(handle);
-            VLResult result = NativeLocalizerBridge.vl_process_frame(
+            VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 handle, img, 64, 64, 500, 500, 32, 32, 0, null);
             Assert.AreEqual(2, result.state);
 
@@ -204,17 +212,15 @@ namespace AreaTargetPlugin.Tests
         {
             IntPtr handle = NativeLocalizerBridge.vl_create();
 
-            // Add data, build, process
             byte[] vocab = new byte[32];
             NativeLocalizerBridge.vl_add_vocabulary_word(handle, 0, vocab, 32, 1.0f);
             NativeLocalizerBridge.vl_build_index(handle);
 
             byte[] img = new byte[64 * 64];
-            NativeLocalizerBridge.vl_process_frame(handle, img, 64, 64, 500, 500, 32, 32, 0, null);
+            NativeLocalizerBridge.ProcessFrameSafe(handle, img, 64, 64, 500, 500, 32, 32, 0, null);
 
-            // Reset and process again
             NativeLocalizerBridge.vl_reset(handle);
-            VLResult result = NativeLocalizerBridge.vl_process_frame(
+            VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 handle, img, 64, 64, 500, 500, 32, 32, 0, null);
             Assert.AreEqual(2, result.state);
 
@@ -229,7 +235,7 @@ namespace AreaTargetPlugin.Tests
 
             byte[] img = new byte[64 * 64];
             float[] lastPose = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 3, 0, 0, 0, 1 };
-            VLResult result = NativeLocalizerBridge.vl_process_frame(
+            VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 handle, img, 64, 64, 500, 500, 32, 32, 1, lastPose);
             Assert.AreEqual(2, result.state);
 

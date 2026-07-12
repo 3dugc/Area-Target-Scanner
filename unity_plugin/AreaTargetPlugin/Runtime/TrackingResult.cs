@@ -18,5 +18,8 @@ namespace AreaTargetPlugin
 
         /// <summary>Number of matched feature points used for pose estimation.</summary>
         public int MatchedFeatures;
+
+        /// <summary>定位质量等级（默认 NONE）。</summary>
+        public LocalizationQuality Quality;
     }
 }

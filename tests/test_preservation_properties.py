@@ -9,17 +9,13 @@ Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
 
 from __future__ import annotations
 
-import inspect
 import os
-import sqlite3
 import tempfile
-import time
 import zipfile
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
-from hypothesis import given, settings, HealthCheck, assume
+from hypothesis import given, settings, HealthCheck
 from hypothesis import strategies as st
 
 
@@ -458,7 +454,6 @@ class TestPipelineFinalProgressState:
                 _trimesh_mod, "Scene", new=type("_FakeScene", (), {})
             ):
 
-                import shutil
                 output_dir = os.path.join(
                     os.environ.get("OUTPUT_DIR", "/tmp/pipeline_outputs"),
                     job_id,

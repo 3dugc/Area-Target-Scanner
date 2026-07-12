@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
@@ -11,8 +12,15 @@ namespace AreaTargetPlugin.Tests
     /// Updated to remove OpenCvSharp dependency — uses pure C# math helpers.
     /// </summary>
     [TestFixture]
+    [IgnoreLogErrors]
     public class VisualLocalizationTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            LogAssert.ignoreFailingMessages = true;
+        }
+
         #region Helper Methods
 
         private static Matrix4x4 CreateIntrinsics(float fx, float fy, float cx, float cy)

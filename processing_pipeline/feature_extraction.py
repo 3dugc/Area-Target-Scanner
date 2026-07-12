@@ -19,6 +19,7 @@ _POPCOUNT_TABLE = np.array([bin(i).count("1") for i in range(256)], dtype=np.int
 def _hamming_word_assignment(
     descriptors: np.ndarray,
     vocabulary_medoids: np.ndarray,
+    batch_size: int = 2048,
 ) -> np.ndarray:
     """Assign visual words to descriptors using Hamming distance.
 
@@ -35,26 +36,54 @@ def _hamming_word_assignment(
     descriptors = np.asarray(descriptors, dtype=np.uint8)
     vocabulary_medoids = np.asarray(vocabulary_medoids, dtype=np.uint8)
 
-    # 广播 XOR: (N, 1, D) ^ (1, K, D) → (N, K, D)
-    xor = np.bitwise_xor(
-        descriptors[:, np.newaxis, :],
-        vocabulary_medoids[np.newaxis, :, :],
-    )
-    # Popcount via lookup: (N, K, D) → (N, K)
-    dists = _POPCOUNT_TABLE[xor].sum(axis=2)
-    return dists.argmin(axis=1).astype(np.intp)
+    labels = np.empty(len(descriptors), dtype=np.intp)
+    batch_size = max(1, int(batch_size))
+    for start in range(0, len(descriptors), batch_size):
+        end = min(start + batch_size, len(descriptors))
+        # 广播 XOR: (B, 1, D) ^ (1, K, D) → (B, K, D)
+        xor = np.bitwise_xor(
+            descriptors[start:end, np.newaxis, :],
+            vocabulary_medoids[np.newaxis, :, :],
+        )
+        # Popcount via lookup: (B, K, D) → (B, K)
+        dists = _POPCOUNT_TABLE[xor].sum(axis=2)
+        labels[start:end] = dists.argmin(axis=1).astype(np.intp)
+    return labels
+
+
+def _limit_keyframes_evenly(images: List[dict], max_keyframes: int | None):
+    indexed_images = list(enumerate(images))
+    if max_keyframes is None or len(indexed_images) <= max_keyframes:
+        return indexed_images
+    indices = np.linspace(0, len(indexed_images) - 1, max_keyframes)
+    selected = sorted({int(round(i)) for i in indices})
+    return [indexed_images[i] for i in selected[:max_keyframes]]
 
 
 def build_feature_database(
     images: List[dict],
     mesh: o3d.geometry.TriangleMesh,
     intrinsics: dict | None = None,
+    extract_akaze: bool = True,
+    orb_nfeatures: int = 2000,
+    bow_k: int = 1000,
+    max_keyframes: int | None = None,
+    use_minibatch_kmeans: bool = False,
+    kmeans_batch_size: int = 4096,
+    kmeans_n_init: int = 3,
+    kmeans_max_iter: int = 300,
+    assignment_batch_size: int = 2048,
 ) -> FeatureDatabase:
     """Extract ORB features from keyframes and build a visual feature database.
 
     For each keyframe image, extracts up to 2000 ORB features, back-projects
     2D keypoints to 3D via ray-mesh intersection, and stores valid
     correspondences. Keyframes with fewer than 20 valid features are skipped.
+
+    When ``extract_akaze`` is True, additionally extracts AKAZE features for
+    each keyframe using ``cv2.AKAZE_create()``, and obtains 3D points via the
+    same ray-mesh intersection pipeline. AKAZE data is stored in the
+    KeyframeData's ``akaze_*`` fields.
 
     After processing all keyframes, builds a visual Bag-of-Words (BoW)
     vocabulary using K-Means clustering (K=min(1000, n_descriptors)) on all
@@ -67,6 +96,8 @@ def build_feature_database(
         mesh: Triangle mesh used for ray-casting.
         intrinsics: Optional dict with ``fx``, ``fy``, ``cx``, ``cy`` keys.
             If *None*, intrinsics are estimated from image dimensions.
+        extract_akaze: If True (default), additionally extract AKAZE features
+            for each keyframe and store in akaze_* fields.
 
     Returns:
         Populated feature database with keyframes, vocabulary (uint8 medoids),
@@ -80,8 +111,16 @@ def build_feature_database(
 
     logger = logging.getLogger(__name__)
 
-    # --- Step 1: Create ORB detector ---
-    orb = cv2.ORB_create(nfeatures=2000)
+    try:
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
+
+    selected_images = _limit_keyframes_evenly(images, max_keyframes)
+
+    # --- Step 1: Create ORB detector (+ AKAZE if requested) ---
+    orb = cv2.ORB_create(nfeatures=orb_nfeatures)
+    akaze = cv2.AKAZE_create() if extract_akaze else None
 
     # --- Step 2: Prepare ray-casting scene from mesh ---
     scene = o3d.t.geometry.RaycastingScene()
@@ -92,7 +131,7 @@ def build_feature_database(
 
     keyframes: List[KeyframeData] = []
 
-    for idx, img_info in enumerate(images):
+    for idx, img_info in selected_images:
         img_path = img_info["path"]
         pose = np.asarray(img_info["pose"], dtype=np.float64)
 
@@ -195,9 +234,76 @@ def build_feature_database(
             idx, img_path, len(valid_keypoints),
         )
 
+        # --- Step 2e: Extract AKAZE features (if requested) ---
+        if akaze is not None:
+            akaze_kps, akaze_descs = akaze.detectAndCompute(img_gray, None)
+
+            if akaze_descs is not None and len(akaze_kps) > 0:
+                # 构建 AKAZE 关键点的射线，复用相同的 intrinsics 和 pose
+                akaze_rays_list = []
+                for kp in akaze_kps:
+                    px, py = kp.pt
+                    x_cam = (px - cx) / fx
+                    y_cam = (py - cy) / fy
+                    dir_cam = np.array([x_cam, -y_cam, -1.0])
+                    dir_cam = dir_cam / np.linalg.norm(dir_cam)
+                    origin_world = t
+                    dir_world = R @ dir_cam
+                    akaze_rays_list.append([
+                        origin_world[0], origin_world[1], origin_world[2],
+                        dir_world[0], dir_world[1], dir_world[2],
+                    ])
+
+                akaze_rays_tensor = o3d.core.Tensor(
+                    np.array(akaze_rays_list, dtype=np.float32),
+                    dtype=o3d.core.float32,
+                )
+                akaze_result = scene.cast_rays(akaze_rays_tensor)
+                akaze_t_hit = akaze_result["t_hit"].numpy()
+
+                # 过滤有效交点的 AKAZE 特征
+                akaze_valid_kps: List[tuple[float, float]] = []
+                akaze_valid_descs: List[np.ndarray] = []
+                akaze_valid_pts3d: List[tuple[float, float, float]] = []
+
+                for j, kp in enumerate(akaze_kps):
+                    if np.isinf(akaze_t_hit[j]) or akaze_t_hit[j] <= 0:
+                        continue
+                    ray = np.array(akaze_rays_list[j], dtype=np.float64)
+                    origin = ray[:3]
+                    direction = ray[3:]
+                    hit_point = origin + akaze_t_hit[j] * direction
+
+                    akaze_valid_kps.append((kp.pt[0], kp.pt[1]))
+                    akaze_valid_descs.append(akaze_descs[j])
+                    akaze_valid_pts3d.append(
+                        (float(hit_point[0]), float(hit_point[1]), float(hit_point[2]))
+                    )
+
+                if akaze_valid_kps:
+                    keyframe.akaze_keypoints = akaze_valid_kps
+                    keyframe.akaze_descriptors = np.array(
+                        akaze_valid_descs, dtype=np.uint8
+                    )
+                    keyframe.akaze_points_3d = akaze_valid_pts3d
+                    logger.info(
+                        "Image %d (%s): %d valid AKAZE features extracted.",
+                        idx, img_path, len(akaze_valid_kps),
+                    )
+                else:
+                    logger.info(
+                        "Image %d (%s): no valid AKAZE features (all rays missed mesh).",
+                        idx, img_path,
+                    )
+            else:
+                logger.info(
+                    "Image %d (%s): AKAZE detected no features.",
+                    idx, img_path,
+                )
+
     logger.info(
-        "Feature database built: %d keyframes out of %d images.",
-        len(keyframes), len(images),
+        "Feature database built: %d keyframes out of %d selected images (%d total).",
+        len(keyframes), len(selected_images), len(images),
     )
 
     if len(keyframes) == 0 and len(images) > 0:
@@ -217,18 +323,40 @@ def build_feature_database(
 
     if all_descriptors:
         all_desc_uint8 = np.vstack(all_descriptors).astype(np.uint8)
-        all_desc_float = all_desc_uint8.astype(np.float64)
+        all_desc_float = all_desc_uint8.astype(np.float32)
         n_descriptors = all_desc_float.shape[0]
 
         if n_descriptors > 0:
-            from sklearn.cluster import KMeans
+            k = min(bow_k, n_descriptors)
+            if use_minibatch_kmeans:
+                from sklearn.cluster import MiniBatchKMeans
 
-            k = min(1000, n_descriptors)
-            logger.info(
-                "Building BoW vocabulary: K-Means with K=%d on %d descriptors.",
-                k, n_descriptors,
-            )
-            kmeans = KMeans(n_clusters=k, random_state=42, n_init=3)
+                logger.info(
+                    "Building BoW vocabulary: MiniBatchKMeans K=%d on %d descriptors.",
+                    k,
+                    n_descriptors,
+                )
+                kmeans = MiniBatchKMeans(
+                    n_clusters=k,
+                    random_state=42,
+                    n_init=kmeans_n_init,
+                    max_iter=kmeans_max_iter,
+                    batch_size=kmeans_batch_size,
+                )
+            else:
+                from sklearn.cluster import KMeans
+
+                logger.info(
+                    "Building BoW vocabulary: KMeans K=%d on %d descriptors.",
+                    k,
+                    n_descriptors,
+                )
+                kmeans = KMeans(
+                    n_clusters=k,
+                    random_state=42,
+                    n_init=kmeans_n_init,
+                    max_iter=kmeans_max_iter,
+                )
             kmeans.fit(all_desc_float)
 
             # --- Step 3b: Compute medoids (real uint8 descriptors) ---
@@ -265,7 +393,9 @@ def build_feature_database(
             doc_freq = np.zeros(k, dtype=np.float64)
             for i, kf in enumerate(keyframes):
                 word_labels = _hamming_word_assignment(
-                    kf.descriptors, medoids,
+                    kf.descriptors,
+                    medoids,
+                    batch_size=assignment_batch_size,
                 )
                 all_word_labels.append(word_labels)
                 unique_words = set(word_labels.tolist())

@@ -2,7 +2,8 @@
   "name": "AreaTargetTest.Editor",
   "rootNamespace": "",
   "references": [
-    "AreaTargetPlugin.Runtime"
+    "AreaTargetPlugin.Runtime",
+    "VideoPlaybackTestScene"
   ],
   "includePlatforms": [
     "Editor"

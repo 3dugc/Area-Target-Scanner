@@ -6,13 +6,20 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/SLAMTestScene.unity
+    guid: e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+  - enabled: 1
+    path: Assets/Scenes/DownloadTestScene.unity
+    guid: a3b5c7d9e1f2a4b6c8d0e2f4a6b8c0d2
+  - enabled: 1
     path: Assets/Scenes/TestScene.unity
-    guid: 00000000000000000000000000000001
+    guid: 837af7fc615bc4410813e9871f54d04c
   - enabled: 1
     path: Assets/Scenes/ARTestScene.unity
-    guid: 00000000000000000000000000000002
+    guid: 74f8e1e1b67094efba850d6ee7bd6a62
   m_configObjects:
     UnityEditor.XR.ARKit.ARKitSettings: {fileID: 11400000, guid: 15a9a1a22c85c42b38099aae6c78f6ef, type: 2}
     com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: ca67fd0bfe3e34378a12fdb1903a15e1, type: 2}
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 6883de2d4764747dfab10d70e1a376d3, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 94b1cef9292e4444c97b27beb053592a, type: 2}
   m_UseUCBPForAssetBundles: 0

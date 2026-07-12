@@ -24,7 +24,6 @@ from unittest.mock import MagicMock, patch
 import cv2
 import numpy as np
 import open3d as o3d
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -687,7 +686,6 @@ class TestCLIE2E:
         a valid asset bundle directory.
         """
         from unittest.mock import patch
-        import sys
 
         scan_dir = str(tmp_path / "scan")
         output_dir = str(tmp_path / "output")

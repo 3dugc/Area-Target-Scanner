@@ -91,13 +91,17 @@ def project_point_to_image(world_pt, pose_matrix, intr):
 
 
 def select_best_frame_for_face(center, normal, pose_matrices, intr):
-    """Select best camera frame: highest score = dot(normal, viewDir) / dist^2.
+    """Select best camera frame: highest score = dot(normal, viewDir) / dist.
 
-    Matches iOS TextureProjector.selectBestFrames logic.
+    Uses linear distance decay (not quadratic) to prevent near-origin frames
+    from monopolizing face assignments.
     """
     best_idx, best_score = -1, 0.0
     for i, pose in enumerate(pose_matrices):
         cam_pos = pose[:3, 3]
+        # Skip near-origin frames (camera hasn't moved yet)
+        if np.linalg.norm(cam_pos) < 0.01:
+            continue
         to_cam = cam_pos - center
         dist = np.linalg.norm(to_cam)
         if dist < 1e-10:
@@ -108,7 +112,7 @@ def select_best_frame_for_face(center, normal, pose_matrices, intr):
             continue
         if project_point_to_image(center, pose, intr) is None:
             continue
-        score = dot / (dist * dist)
+        score = dot / dist
         if score > best_score:
             best_score = score
             best_idx = i

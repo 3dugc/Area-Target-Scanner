@@ -25,6 +25,8 @@
 		<string>arkit</string>
 		<string>lidar</string>
 	</array>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Area Target Scanner needs camera access to capture RGB images and LiDAR point clouds for 3D scene scanning.</string>
 	<key>UILaunchScreen</key>

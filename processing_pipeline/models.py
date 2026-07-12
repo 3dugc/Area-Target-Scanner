@@ -89,6 +89,9 @@ class KeyframeData:
         descriptors: (M, 32) array of ORB descriptors (uint8).
         points_3d: List of 3D points corresponding to each keypoint.
         camera_pose: 4x4 camera-to-world transformation matrix.
+        akaze_descriptors: (M, 61) AKAZE 描述子 (uint8)，可选。
+        akaze_keypoints: AKAZE 2D 关键点列表 (x, y)，可选。
+        akaze_points_3d: AKAZE 对应的 3D 点列表 (x, y, z)，可选。
     """
 
     image_id: int
@@ -96,6 +99,9 @@ class KeyframeData:
     descriptors: NDArray[np.uint8]
     points_3d: List[tuple[float, float, float]]
     camera_pose: NDArray[np.float64]  # (4, 4)
+    akaze_descriptors: Optional[NDArray[np.uint8]] = None
+    akaze_keypoints: Optional[List[tuple[float, float]]] = None
+    akaze_points_3d: Optional[List[tuple[float, float, float]]] = None
 
 
 @dataclass

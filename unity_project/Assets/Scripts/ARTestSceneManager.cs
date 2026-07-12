@@ -18,7 +18,7 @@ public class ARTestSceneManager : MonoBehaviour
     [SerializeField] private ARSession arSession;
 
     [Header("Area Target 配置")]
-    [SerializeField] private string assetBundlePath = "AreaTargetAssets/test_room";
+    [SerializeField] private string assetBundlePath = "SLAMTestAssets";
     [SerializeField] private int trackingQualityThreshold = 50;
 
     [Header("场景引用")]
@@ -31,6 +31,9 @@ public class ARTestSceneManager : MonoBehaviour
     [SerializeField] private Text trackingInfoText;
     [SerializeField] private Text fpsText;
     [SerializeField] private Button resetButton;
+
+    [Header("调试 UI")]
+    [SerializeField] private Text qualityText;
 
     [Header("测试内容")]
     [SerializeField] private GameObject testCubePrefab;
@@ -65,13 +68,97 @@ public class ARTestSceneManager : MonoBehaviour
         SpawnTestContent();
     }
 
+    /// <summary>
+    /// 解析资产路径：绝对路径直接使用，相对路径拼接 streamingAssetsPath。
+    /// 提取为 public static 以便属性测试验证。
+    /// </summary>
+    public static string ResolveAssetPath(string assetBundlePath, string streamingAssetsPath)
+    {
+        if (System.IO.Path.IsPathRooted(assetBundlePath))
+            return assetBundlePath;
+
+        // 防御性处理：移除可能的 file:// 前缀（Android 上会出现）
+        string basePath = streamingAssetsPath;
+        if (basePath.StartsWith("file://"))
+            basePath = basePath.Substring(7);
+
+        return System.IO.Path.Combine(basePath, assetBundlePath);
+    }
+
+    /// <summary>
+    /// 验证资产目录和关键文件是否存在。
+    /// 返回 null 表示无错误，否则返回具体错误信息。
+    /// </summary>
+    public static string ValidateAssetDirectory(string fullPath, string assetBundlePath)
+    {
+        if (!System.IO.Directory.Exists(fullPath))
+            return $"资产目录不存在: {assetBundlePath}";
+        if (!System.IO.File.Exists(System.IO.Path.Combine(fullPath, "features.db")))
+            return $"缺少 features.db: {assetBundlePath}";
+        if (!System.IO.File.Exists(System.IO.Path.Combine(fullPath, "manifest.json")))
+            return $"缺少 manifest.json: {assetBundlePath}";
+        return null; // 无错误
+    }
+
+    /// <summary>
+    /// LocalizationQuality 到颜色的确定性映射。
+    /// 提取为 public static 以便属性测试验证。
+    /// </summary>
+    public static Color GetQualityColor(LocalizationQuality quality)
+    {
+        switch (quality)
+        {
+            case LocalizationQuality.LOCALIZED:
+                return Color.green;
+            case LocalizationQuality.RECOGNIZED:
+                return Color.yellow;
+            case LocalizationQuality.NONE:
+            default:
+                return Color.red;
+        }
+    }
+
+    /// <summary>
+    /// 格式化 TRACKING 状态下的调试文本。
+    /// 提取为 public static 以便属性测试验证。
+    /// </summary>
+    public static string FormatTrackingDebugText(
+        float confidence, int matchedFeatures, int frameCount,
+        LocalizationMode currentMode, LocalizationQuality quality,
+        int akazeTriggered, int consistencyRejected)
+    {
+        return $"置信度: {confidence:P0}\n" +
+            $"特征点: {matchedFeatures}\n" +
+            $"帧: {frameCount}\n" +
+            $"模式: {currentMode}\n" +
+            $"质量: {quality}\n" +
+            $"AKAZE: {(akazeTriggered == 1 ? "触发" : "未触发")}\n" +
+            $"一致性: {(consistencyRejected == 1 ? "拒绝" : "通过")}";
+    }
+
+    /// <summary>
+    /// 格式化质量文本。
+    /// </summary>
+    public static string FormatQualityText(LocalizationQuality quality)
+    {
+        string modeStr = quality == LocalizationQuality.LOCALIZED ? "Aligned" : "Raw";
+        return $"模式: {modeStr} | 质量: {quality}";
+    }
+
     private void InitializeTracker()
     {
         _tracker = new AreaTargetTracker();
 
-        string fullPath = System.IO.Path.IsPathRooted(assetBundlePath)
-            ? assetBundlePath
-            : System.IO.Path.Combine(Application.streamingAssetsPath, assetBundlePath);
+        string fullPath = ResolveAssetPath(assetBundlePath, Application.streamingAssetsPath);
+
+        // 资产目录和关键文件预检查
+        string error = ValidateAssetDirectory(fullPath, assetBundlePath);
+        if (error != null)
+        {
+            SetStatus(error, Color.red);
+            Log(error);
+            return;
+        }
 
         bool ok = _tracker.Initialize(fullPath);
         if (ok)
@@ -167,11 +254,23 @@ public class ARTestSceneManager : MonoBehaviour
                 if (trackingIndicatorUI != null) trackingIndicatorUI.SetActive(true);
 
                 SetStatus("跟踪中", Color.green);
+
+                var extDebug = _tracker.GetExtendedDebugInfo();
+                Color qualityColor = GetQualityColor(result.Quality);
+
+                if (qualityText != null)
+                {
+                    qualityText.text = FormatQualityText(result.Quality);
+                    qualityText.color = qualityColor;
+                }
+
                 if (trackingInfoText != null)
                 {
-                    trackingInfoText.text = $"置信度: {result.Confidence:P0}\n" +
-                                            $"特征点: {result.MatchedFeatures}\n" +
-                                            $"帧: {_frameCount}";
+                    trackingInfoText.text = FormatTrackingDebugText(
+                        result.Confidence, result.MatchedFeatures, _frameCount,
+                        extDebug.CurrentMode, result.Quality,
+                        extDebug.NativeDebugInfo.akaze_triggered,
+                        extDebug.NativeDebugInfo.consistency_rejected);
                 }
                 break;
 
@@ -191,18 +290,73 @@ public class ARTestSceneManager : MonoBehaviour
     {
         if (areaTargetOrigin == null) return;
 
-        // 在 AreaTarget 原点下创建测试几何体
+        // 从 SLAMTestAssets 加载 optimized.glb 作为线框叠加
+        string fullPath = ResolveAssetPath(assetBundlePath, Application.streamingAssetsPath);
+        string glbPath = System.IO.Path.Combine(fullPath, "optimized.glb");
+
+        if (System.IO.File.Exists(glbPath))
+        {
+            Mesh mesh = GLBMeshLoader.Load(glbPath);
+            if (mesh != null)
+            {
+                var meshObj = new GameObject("AreaTargetMesh");
+                meshObj.transform.SetParent(areaTargetOrigin);
+                meshObj.transform.localPosition = Vector3.zero;
+                meshObj.transform.localRotation = Quaternion.identity;
+                meshObj.transform.localScale = Vector3.one;
+
+                var mf = meshObj.AddComponent<MeshFilter>();
+                mf.mesh = mesh;
+
+                var mr = meshObj.AddComponent<MeshRenderer>();
+
+                // 线框材质
+                var wireShader = Shader.Find("Custom/Wireframe");
+                Material mat;
+                if (wireShader != null)
+                {
+                    mat = new Material(wireShader);
+                    mat.SetColor("_WireColor", new Color(0f, 1f, 0.5f, 0.8f));
+                    mat.SetColor("_FillColor", new Color(0f, 0f, 0f, 0f));
+                    mat.SetFloat("_WireWidth", 0.003f);
+                }
+                else
+                {
+                    // Fallback: 半透明绿色
+                    mat = new Material(Shader.Find("Unlit/Color"));
+                    mat.color = new Color(0f, 1f, 0.5f, 0.4f);
+                    Log("Wireframe shader 未找到，使用 Unlit/Color fallback");
+                }
+                mr.material = mat;
+
+                Log($"GLB mesh 已加载: {mesh.vertexCount} 顶点, {mesh.triangles.Length / 3} 三角面");
+            }
+            else
+            {
+                Log("GLB mesh 加载失败，使用默认立方体");
+                SpawnFallbackCube();
+            }
+        }
+        else
+        {
+            Log($"optimized.glb 不存在: {glbPath}，使用默认立方体");
+            SpawnFallbackCube();
+        }
+
+        // 坐标轴指示器
+        CreateAxisIndicator(areaTargetOrigin);
+    }
+
+    private void SpawnFallbackCube()
+    {
         var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        cube.name = "TestCube";
+        cube.name = "FallbackCube";
         cube.transform.SetParent(areaTargetOrigin);
         cube.transform.localPosition = Vector3.zero;
         cube.transform.localScale = Vector3.one * 0.3f;
         var renderer = cube.GetComponent<Renderer>();
         if (renderer != null)
             renderer.material.color = new Color(0.2f, 0.6f, 1f, 0.8f);
-
-        // 坐标轴指示器
-        CreateAxisIndicator(areaTargetOrigin);
     }
 
     private void CreateAxisIndicator(Transform parent)

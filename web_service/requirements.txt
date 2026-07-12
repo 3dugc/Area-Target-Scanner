@@ -1,8 +1,10 @@
 flask>=3.0.0
 open3d>=0.17.0
-opencv-python-headless>=4.8.0
+opencv-python-headless>=4.8.0,<5
 numpy>=1.24.0
 scikit-learn>=1.3.0
 Pillow>=10.0.0
 requests>=2.31.0
 trimesh>=3.23.0
+xatlas>=0.0.9
+scipy>=1.11.0

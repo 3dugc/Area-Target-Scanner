@@ -1,0 +1,3 @@
+[submodule "model_optimizer"]
+	path = model_optimizer
+	url = git@github.com:3dugc/3D-Model-Optimizer.git

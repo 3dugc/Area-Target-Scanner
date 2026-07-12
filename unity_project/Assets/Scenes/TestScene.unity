@@ -350,7 +350,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 300}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 00000000000000000000000000000000, type: 3}
+  m_Script: {fileID: 11500000, guid: c9cc1832374a7498a8493685f3fe07c8, type: 3}
   m_Name:
   m_EditorClassIdentifier:
   assetBundlePath: AreaTargetAssets/test_room

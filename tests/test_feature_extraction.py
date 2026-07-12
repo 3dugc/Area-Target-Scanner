@@ -243,6 +243,85 @@ class TestBuildFeatureDatabaseEdgeCases:
             build_feature_database(images, self.mesh)
 
 
+class TestBuildFeatureDatabaseAKAZE:
+    """Tests for AKAZE feature extraction in build_feature_database().
+
+    Validates Requirement 3.2: AKAZE extraction via extract_akaze parameter.
+    """
+
+    def setup_method(self):
+        import copy
+        self.mesh = copy.deepcopy(_build_sphere_mesh())
+        self.tmpdir = tempfile.mkdtemp()
+
+    def _make_images(self, count: int = 3) -> list:
+        images = []
+        for i in range(count):
+            img = _make_textured_image(seed=42 + i)
+            path = _save_image(img, self.tmpdir, f"frame_{i:04d}.png")
+            pose = _make_camera_pose(tx=0.2 * i, tz=3.0)
+            images.append({"path": path, "pose": pose})
+        return images
+
+    def test_akaze_fields_populated_when_enabled(self):
+        """extract_akaze=True should populate akaze_* fields on keyframes."""
+        images = self._make_images(2)
+        db = build_feature_database(images, self.mesh, extract_akaze=True)
+        has_akaze = False
+        for kf in db.keyframes:
+            if kf.akaze_descriptors is not None:
+                has_akaze = True
+                assert kf.akaze_keypoints is not None
+                assert kf.akaze_points_3d is not None
+                assert len(kf.akaze_keypoints) == len(kf.akaze_points_3d)
+                assert kf.akaze_descriptors.shape[0] == len(kf.akaze_keypoints)
+                assert kf.akaze_descriptors.dtype == np.uint8
+        assert has_akaze, "At least one keyframe should have AKAZE features"
+
+    def test_akaze_fields_none_when_disabled(self):
+        """extract_akaze=False should leave akaze_* fields as None."""
+        images = self._make_images(2)
+        db = build_feature_database(images, self.mesh, extract_akaze=False)
+        for kf in db.keyframes:
+            assert kf.akaze_descriptors is None
+            assert kf.akaze_keypoints is None
+            assert kf.akaze_points_3d is None
+
+    def test_akaze_3d_points_near_mesh_surface(self):
+        """AKAZE 3D points should come from ray-mesh intersection (near mesh)."""
+        images = self._make_images(2)
+        db = build_feature_database(images, self.mesh, extract_akaze=True)
+        bbox = self.mesh.get_axis_aligned_bounding_box()
+        min_b = np.asarray(bbox.min_bound) - 0.5
+        max_b = np.asarray(bbox.max_bound) + 0.5
+        for kf in db.keyframes:
+            if kf.akaze_points_3d is not None:
+                for pt in kf.akaze_points_3d:
+                    p = np.array(pt)
+                    assert np.all(p >= min_b) and np.all(p <= max_b), (
+                        f"AKAZE 3D point {p} outside mesh bounding box"
+                    )
+
+    def test_akaze_default_is_enabled(self):
+        """Default value of extract_akaze should be True."""
+        images = self._make_images(1)
+        db = build_feature_database(images, self.mesh)
+        # With default params, AKAZE should be extracted
+        has_akaze = any(kf.akaze_descriptors is not None for kf in db.keyframes)
+        assert has_akaze, "Default extract_akaze=True should produce AKAZE features"
+
+    def test_orb_fields_unaffected_by_akaze(self):
+        """AKAZE extraction should not affect ORB fields."""
+        images = self._make_images(2)
+        db_with = build_feature_database(images, self.mesh, extract_akaze=True)
+        db_without = build_feature_database(images, self.mesh, extract_akaze=False)
+        assert len(db_with.keyframes) == len(db_without.keyframes)
+        for kf_a, kf_b in zip(db_with.keyframes, db_without.keyframes):
+            assert kf_a.image_id == kf_b.image_id
+            assert len(kf_a.keypoints) == len(kf_b.keypoints)
+            np.testing.assert_array_equal(kf_a.descriptors, kf_b.descriptors)
+
+
 class TestBuildFeatureDatabaseORB:
     """Tests specifically for ORB feature extraction (Requirement 8.1)."""
 

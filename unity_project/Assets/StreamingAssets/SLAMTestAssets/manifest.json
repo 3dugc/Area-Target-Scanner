@@ -1,0 +1,22 @@
+{
+  "version": "2.0",
+  "meshFile": "optimized.glb",
+  "featureDbFile": "features.db",
+  "bounds": {
+    "min": [
+      -3.148472785949707,
+      -1.0511109828948975,
+      -4.253241539001465
+    ],
+    "max": [
+      3.057666778564453,
+      2.059647798538208,
+      4.260324478149414
+    ]
+  },
+  "keyframeCount": 92,
+  "featureType": "ORB",
+  "format": "glb",
+  "optimizedWith": "3D-Model-Optimizer",
+  "createdAt": "2026-03-24T06:54:32.130079+00:00"
+}

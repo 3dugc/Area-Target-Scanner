@@ -141,13 +141,22 @@ public class AreaTargetExampleManager : MonoBehaviour
                 {
                     areaTargetOrigin.gameObject.SetActive(true);
 
-                    // 从 4x4 位姿矩阵提取位置和旋转
+                    // result.Pose 是 world-to-camera 变换（PnP 输出经 flip 后）。
+                    // 要把模型放到 ARKit 世界中，需要：
+                    //   T_model→ARKit = T_camera→ARKit * T_model→camera
+                    // 其中 T_camera→ARKit = AR 相机的 localToWorldMatrix，
+                    //       T_model→camera = result.Pose (w2c)。
+                    Matrix4x4 cameraPose = arCameraManager != null
+                        ? arCameraManager.transform.localToWorldMatrix
+                        : Matrix4x4.identity;
+                    Matrix4x4 modelToWorld = cameraPose * result.Pose;
+
                     Vector3 position = new Vector3(
-                        result.Pose.m03,
-                        result.Pose.m13,
-                        result.Pose.m23
+                        modelToWorld.m03,
+                        modelToWorld.m13,
+                        modelToWorld.m23
                     );
-                    Quaternion rotation = result.Pose.rotation;
+                    Quaternion rotation = modelToWorld.rotation;
 
                     // 平滑插值（避免跳变）
                     areaTargetOrigin.position = Vector3.Lerp(

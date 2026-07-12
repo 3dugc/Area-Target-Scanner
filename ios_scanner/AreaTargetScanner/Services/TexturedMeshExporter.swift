@@ -44,7 +44,17 @@ final class TexturedMeshExporter {
         try jpegData.write(to: URL(fileURLWithPath: texturePath))
 
         // 2. Write model.mtl
-        let mtlContent = "newmtl textured_material\nKa 1.0 1.0 1.0\nKd 1.0 1.0 1.0\nmap_Kd texture.jpg\n"
+        // illum 1 = diffuse-only lighting model, prevents specular highlights washing out texture
+        let mtlContent = """
+            newmtl textured_material
+            Ka 0.2 0.2 0.2
+            Kd 1.0 1.0 1.0
+            Ks 0.0 0.0 0.0
+            Ns 1.0
+            illum 1
+            map_Kd texture.jpg
+            
+            """.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: "\n") + "\n"
         try mtlContent.write(toFile: mtlPath, atomically: true, encoding: .utf8)
 
         // 3. Write model.obj
@@ -106,11 +116,10 @@ final class TexturedMeshExporter {
     /// Build the OBJ file content string from a TexturedMeshResult.
     private static func buildOBJContent(mesh: TexturedMeshResult) -> String {
         var lines: [String] = []
-        lines.reserveCapacity(3 + mesh.vertices.count + mesh.uvCoordinates.count + mesh.normals.count + mesh.faces.count + 2)
+        lines.reserveCapacity(3 + mesh.vertices.count + mesh.uvCoordinates.count + mesh.normals.count + mesh.faces.count + 4)
 
         lines.append("# Textured mesh exported by AreaTargetScanner")
         lines.append("mtllib model.mtl")
-        lines.append("usemtl textured_material")
         lines.append("")
 
         // Vertices
@@ -118,7 +127,9 @@ final class TexturedMeshExporter {
             lines.append("v \(v.x) \(v.y) \(v.z)")
         }
 
-        // UV coordinates
+        // UV coordinates — OBJ convention: vt V=0 is bottom of texture image.
+        // Our atlas renderer already writes pixels with this convention (flippedY),
+        // so we output UVs as-is.
         for uv in mesh.uvCoordinates {
             lines.append("vt \(uv.x) \(uv.y)")
         }
@@ -127,6 +138,9 @@ final class TexturedMeshExporter {
         for n in mesh.normals {
             lines.append("vn \(n.x) \(n.y) \(n.z)")
         }
+
+        // Material assignment must come right before faces
+        lines.append("usemtl textured_material")
 
         // Faces — OBJ indices are 1-based
         for f in mesh.faces {

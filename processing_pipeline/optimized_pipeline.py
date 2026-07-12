@@ -22,6 +22,29 @@ from processing_pipeline.feature_db import save_feature_database
 from processing_pipeline.models import FeatureDatabase, ScanInput
 from processing_pipeline.optimizer_client import ModelOptimizerClient
 
+FEATURE_PROFILE_OPTIONS = {
+    "fast": {
+        "extract_akaze": False,
+        "orb_nfeatures": 1000,
+        "bow_k": 500,
+        "max_keyframes": 80,
+        "use_minibatch_kmeans": True,
+        "kmeans_n_init": 1,
+        "kmeans_max_iter": 50,
+        "kmeans_batch_size": 4096,
+    },
+    "quality": {
+        "extract_akaze": True,
+        "orb_nfeatures": 2000,
+        "bow_k": 1000,
+        "max_keyframes": None,
+        "use_minibatch_kmeans": False,
+        "kmeans_n_init": 3,
+        "kmeans_max_iter": 300,
+        "kmeans_batch_size": 4096,
+    },
+}
+
 
 class OptimizedPipeline:
     """4-step pipeline that processes iOS scan data into an AR asset bundle.
@@ -40,9 +63,15 @@ class OptimizedPipeline:
         self,
         optimizer_url: str = "http://model_optimizer:3000",
         optimizer_preset: str = "balanced",
+        processing_profile: str = "quality",
     ) -> None:
         self.optimizer_url = optimizer_url
         self.optimizer_preset = optimizer_preset
+        self.processing_profile = (
+            processing_profile
+            if processing_profile in FEATURE_PROFILE_OPTIONS
+            else "quality"
+        )
 
     def validate_input(self, scan_dir: str) -> ScanInput:
         """Validate that *scan_dir* contains all required files and load poses.
@@ -153,7 +182,13 @@ class OptimizedPipeline:
         o3d_mesh = self._trimesh_to_o3d(mesh_tri)
 
         # Reuse existing ORB + ray-casting + BoW logic
-        return build_feature_database(images, o3d_mesh, intrinsics)
+        feature_options = FEATURE_PROFILE_OPTIONS[self.processing_profile]
+        return build_feature_database(
+            images,
+            o3d_mesh,
+            intrinsics,
+            **feature_options,
+        )
 
     def export_asset_bundle(
         self,

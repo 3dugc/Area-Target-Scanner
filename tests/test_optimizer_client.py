@@ -10,7 +10,7 @@ and wait_for_completion terminates on completed/failed status.
 from __future__ import annotations
 
 import os
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

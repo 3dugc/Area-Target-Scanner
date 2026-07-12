@@ -1,0 +1,29 @@
+{
+  "name": "AreaTargetPlugin.Tests.Property",
+  "rootNamespace": "AreaTargetPlugin.Tests",
+  "references": [
+    "AreaTargetPlugin.Runtime",
+    "AreaTargetTest",
+    "Unity.XR.ARFoundation",
+    "Gilzoide.SqliteNet",
+    "VideoPlaybackTestScene"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "FsCheck.dll",
+    "FsCheck.NUnit.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS",
+    "FSCHECK_AVAILABLE"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

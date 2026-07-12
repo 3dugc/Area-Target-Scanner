@@ -106,7 +106,7 @@ final class ARKitScannerService: NSObject, ScannerService {
         )
     }
 
-    func exportScanData(outputPath: String) throws -> Bool {
+    func exportScanData(outputPath: String, onProgress: ((String) -> Void)? = nil) throws -> Bool {
         guard !isScanning else {
             throw ScannerError.scanAlreadyInProgress
         }
@@ -128,7 +128,8 @@ final class ARKitScannerService: NSObject, ScannerService {
                 intrinsics: intrinsics,
                 images: capturedImages,
                 meshAnchors: meshAnchors,
-                outputPath: outputPath
+                outputPath: outputPath,
+                onProgress: onProgress
             )
         } catch {
             throw ScannerError.exportFailed(reason: error.localizedDescription)
@@ -337,6 +338,14 @@ extension ARKitScannerService: ARSessionDelegate {
 
         // Keyframe capture: every 0.5s or camera movement > 10cm (Requirement 1.2)
         let cameraTransform = frame.camera.transform
+
+        // Skip keyframe capture if ARKit tracking is not fully established.
+        // Early frames often have identity transforms (no real pose data),
+        // which corrupt downstream texture mapping.
+        guard frame.camera.trackingState == .normal else {
+            return
+        }
+
         guard shouldCaptureKeyframe(currentTime: currentTime, currentTransform: cameraTransform) else {
             return
         }

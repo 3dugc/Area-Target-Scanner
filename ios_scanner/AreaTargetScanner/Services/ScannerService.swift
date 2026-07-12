@@ -54,7 +54,7 @@ protocol ScannerService: AnyObject {
     /// - Returns: `true` if export succeeded.
     /// - Throws: `ScannerError.insufficientData` if point count < 1000,
     ///           `ScannerError.exportFailed` on I/O errors.
-    func exportScanData(outputPath: String) throws -> Bool
+    func exportScanData(outputPath: String, onProgress: ((String) -> Void)?) throws -> Bool
 
     /// Get the current scan progress.
     /// - Returns: A `ScanProgress` snapshot with point count, coverage area, etc.

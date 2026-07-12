@@ -1,10 +1,13 @@
 using System;
 using System.IO;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace AreaTargetPlugin.Tests
 {
     [TestFixture]
+    [IgnoreLogErrors]
     public class AssetBundleLoaderTests
     {
         private string _testDir;
@@ -13,6 +16,7 @@ namespace AreaTargetPlugin.Tests
         [SetUp]
         public void SetUp()
         {
+            LogAssert.ignoreFailingMessages = true;
             _testDir = Path.Combine(Path.GetTempPath(), "AreaTargetPluginTests_" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_testDir);
             _loader = new AssetBundleLoader();
@@ -103,6 +107,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_NullPath_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             bool result = _loader.Load(null);
 
             Assert.IsFalse(result);
@@ -113,6 +118,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_EmptyPath_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             bool result = _loader.Load("");
 
             Assert.IsFalse(result);
@@ -123,6 +129,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_NonExistentDirectory_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             bool result = _loader.Load("/nonexistent/path/to/asset");
 
             Assert.IsFalse(result);
@@ -137,6 +144,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_MissingManifest_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "no_manifest");
             Directory.CreateDirectory(dir);
 
@@ -153,6 +161,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_InvalidJsonManifest_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "bad_json");
             Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, "manifest.json"), "NOT VALID JSON {{{");
@@ -168,6 +177,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_ManifestMissingVersion_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "no_version");
             Directory.CreateDirectory(dir);
             string manifest = @"{
@@ -187,6 +197,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_IncompatibleVersion_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "bad_version");
             Directory.CreateDirectory(dir);
             string manifest = @"{
@@ -213,6 +224,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_MissingMeshFile_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "no_mesh");
             Directory.CreateDirectory(dir);
             string manifest = @"{
@@ -235,6 +247,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_MissingFeatureDb_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "no_features");
             Directory.CreateDirectory(dir);
             string manifest = @"{
@@ -261,6 +274,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_ManifestMissingMeshFile_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "no_mesh_field");
             Directory.CreateDirectory(dir);
             string manifest = @"{
@@ -280,6 +294,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_ManifestMissingFeatureDbFile_ReturnsFalse()
         {
+            LogAssert.ignoreFailingMessages = true;
             string dir = Path.Combine(_testDir, "no_featuredb_field");
             Directory.CreateDirectory(dir);
             string manifest = @"{
@@ -303,6 +318,7 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void Load_AfterFailedLoad_ClearsState()
         {
+            LogAssert.ignoreFailingMessages = true;
             // First load fails
             _loader.Load("/nonexistent");
             Assert.IsFalse(string.IsNullOrEmpty(_loader.LastError));

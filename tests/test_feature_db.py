@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import math
-import os
 import sqlite3
-import tempfile
 
 import numpy as np
-import pytest
 from sklearn.cluster import KMeans
 
 from processing_pipeline.feature_db import (
@@ -350,3 +347,192 @@ class TestEdgeCases:
         np.testing.assert_array_equal(
             loaded.keyframes[0].descriptors, db.keyframes[0].descriptors
         )
+
+
+# ---------------------------------------------------------------------------
+# AKAZE feature table tests
+# ---------------------------------------------------------------------------
+
+
+def _make_keyframe_with_akaze(
+    image_id: int, n_features: int = 50, n_akaze: int = 30, seed: int = 0
+) -> KeyframeData:
+    """Create a synthetic keyframe with both ORB and AKAZE data."""
+    rng = np.random.RandomState(seed + image_id)
+    kps = [(rng.uniform(0, 640), rng.uniform(0, 480)) for _ in range(n_features)]
+    pts3d = [
+        (rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(0, 3))
+        for _ in range(n_features)
+    ]
+    descriptors = rng.randint(0, 256, size=(n_features, 32), dtype=np.uint8)
+    pose = np.eye(4, dtype=np.float64)
+    pose[:3, 3] = rng.uniform(-2, 2, size=3)
+
+    # AKAZE data（61 bytes 描述子）
+    akaze_kps = [(rng.uniform(0, 640), rng.uniform(0, 480)) for _ in range(n_akaze)]
+    akaze_pts3d = [
+        (rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(0, 3))
+        for _ in range(n_akaze)
+    ]
+    akaze_descs = rng.randint(0, 256, size=(n_akaze, 61), dtype=np.uint8)
+
+    return KeyframeData(
+        image_id=image_id,
+        keypoints=kps,
+        descriptors=descriptors,
+        points_3d=pts3d,
+        camera_pose=pose,
+        akaze_descriptors=akaze_descs,
+        akaze_keypoints=akaze_kps,
+        akaze_points_3d=akaze_pts3d,
+    )
+
+
+class TestAkazeSchema:
+    """Verify akaze_features table schema."""
+
+    def test_akaze_table_created_when_data_present(self, tmp_path):
+        """akaze_features 表在有 AKAZE 数据时应被创建。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe_with_akaze(0)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='akaze_features'")
+        assert cur.fetchone() is not None
+        conn.close()
+
+    def test_akaze_table_not_created_without_data(self, tmp_path):
+        """无 AKAZE 数据时不应创建 akaze_features 表。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe(0)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='akaze_features'")
+        assert cur.fetchone() is None
+        conn.close()
+
+    def test_akaze_table_columns(self, tmp_path):
+        """akaze_features 表的列应与 schema 一致。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe_with_akaze(0)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(akaze_features)")
+        cols = {row[1] for row in cur.fetchall()}
+        conn.close()
+
+        assert cols == {"id", "keyframe_id", "x", "y", "x3d", "y3d", "z3d", "descriptor"}
+
+
+class TestAkazeRoundTrip:
+    """Verify AKAZE data save → load round-trip."""
+
+    def test_akaze_descriptors_preserved(self, tmp_path):
+        """AKAZE 描述子 round-trip 后应完全一致。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe_with_akaze(0, n_akaze=20)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+        loaded = load_feature_database(db_path)
+
+        assert loaded.keyframes[0].akaze_descriptors is not None
+        np.testing.assert_array_equal(
+            loaded.keyframes[0].akaze_descriptors, kf.akaze_descriptors
+        )
+
+    def test_akaze_keypoints_preserved(self, tmp_path):
+        """AKAZE 2D 关键点 round-trip 后应完全一致。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe_with_akaze(0, n_akaze=15)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+        loaded = load_feature_database(db_path)
+
+        assert loaded.keyframes[0].akaze_keypoints is not None
+        assert len(loaded.keyframes[0].akaze_keypoints) == len(kf.akaze_keypoints)
+        for (ox, oy), (lx, ly) in zip(kf.akaze_keypoints, loaded.keyframes[0].akaze_keypoints):
+            assert abs(lx - ox) < 1e-6
+            assert abs(ly - oy) < 1e-6
+
+    def test_akaze_points_3d_preserved(self, tmp_path):
+        """AKAZE 3D 点 round-trip 后应完全一致。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe_with_akaze(0, n_akaze=15)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+        loaded = load_feature_database(db_path)
+
+        assert loaded.keyframes[0].akaze_points_3d is not None
+        assert len(loaded.keyframes[0].akaze_points_3d) == len(kf.akaze_points_3d)
+        for op, lp in zip(kf.akaze_points_3d, loaded.keyframes[0].akaze_points_3d):
+            for a, b in zip(op, lp):
+                assert abs(a - b) < 1e-6
+
+    def test_multiple_keyframes_akaze_preserved(self, tmp_path):
+        """多个 keyframe 的 AKAZE 数据应分别正确保存和加载。"""
+        db_path = str(tmp_path / "features.db")
+        kfs = [_make_keyframe_with_akaze(i, n_akaze=10 + i * 5) for i in range(3)]
+        db = FeatureDatabase(keyframes=kfs, global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+        loaded = load_feature_database(db_path)
+
+        for orig_kf, loaded_kf in zip(kfs, loaded.keyframes):
+            assert loaded_kf.akaze_descriptors is not None
+            np.testing.assert_array_equal(loaded_kf.akaze_descriptors, orig_kf.akaze_descriptors)
+            assert len(loaded_kf.akaze_keypoints) == len(orig_kf.akaze_keypoints)
+            assert len(loaded_kf.akaze_points_3d) == len(orig_kf.akaze_points_3d)
+
+    def test_orb_data_unaffected_by_akaze(self, tmp_path):
+        """添加 AKAZE 数据不应影响 ORB 数据的 round-trip。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe_with_akaze(0)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+        loaded = load_feature_database(db_path)
+
+        np.testing.assert_array_equal(loaded.keyframes[0].descriptors, kf.descriptors)
+        assert len(loaded.keyframes[0].keypoints) == len(kf.keypoints)
+        assert len(loaded.keyframes[0].points_3d) == len(kf.points_3d)
+
+
+class TestAkazeBackwardCompatibility:
+    """Verify backward compatibility when akaze_features table is missing."""
+
+    def test_load_without_akaze_table(self, tmp_path):
+        """加载无 akaze_features 表的旧 DB 时，AKAZE 字段应为 None。"""
+        db_path = str(tmp_path / "features.db")
+        kf = _make_keyframe(0)
+        db = FeatureDatabase(keyframes=[kf], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+        loaded = load_feature_database(db_path)
+
+        assert loaded.keyframes[0].akaze_descriptors is None
+        assert loaded.keyframes[0].akaze_keypoints is None
+        assert loaded.keyframes[0].akaze_points_3d is None
+
+    def test_partial_akaze_data(self, tmp_path):
+        """部分 keyframe 有 AKAZE 数据、部分没有时应正确处理。"""
+        db_path = str(tmp_path / "features.db")
+        kf_with = _make_keyframe_with_akaze(0, n_akaze=10)
+        kf_without = _make_keyframe(1)  # 无 AKAZE 数据
+        db = FeatureDatabase(keyframes=[kf_with, kf_without], global_descriptors=None, vocabulary=None)
+        save_feature_database(db, db_path)
+        loaded = load_feature_database(db_path)
+
+        # keyframe 0 应有 AKAZE 数据
+        assert loaded.keyframes[0].akaze_descriptors is not None
+        np.testing.assert_array_equal(loaded.keyframes[0].akaze_descriptors, kf_with.akaze_descriptors)
+
+        # keyframe 1 应无 AKAZE 数据
+        assert loaded.keyframes[1].akaze_descriptors is None
+        assert loaded.keyframes[1].akaze_keypoints is None
+        assert loaded.keyframes[1].akaze_points_3d is None

@@ -30,5 +30,40 @@ unity_project/*.sln
 *.unitypackage
 *.tgz
 
-# Native build output
+# Debug scripts (root level)
+debug_*.py
+
+# Native build output & dependencies
 native_visual_localizer/build/
+native_visual_localizer/build_ios/
+native_visual_localizer/opencv_ios/
+build/
+
+# Backup files
+*.bak
+*.bak.meta
+*.stub_bak
+*.stub_bak.meta
+
+# Build logs
+/tmp/unity_ios_build*.log
+/tmp/xcode_build*.log
+/debug
+/data
+
+# Generated verification reports
+unity_project/*test_results*.xml
+unity_project/TestResults-*.xml
+unity_project/pbt_*.xml
+unity_project/mono_crash.*.json
+unity_project/unity_project/
+
+# Asset backup variants
+*.bak2
+*.bak2.meta
+*.data1_bak
+*.data1_bak.meta
+
+# Phase 0 build products
+dist/
+phase0-results/

@@ -15,6 +15,8 @@ namespace AreaTargetPlugin
         private IntPtr _nativeHandle;
         private bool _disposed;
 
+        internal LocalizationMode CurrentMode { get; set; } = LocalizationMode.Raw;
+
         public Matrix4x4? LastValidPose { get; private set; }
 
         public bool Initialize(FeatureDatabaseReader featureDb)
@@ -53,6 +55,24 @@ namespace AreaTargetPlugin
                     flatPts3d, flatPts2d);
             }
 
+            // Load AKAZE features if available
+            if (featureDb.HasAkazeFeatures)
+            {
+                foreach (var kf in featureDb.Keyframes)
+                {
+                    if (kf.AkazeDescriptors.Count == 0) continue;
+
+                    byte[] flatAkazeDesc = FlattenAkazeDescriptors(kf.AkazeDescriptors);
+                    float[] flatAkazePts3d = FlattenPoints3D(kf.AkazePoints3D);
+                    float[] flatAkazePts2d = FlattenPoints2D(kf.AkazeKeypoints2D);
+
+                    NativeLocalizerBridge.vl_add_keyframe_akaze(
+                        _nativeHandle, kf.Id,
+                        flatAkazeDesc, kf.AkazeDescriptors.Count, 61,
+                        flatAkazePts3d, flatAkazePts2d);
+                }
+            }
+
             LastValidPose = null;
             return NativeLocalizerBridge.vl_build_index(_nativeHandle) == 1;
         }
@@ -62,7 +82,8 @@ namespace AreaTargetPlugin
             float[] lastPose = LastValidPose.HasValue
                 ? Matrix4x4ToArray(LastValidPose.Value) : null;
 
-            VLResult result = NativeLocalizerBridge.vl_process_frame(
+            // Use ProcessFrameSafe to avoid struct-return ABI issues on iOS ARM64
+            VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 _nativeHandle, frame.ImageData, frame.Width, frame.Height,
                 frame.Intrinsics.m00, frame.Intrinsics.m11,
                 frame.Intrinsics.m02, frame.Intrinsics.m12,
@@ -76,17 +97,43 @@ namespace AreaTargetPlugin
                 MatchedFeatures = result.matched_features
             };
 
+            // 根据 CurrentMode 和定位成功状态设置 Quality
             if (tracking.State == TrackingState.TRACKING)
+            {
+                tracking.Quality = CurrentMode == LocalizationMode.Aligned
+                    ? LocalizationQuality.LOCALIZED
+                    : LocalizationQuality.RECOGNIZED;
                 LastValidPose = tracking.Pose;
+            }
+            // 失败时 Quality 保持默认 NONE
 
             return tracking;
+        }
+
+        public void SetAlignmentTransform(Matrix4x4 at)
+        {
+            float[] atArray = Matrix4x4ToArray(at);
+            NativeLocalizerBridge.vl_set_alignment_transform(_nativeHandle, atArray);
+            CurrentMode = LocalizationMode.Aligned;
         }
 
         public void ResetState()
         {
             LastValidPose = null;
+            CurrentMode = LocalizationMode.Raw;
             if (_nativeHandle != IntPtr.Zero)
                 NativeLocalizerBridge.vl_reset(_nativeHandle);
+        }
+
+        /// <summary>
+        /// Returns debug diagnostics from the last processed frame.
+        /// Requires native lib with vl_get_debug_info; returns default if unavailable.
+        /// </summary>
+        internal VLDebugInfo GetDebugInfo()
+        {
+            if (_nativeHandle == IntPtr.Zero)
+                return default;
+            return NativeLocalizerBridge.GetDebugInfoSafe(_nativeHandle);
         }
 
         public void Dispose()
@@ -139,6 +186,22 @@ namespace AreaTargetPlugin
             for (int i = 0; i < descriptors.Count; i++)
             {
                 Buffer.BlockCopy(descriptors[i], 0, flat, i * 32, 32);
+            }
+            return flat;
+        }
+
+        /// <summary>
+        /// Concatenates a list of 61-byte AKAZE descriptors into a single flat byte array.
+        /// </summary>
+        internal static byte[] FlattenAkazeDescriptors(List<byte[]> descriptors)
+        {
+            if (descriptors == null || descriptors.Count == 0)
+                return Array.Empty<byte>();
+
+            byte[] flat = new byte[descriptors.Count * 61];
+            for (int i = 0; i < descriptors.Count; i++)
+            {
+                Buffer.BlockCopy(descriptors[i], 0, flat, i * 61, 61);
             }
             return flat;
         }
