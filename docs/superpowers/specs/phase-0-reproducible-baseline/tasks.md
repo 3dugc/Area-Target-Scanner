@@ -1014,6 +1014,8 @@ git commit -m "docs: document phase 0 support baseline"
 
 ## 任务 9：完整的干净检出验收
 
+> 进度：已完成。主工作区和基于 `5cbc20e` 的临时干净 worktree 均完成完整本地门禁；验证记录见 `docs/phase-0-validation.md`。未执行推送、标签、Release 或合并。
+
 **对应需求：** 全部需求和验收标准
 
 **涉及文件：**
@@ -1021,7 +1023,7 @@ git commit -m "docs: document phase 0 support baseline"
 - 新建：`docs/phase-0-validation.md`
 - 更新：随着检查完成同步更新本 `tasks.md`
 
-- [ ] **步骤 1：在当前工作目录运行全部快速测试**
+- [x] **步骤 1：在当前工作目录运行全部快速测试**
 
 ```bash
 python3 -m pytest tests/ -v --tb=short
@@ -1032,7 +1034,7 @@ python3 -m pytest tests/phase0 -v
 
 预期结果：所有命令均返回零。
 
-- [ ] **步骤 2：运行完整本地门禁**
+- [x] **步骤 2：运行完整本地门禁**
 
 ```bash
 tools/phase0/verify.sh local | tee phase0-results/phase0-local.log
@@ -1040,7 +1042,7 @@ tools/phase0/verify.sh local | tee phase0-results/phase0-local.log
 
 预期结果：每个必需检查项都是 `PASS`，没有必需检查项为 `SKIP`。
 
-- [ ] **步骤 3：在干净 worktree 中验证可重复性**
+- [x] **步骤 3：在干净 worktree 中验证可重复性**
 
 ```bash
 git worktree add /tmp/area-target-phase0-clean HEAD
@@ -1051,7 +1053,7 @@ tools/phase0/verify.sh local | tee phase0-results/phase0-clean.log
 
 预期结果：完整门禁在干净 worktree 中通过。
 
-- [ ] **步骤 4：根据实际版本和结果创建验证记录**
+- [x] **步骤 4：根据实际版本和结果创建验证记录**
 
 运行以下命令，然后使用命令原始输出以及两份日志中真实的 PASS/FAIL/SKIP 结果创建 `docs/phase-0-validation.md`：
 
@@ -1068,7 +1070,7 @@ cmake --version
 
 只复制结果摘要，不得复制完整扫描数据或设备隐私内容。
 
-- [ ] **步骤 5：确认源码状态干净**
+- [x] **步骤 5：确认源码状态干净**
 
 ```bash
 git status --short
@@ -1077,14 +1079,14 @@ git diff --check
 
 预期结果：没有意外源码变更。`dist/`、`build/`、`phase0-results/` 和临时验证项目保持被忽略或位于仓库之外。
 
-- [ ] **步骤 6：提交最终验证记录和已完成任务状态**
+- [x] **步骤 6：提交最终验证记录和已完成任务状态**
 
 ```bash
 git add docs/phase-0-validation.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
 git commit -m "chore: validate reproducible v1.2.1 baseline"
 ```
 
-- [ ] **步骤 7：移除临时干净 worktree**
+- [x] **步骤 7：移除临时干净 worktree**
 
 返回主 worktree，然后运行：
 
@@ -1094,7 +1096,7 @@ git worktree remove /tmp/area-target-phase0-clean
 
 预期结果：临时 worktree 已移除，主 worktree 保持不变。
 
-- [ ] **步骤 8：执行外部发布操作前验证验收状态**
+- [x] **步骤 8：执行外部发布操作前验证验收状态**
 
 ```bash
 git status --short --branch
