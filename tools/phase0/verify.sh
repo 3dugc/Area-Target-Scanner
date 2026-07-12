@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MODE="${1:-local}"
-CHECKS=(metadata hygiene python docker native ios-archive xcode unity upm)
+CHECKS=(metadata hygiene python docker native native-python ios-archive xcode unity upm)
 
 if [[ "$MODE" == "--list" ]]; then
   printf '%s\n' "${CHECKS[@]}"
@@ -39,6 +39,7 @@ run python "$PYTHON" -m pytest tests/ -v --tb=short
 run docker-config docker compose config --quiet
 run docker-build docker build -t area-target-scanner-phase0 .
 run native native_visual_localizer/build_macos.sh
+run native-python "$PYTHON" -m pytest tests/test_native_localizer.py -v --tb=short
 run ios-archive tools/phase0/check_native_symbols.sh unity_project/Assets/Plugins/iOS/libvisual_localizer.a
 
 if [[ "$MODE" == "ci" ]]; then
