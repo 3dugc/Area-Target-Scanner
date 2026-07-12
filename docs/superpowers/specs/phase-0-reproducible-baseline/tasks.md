@@ -962,6 +962,8 @@ git commit -m "ci: enforce phase 0 baseline checks"
 
 ## 任务 8：基线文档与支持范围声明
 
+> 进度：已完成。根 README 和包 README 已明确区分源码能力与阶段 0 验证边界，并记录规范验证/打包命令、实际工具版本和回滚基线。
+
 **对应需求：** R0.8
 
 **涉及文件：**
@@ -970,7 +972,7 @@ git commit -m "ci: enforce phase 0 baseline checks"
 - 修改：`unity_plugin/AreaTargetPlugin/README.md`
 - 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
 
-- [ ] **步骤 1：添加明确的阶段 0 支持范围表**
+- [x] **步骤 1：添加明确的阶段 0 支持范围表**
 
 在根 README 和包 README 中写明：
 
@@ -983,7 +985,7 @@ git commit -m "ci: enforce phase 0 baseline checks"
 | Android ARM64 | 计划在阶段 2 实施；阶段 0 不支持 |
 | Windows/Linux 运行时 | 不支持；已移除空占位文件 |
 
-- [ ] **步骤 2：修正构建和打包说明**
+- [x] **步骤 2：修正构建和打包说明**
 
 记录以下规范命令：
 
@@ -995,7 +997,7 @@ tools/phase0/validate_unity_package.sh
 
 删除把受 Git 跟踪的 `1.2.0` 归档作为当前版本的说明。
 
-- [ ] **步骤 3：检查文档中的能力声明**
+- [x] **步骤 3：检查文档中的能力声明**
 
 ```bash
 rg -n "supports.*Android|Windows|Linux|Rokid|支持.*Android|支持.*Windows|支持.*Linux|支持.*Rokid" README.md unity_plugin/AreaTargetPlugin/README.md
@@ -1003,7 +1005,7 @@ rg -n "supports.*Android|Windows|Linux|Rokid|支持.*Android|支持.*Windows|支
 
 预期结果：所有剩余匹配项都明确标注为“不支持”或“计划中”，或者有阶段 0 验证证据支撑。
 
-- [ ] **步骤 4：提交任务 8**
+- [x] **步骤 4：提交任务 8**
 
 ```bash
 git add README.md unity_plugin/AreaTargetPlugin/README.md unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md

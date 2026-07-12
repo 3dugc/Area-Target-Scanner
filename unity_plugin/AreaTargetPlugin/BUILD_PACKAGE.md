@@ -7,9 +7,16 @@
 ### 前置条件
 
 - Python 3.11
+- OpenCV 4.x
 - 已通过 `native_visual_localizer/build_macos.sh`
 - `unity_project/Assets/Plugins/iOS/libvisual_localizer.a` 已通过原生符号检查
-- Unity 6000.3.11f1（仅干净安装验证时需要）
+- Unity 6000.4.6f1（本次干净安装验证版本）
+
+完整本地发布门禁：
+
+```bash
+tools/phase0/verify.sh local
+```
 
 ### 生成命令
 
