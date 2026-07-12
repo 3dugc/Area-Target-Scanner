@@ -1,4 +1,12 @@
-# Phase 0 Reproducible Baseline Specification
+# Phase 0 Reproducible Baseline Specification (Superseded Index)
+
+The approved Phase 0 specification has been normalized into the tracked three-file set:
+
+- `phase-0-reproducible-baseline/requirements.md`
+- `phase-0-reproducible-baseline/design.md`
+- `phase-0-reproducible-baseline/tasks.md`
+
+The content below is retained as the approved source snapshot. The three-file set is authoritative for execution and progress tracking.
 
 **Target version:** `v1.2.1`
 

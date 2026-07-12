@@ -60,7 +60,7 @@ Every phase produces a tagged internal version. A later phase may improve a prev
 
 Create a clean and repeatable baseline without changing localization behavior. From a clean checkout, the scanner, Docker pipeline, native smoke test, Unity Editor test project, and UPM package must build through documented commands. Repository artifacts, package metadata, dependencies, CI coverage, and verification commands are normalized.
 
-The dedicated Phase 0 specification is in `2026-07-12-phase-0-reproducible-baseline-spec.md`.
+The dedicated Phase 0 specification is in `phase-0-reproducible-baseline/requirements.md`, `design.md`, and `tasks.md`.
 
 ### Phase 1 — Complete iOS workflow (`v1.3.0`)
 
