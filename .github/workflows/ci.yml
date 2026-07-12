@@ -30,27 +30,49 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
           pip install -r web_service/requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run tests
-        run: >
-          python -m pytest
-          tests/test_web_job_store.py
-          tests/test_uv_unwrap_worker.py
-          tests/test_efficiency_profiles.py
-          tests/test_xatlas_native_helper.py
-          -v
-          --tb=short
+      - name: Run Phase 0 tests
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Validate package metadata
+        run: python tools/phase0/check_package_metadata.py unity_plugin/AreaTargetPlugin/package.json
+
+      - name: Build and inspect UPM package
+        run: |
+          python tools/phase0/build_upm_package.py
+          python -m pytest tests/phase0/test_upm_package.py -v
 
   web-service-image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
       - name: Build web service image
         run: docker build -t area-target-scanner-web-service-ci .
+
+  native-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: brew install cmake opencv
+
+      - name: Build and verify native library
+        run: native_visual_localizer/build_macos.sh
+
+      - name: Verify iOS archive contract
+        run: tools/phase0/check_native_symbols.sh unity_project/Assets/Plugins/iOS/libvisual_localizer.a
+
+  # Unity EditMode and clean-package installation remain required local release
+  # gates until a valid Unity license is configured in repository secrets.
 
   lint:
     runs-on: ubuntu-latest

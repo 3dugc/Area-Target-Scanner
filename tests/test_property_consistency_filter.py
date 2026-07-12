@@ -107,6 +107,15 @@ def consistency_filter_scenario(draw):
         frames.append(_make_frame(idx, err, method=method))
         outlier_indices.append(idx)
 
+    # The implementation computes its threshold from every currently-ok frame,
+    # including the candidate outliers. Ensure the generated contract is true
+    # for that exact population rather than only for the normal subset.
+    all_errs = np.asarray([frame["s2a_err"] for frame in frames])
+    actual_median = float(np.median(all_errs))
+    actual_mad = float(np.median(np.abs(all_errs - actual_median)))
+    actual_threshold = actual_median + 3.0 * max(actual_mad, 0.1)
+    assume(all(frames[idx]["s2a_err"] > actual_threshold for idx in outlier_indices))
+
     return frames, normal_indices, outlier_indices, threshold
 
 

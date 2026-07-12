@@ -874,6 +874,8 @@ git commit -m "test: add iOS and Unity baseline gates"
 
 ## 任务 7：将 CI 扩展到阶段 0 基线
 
+> 进度：已完成。工作流 YAML 解析通过；`verify.sh ci` 报告 Python `299 passed, 3 skipped`、Docker 配置与镜像构建、macOS 原生库、iOS archive、UPM 生成与内容检查全部通过，Xcode 和 Unity 按设计明确报告 `SKIP`。
+
 **对应需求：** R0.7
 
 **涉及文件：**
@@ -881,7 +883,7 @@ git commit -m "test: add iOS and Unity baseline gates"
 - 修改：`.github/workflows/ci.yml`
 - 修改：`requirements-dev.txt`
 
-- [ ] **步骤 1：替换抽样执行的 Python 测试命令**
+- [x] **步骤 1：替换抽样执行的 Python 测试命令**
 
 Linux Python job 必须安装三组依赖并执行：
 
@@ -905,7 +907,7 @@ Linux Python job 必须安装三组依赖并执行：
     python -m pytest tests/phase0/test_upm_package.py -v
 ```
 
-- [ ] **步骤 2：在镜像构建前添加 Docker 配置验证**
+- [x] **步骤 2：在镜像构建前添加 Docker 配置验证**
 
 ```yaml
 - name: Validate Docker Compose
@@ -915,7 +917,7 @@ Linux Python job 必须安装三组依赖并执行：
   run: docker build -t area-target-scanner-web-service-ci .
 ```
 
-- [ ] **步骤 3：添加 macOS 原生构建 job**
+- [x] **步骤 3：添加 macOS 原生构建 job**
 
 ```yaml
 native-macos:
@@ -930,11 +932,11 @@ native-macos:
       run: tools/phase0/check_native_symbols.sh unity_project/Assets/Plugins/iOS/libvisual_localizer.a
 ```
 
-- [ ] **步骤 4：在工作流注释中记录 Unity 本地门禁例外**
+- [x] **步骤 4：在工作流注释中记录 Unity 本地门禁例外**
 
 添加注释说明：在仓库 secrets 配置有效的 Unity 许可证前，Unity EditMode 仍是必需的本地发布门禁。不得添加虚假的绿色 Unity job。
 
-- [ ] **步骤 5：添加工作流解析依赖**
+- [x] **步骤 5：添加工作流解析依赖**
 
 在 `requirements-dev.txt` 中添加：
 
@@ -942,7 +944,7 @@ native-macos:
 PyYAML>=6.0,<7
 ```
 
-- [ ] **步骤 6：验证工作流语法和本地 CI 模式**
+- [x] **步骤 6：验证工作流语法和本地 CI 模式**
 
 ```bash
 python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml"))'
@@ -951,7 +953,7 @@ tools/phase0/verify.sh ci
 
 预期结果：YAML 解析成功；所有 CI 模式检查通过，Xcode/Unity 被明确报告为 `SKIP`。
 
-- [ ] **步骤 7：提交任务 7**
+- [x] **步骤 7：提交任务 7**
 
 ```bash
 git add .github/workflows/ci.yml requirements-dev.txt docs/superpowers/specs/phase-0-reproducible-baseline/tasks.md
