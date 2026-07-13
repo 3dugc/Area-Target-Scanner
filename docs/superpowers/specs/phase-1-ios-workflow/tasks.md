@@ -24,6 +24,12 @@
 
 ## 任务 1：建立跨语言坐标契约 fixture
 
+> 进度：已完成（2026-07-13）。隔离 worktree 已建立；实施前 Python 基线为 `281 passed, 4 skipped`。步骤 1–8 已完成，尚未开始任务 2。
+>
+> 环境记录：本机未安装计划中写明的 `iPhone 16 Pro` simulator；任务 1 的 Swift 验证改用已安装的 `iPhone 17 Pro (iOS 26.3.1)`，测试语义不变。
+>
+> 验证证据：Python fixture 与既有 feature DB 测试 `33 passed`；完整 Python 套件 `286 passed, 4 skipped`；Swift 的 `CoordinateContractTests` 在 iPhone 17 Pro simulator 上 `3 passed`；Unity EditMode fixture 测试 `2 passed`。合同检查器输出的 `T_U_S` 平移为 `(5, 7, 9)`，且 `git diff --check` 通过。Unity 运行时自动迁移的项目设置已按阶段 0 的既有惯例还原，未纳入本任务。
+
 **对应需求：** R1.1、R1.6
 
 **可运行产物：** 一个不含真实图片的 `coordinate-contract-v1.json`，可由 Swift、Python 和 Unity 测试读取并验证同一组矩阵、内参和图像方向。
@@ -34,10 +40,13 @@
 - 新建：`tools/phase1/validate_scan_contract.py`
 - 新建：`tests/phase1/test_scan_contract.py`
 - 新建：`ios_scanner/AreaTargetScannerTests/CoordinateContractTests.swift`
+- 新建：`unity_plugin/AreaTargetPlugin/Tests/CoordinateContractFixtureTests.cs`
+- 新建：`unity_plugin/AreaTargetPlugin/Tests/CoordinateContractFixtureTests.cs.meta`
+- 修改：`ios_scanner/AreaTargetScanner.xcodeproj/project.pbxproj`（测试 target 与 fixture resource）
 - 修改：`tests/test_feature_db.py`
 - 修改：`unity_plugin/AreaTargetPlugin/Tests/AreaTargetPlugin.Tests.asmdef`
 
-- [ ] **步骤 1：定义 fixture 的固定语义和数值**
+- [x] **步骤 1：定义 fixture 的固定语义和数值**
 
 创建 `tests/fixtures/phase1/coordinate-contract-v1.json`，其中必须包含：
 
@@ -73,7 +82,7 @@
 
 数组在 JSON 中一律为 row-major；Swift 测试额外构造其等价的 ARKit column-major `simd_float4x4`，证明导出转换后仍等于 fixture 的 row-major 语义。
 
-- [ ] **步骤 2：先添加会失败的 Python fixture 验证测试**
+- [x] **步骤 2：先添加会失败的 Python fixture 验证测试**
 
 创建 `tests/phase1/test_scan_contract.py`，测试应调用尚不存在的 checker，并覆盖：正确 fixture、16 元矩阵长度错误、未知方向、无效内参和错误的 `T_U_S`。
 
@@ -93,7 +102,7 @@ def test_wrong_composed_pose_is_rejected(tmp_path):
     assert "T_U_S" in result.stderr
 ```
 
-- [ ] **步骤 3：运行测试并确认因 checker 缺失而失败**
+- [x] **步骤 3：运行测试并确认因 checker 缺失而失败**
 
 运行：
 
@@ -103,7 +112,7 @@ venv/bin/python -m pytest tests/phase1/test_scan_contract.py -v
 
 预期结果：失败，错误指出 `tools/phase1/validate_scan_contract.py` 尚不存在。
 
-- [ ] **步骤 4：实现纯 Python 合同检查器**
+- [x] **步骤 4：实现纯 Python 合同检查器**
 
 创建 `tools/phase1/validate_scan_contract.py`。该脚本必须：
 
@@ -127,7 +136,7 @@ if not numpy.allclose(actual, expected, atol=1e-5):
 
 若项目未声明 NumPy 为验证脚本依赖，使用标准库实现 4×4 乘法，避免新增依赖。
 
-- [ ] **步骤 5：补全 Python 测试并确认通过**
+- [x] **步骤 5：补全 Python 测试并确认通过**
 
 运行：
 
@@ -137,7 +146,13 @@ venv/bin/python -m pytest tests/phase1/test_scan_contract.py tests/test_feature_
 
 预期结果：所有测试通过；测试输出明确显示 fixture 被接受，四类损坏输入均被拒绝。
 
-- [ ] **步骤 6：添加 Swift fixture 互操作测试**
+- [x] **步骤 5a：添加 Unity fixture-only Editor 测试**
+
+新增 `CoordinateContractFixtureTests.cs`，通过 `Application.dataPath` 回溯到仓库根目录读取同一份 `tests/fixtures/phase1/coordinate-contract-v1.json`。测试只验证 fixture 数据合同：schema、方向、row-major 矩阵长度和 `T_U_S` 平移 `(5, 7, 9)`；不得新增 Runtime 坐标转换类或改变 tracker。`CoordinateTransform` 的行为测试仍保留在任务 4。
+
+原因：任务 1 的产物要求 Swift、Python 和 Unity 都读取同一 fixture；原计划未列出对应 Unity 测试步骤，本步骤是保持该已确认产物所需的最小补正。
+
+- [x] **步骤 6：添加 Swift fixture 互操作测试**
 
 创建 `ios_scanner/AreaTargetScannerTests/CoordinateContractTests.swift`。测试读取 bundle 中的 fixture，并验证：
 
@@ -153,7 +168,7 @@ XCTAssertEqual(result.columns.3.y, 7, accuracy: 0.00001)
 XCTAssertEqual(result.columns.3.z, 9, accuracy: 0.00001)
 ```
 
-- [ ] **步骤 7：运行 Swift 测试和 Python 测试**
+- [x] **步骤 7：运行 Swift 测试和 Python 测试**
 
 运行：
 
@@ -165,9 +180,11 @@ xcodebuild test \
 venv/bin/python -m pytest tests/phase1/test_scan_contract.py -v
 ```
 
-预期结果：两个测试入口均通过；若本机不存在指定 simulator，记录 `SKIP` 和可用 simulator 名称，Python 测试仍必须通过。
+另在 Unity Test Runner 运行 `AreaTargetPlugin.Tests/CoordinateContractFixtureTests`。
 
-- [ ] **步骤 8：提交任务 1**
+预期结果：三个测试入口均通过；若本机不存在指定 simulator，记录 `SKIP` 和可用 simulator 名称，Python 和 Unity 测试仍必须通过。
+
+- [x] **步骤 8：提交任务 1**
 
 ```bash
 git add \
@@ -175,6 +192,9 @@ git add \
   tools/phase1/validate_scan_contract.py \
   tests/phase1/test_scan_contract.py \
   ios_scanner/AreaTargetScannerTests/CoordinateContractTests.swift \
+  ios_scanner/AreaTargetScanner.xcodeproj/project.pbxproj \
+  unity_plugin/AreaTargetPlugin/Tests/CoordinateContractFixtureTests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/CoordinateContractFixtureTests.cs.meta \
   tests/test_feature_db.py \
   docs/superpowers/specs/phase-1-ios-workflow/tasks.md
 git commit -m "test: define phase 1 coordinate contract"
