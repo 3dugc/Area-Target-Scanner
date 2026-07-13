@@ -292,6 +292,21 @@ class TestPhase1PoseBlobContract:
             np.frombuffer(pose_blob, dtype=np.float64), expected_values
         )
 
+    def test_round_trips_float32_affine_tail_from_arkit(self, tmp_path):
+        keyframe = _make_keyframe(0, n_features=0)
+        keyframe.camera_pose[3, 3] = 0.9999999403953552
+        db_path = str(tmp_path / "features.db")
+
+        save_feature_database(FeatureDatabase(keyframes=[keyframe]), db_path)
+        loaded = load_feature_database(db_path)
+
+        np.testing.assert_allclose(
+            loaded.keyframes[0].camera_pose,
+            keyframe.camera_pose,
+            rtol=0.0,
+            atol=1e-6,
+        )
+
     def test_rejects_column_major_blob_that_violates_row_major_affine_contract(
         self, tmp_path
     ):

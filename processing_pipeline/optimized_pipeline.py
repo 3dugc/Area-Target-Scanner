@@ -67,7 +67,9 @@ def arkit_column_major_to_matrix(values: list[float]) -> np.ndarray:
         raise ValueError("ARKit transform must contain only finite values")
 
     matrix = array.reshape((4, 4), order="F")
-    if not np.allclose(matrix[3], [0.0, 0.0, 0.0, 1.0], rtol=0.0, atol=1e-9):
+    # ARKit exports simd_float4x4 values. JSON preserves their float32
+    # rounding, so an affine 1.0 can arrive as 0.99999994.
+    if not np.allclose(matrix[3], [0.0, 0.0, 0.0, 1.0], rtol=0.0, atol=1e-6):
         raise ValueError("ARKit transform must have affine last row [0, 0, 0, 1]")
     return matrix
 
