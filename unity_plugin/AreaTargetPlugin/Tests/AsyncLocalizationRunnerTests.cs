@@ -77,6 +77,30 @@ namespace AreaTargetPlugin.Tests
         }
 
         [Test]
+        public async Task ResultProduced_PublishesWorkerOutcomeBeforeMainThreadConsumption()
+        {
+            var processor = new BlockingProcessor { BlockProcess = false };
+            var runner = new AsyncLocalizationRunner(processor);
+            var published = new TaskCompletionSource<LocalizationFrameResult>();
+            runner.ResultProduced += result => published.TrySetResult(result);
+
+            try
+            {
+                Assert.That(runner.Start(), Is.True);
+                Assert.That(runner.Submit(CreateFrame(8, 100)), Is.True);
+
+                await WaitFor(published.Task, "The worker did not publish its localization outcome.");
+                LocalizationFrameResult result = await published.Task;
+                Assert.That(result.FrameId, Is.EqualTo(8));
+                Assert.That(result.FailureCategory, Is.EqualTo(LocalizationFailureCategory.None));
+            }
+            finally
+            {
+                await runner.DisposeAsync();
+            }
+        }
+
+        [Test]
         public async Task ResetAsync_WaitsForWorkerBeforeResettingProcessor()
         {
             var processor = new BlockingProcessor();
@@ -168,6 +192,34 @@ namespace AreaTargetPlugin.Tests
         }
 
         [Test]
+        public async Task TryDequeueLatest_WhenResultIsRejected_ExposesOneDiagnosticSummary()
+        {
+            var processor = new BlockingProcessor { BlockProcess = false };
+            var runner = new AsyncLocalizationRunner(processor);
+
+            try
+            {
+                Assert.That(runner.Start(), Is.True);
+                Assert.That(runner.Submit(CreateFrame(6, 100)), Is.True);
+                await WaitFor(processor.WaitUntilProcessedAsync(6), "The worker did not process frame 6.");
+
+                Assert.That(runner.TryDequeueLatest("fixture-map", 0, 201, 100, out _), Is.False);
+                Assert.That(
+                    runner.TryTakeLatestRejection(
+                        out LocalizationFrameResult rejected,
+                        out string rejectionReason),
+                    Is.True);
+                Assert.That(rejected.FrameId, Is.EqualTo(6));
+                Assert.That(rejectionReason, Does.Contain("stale"));
+                Assert.That(runner.TryTakeLatestRejection(out _, out _), Is.False);
+            }
+            finally
+            {
+                await runner.DisposeAsync();
+            }
+        }
+
+        [Test]
         public async Task StartAndDisposeAsync_HavePredictableRepeatedLifecycleBehavior()
         {
             var processor = new BlockingProcessor { BlockProcess = false };
@@ -188,6 +240,8 @@ namespace AreaTargetPlugin.Tests
         {
             var processor = new ThrowingProcessor();
             var runner = new AsyncLocalizationRunner(processor);
+            var published = new TaskCompletionSource<LocalizationFrameResult>();
+            runner.ResultProduced += result => published.TrySetResult(result);
 
             try
             {
@@ -199,6 +253,10 @@ namespace AreaTargetPlugin.Tests
                     runner, "fixture-map", 0, 101, 100,
                     "The worker exception was not published as a result.");
                 Assert.That(result.FailureCategory, Is.EqualTo(LocalizationFailureCategory.LifecycleFailure));
+                await WaitFor(published.Task, "The worker failure was not published to diagnostics.");
+                Assert.That(
+                    (await published.Task).FailureCategory,
+                    Is.EqualTo(LocalizationFailureCategory.LifecycleFailure));
                 Assert.That(runner.Submit(CreateFrame(2, 200)), Is.False);
             }
             finally

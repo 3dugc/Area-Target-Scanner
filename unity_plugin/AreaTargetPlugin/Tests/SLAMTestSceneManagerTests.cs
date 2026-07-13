@@ -26,6 +26,7 @@ namespace AreaTargetPlugin.Tests
 
             Assert.That(source, Does.Contain("_tracker.SubmitFrame(frame)"));
             Assert.That(source, Does.Contain("_tracker.TryGetLatestTrackingResult("));
+            Assert.That(source, Does.Contain("debugPanel?.SetDiagnosticSummary("));
             Assert.That(source, Does.Not.Contain("LocalizationThreadWorker"));
             Assert.That(source, Does.Not.Contain("Thread.Sleep(2)"));
             Assert.That(source, Does.Not.Contain("BindingFlags."));

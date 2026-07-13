@@ -76,6 +76,25 @@ namespace AreaTargetPlugin.Tests
             Assert.IsTrue(text.Contains("85%"), $"Expected text to contain '85%', got: '{text}'");
         }
 
+        [Test]
+        public void SetDiagnosticSummary_DisplaysOperationalScalarsWithoutPose()
+        {
+            _debugPanel.SetDiagnosticSummary(
+                frameId: 42,
+                resultAgeNs: 1_500_000,
+                state: AreaTargetPlugin.TrackingState.TRACKING,
+                quality: AreaTargetPlugin.LocalizationQuality.LOCALIZED,
+                inliers: 48,
+                workerProcessingTimeNs: 3_200_000);
+
+            string text = _trackingInfoText.text;
+            Assert.That(text, Does.Contain("42"));
+            Assert.That(text, Does.Contain("TRACKING"));
+            Assert.That(text, Does.Contain("LOCALIZED"));
+            Assert.That(text, Does.Contain("48"));
+            Assert.That(text, Does.Not.Contain("Matrix4x4"));
+        }
+
         #endregion
 
         #region Clear Tests (Requirement 3.4, 3.5)

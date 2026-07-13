@@ -113,7 +113,7 @@ namespace AreaTargetPlugin
                     mapGeneration,
                     workerStartedTimestampNs,
                     workerCompletedTimestampNs,
-                    LocalizationFailureCategory.NativeLocalizationFailed,
+                    LocalizationFailureCategory.LocalizationFailed,
                     nativeDebugInfo);
             }
 
@@ -141,7 +141,7 @@ namespace AreaTargetPlugin
                     mapGeneration,
                     workerStartedTimestampNs,
                     workerCompletedTimestampNs,
-                    LocalizationFailureCategory.InvalidNativePose,
+                    LocalizationFailureCategory.InvalidFrame,
                     nativeDebugInfo);
             }
         }

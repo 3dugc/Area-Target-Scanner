@@ -695,6 +695,10 @@ git commit -m "feat: run localization off Unity main thread"
 
 **可运行产物：** Runtime 可以导出有界 JSON Lines 诊断；测试证明其中没有图像、ZIP 或绝对用户路径。
 
+> **进度（2026-07-13）：** 步骤 1–6 已完成。`LocalizationDiagnosticRecord` 固定 schema `1` 并仅序列化身份、帧、定位和 native 数值摘要；`BoundedDiagnosticBuffer` 是线程安全 FIFO，满时丢弃最旧记录并累计计数。`LocalizationDiagnosticExporter` 在创建目录前拒绝路径分隔符与图像/扫描标记，按 UTC 和 map hash 写 JSON Lines。tracker 对帧提交、pending 覆盖、地图/SQLite/native 初始化失败、reset、dispose、过期结果和最终应用结果写入记录；runner 通过内部 `ResultProduced` 事件在 worker 产出 native 结果时直接写入同一 buffer，不改变公开 API。两个场景只显示最新标量摘要。
+>
+> **验证证据：** schema 测试先产生预期 C# 编译失败，随后模型 `3/3`、补齐 capture timestamp 后 `5/5` 通过；worker 结果事件 `1/1` 通过（`/private/tmp/phase1-task6-worker-event-green.xml`）；真实 `SLAMTestAssets` 初始化、native worker 结果和 JSONL 导出 `1/1` 通过（`/private/tmp/phase1-task6-sample-worker-export.xml`）。还原临时导出路径后，完整 Unity EditMode 回归 `987/987` 通过、`0` 失败（`/private/tmp/phase1-task6-editmode-restored.xml`）；真实样例 JSONL（`/private/tmp/phase1-task6-manual-sample-20260713t1018/20260713T101852924Z_3d5ea46587a0.jsonl`）执行规定的 `rg` 检查无输出。
+
 **涉及文件：**
 
 - 新建：`unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticRecord.cs`
@@ -706,7 +710,9 @@ git commit -m "feat: run localization off Unity main thread"
 - 修改：`unity_project/Assets/Scripts/ARTestSceneManager.cs`
 - 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMDebugPanel.cs`
 
-- [ ] **步骤 1：添加失败的诊断 schema 与隐私测试**
+> 最小必要接入：为满足“worker 也可写入诊断”的设计约束，另修改 `AsyncLocalizationRunner.cs` 与其测试；为让 SLAM 场景实际调用面板摘要，另修改 `SLAMTestSceneManager.cs` 与其测试。这些改动不新增公开 Runtime API。
+
+- [x] **步骤 1：添加失败的诊断 schema 与隐私测试**
 
 在 `LocalizationDiagnosticTests.cs` 中构造一条完整记录，序列化后断言包含 schema、包版本、map hash、设备、frame ID、queue、latency、quality 和 native debug 字段；同时断言序列化文本不包含：
 
@@ -720,27 +726,27 @@ file://
 
 添加 buffer 上限为 2 时插入 3 条记录，断言保留最后两条且 `DroppedRecordCount == 1`。
 
-- [ ] **步骤 2：运行诊断测试并确认失败**
+- [x] **步骤 2：运行诊断测试并确认失败**
 
 在 Unity Test Runner 运行 `AreaTargetPlugin.Tests/LocalizationDiagnosticTests`。
 
 预期结果：失败，因为诊断模型和 exporter 尚不存在。
 
-- [ ] **步骤 3：实现版本化诊断记录与固定错误类别**
+- [x] **步骤 3：实现版本化诊断记录与固定错误类别**
 
 `LocalizationDiagnosticRecord` 的 schema 版本固定为 `1`；定义 `LocalizationFailureCategory`：`None`、`UnsupportedDevice`、`InvalidFrame`、`MapLoadFailed`、`NativeInitializationFailed`、`SqliteFailed`、`LocalizationFailed`、`StaleResult`、`LifecycleFailure`。
 
 记录允许存 `MapId`、`MapVersion`、`MapHash`，但不存 scan ZIP 名称、扫描目录、图像内容或真实场地名称。帧记录仅保存数值摘要，`T_U_S` 只记录是否应用和可选的量化平移/旋转摘要，不保存完整原始矩阵到默认导出。
 
-- [ ] **步骤 4：实现有界 buffer 与 exporter**
+- [x] **步骤 4：实现有界 buffer 与 exporter**
 
 `BoundedDiagnosticBuffer` 构造时要求正容量，按 FIFO 丢弃最旧记录。`LocalizationDiagnosticExporter` 以一行一个 JSON 对象写入应用 diagnostics 目录，文件名由 UTC 时间与 map hash 前缀组成。导出前校验每个记录的字符串字段不含路径分隔符和禁止字段名；违反时返回失败类别而不写文件。
 
-- [ ] **步骤 5：将 runner/tracker 事件写入诊断**
+- [x] **步骤 5：将 runner/tracker 事件写入诊断**
 
 在帧提交、pending 覆盖、native 成功/失败、过期结果、reset、dispose、地图加载和 SQLite/native 初始化失败处写一条诊断记录。实时 UI 只显示最近一条摘要：frame ID、结果年龄、state、quality、inlier 与 worker 耗时；不要在每帧 `Debug.Log` 整个 pose。
 
-- [ ] **步骤 6：运行 Unity 回归测试并手动导出样本**
+- [x] **步骤 6：运行 Unity 回归测试并手动导出样本**
 
 在 Unity Test Runner 执行 `LocalizationDiagnosticTests`、`ARTestSceneDebugUITests`、`SLAMDebugPanelTests`。随后在 Editor sample 中加载已有测试地图并导出一份诊断文件，检查：
 
@@ -750,19 +756,31 @@ rg -n "ImageData|JPEG|ScanData|/Users/|file://" /path/to/diagnostic.jsonl
 
 预期结果：测试通过；`rg` 无输出，诊断文件包含 schema 和 frame 摘要。
 
-- [ ] **步骤 7：提交任务 6**
+- [x] **步骤 7：提交任务 6**
 
 ```bash
 git add \
+  docs/superpowers/specs/phase-1-ios-workflow/tasks.md \
   unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticRecord.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticRecord.cs.meta \
   unity_plugin/AreaTargetPlugin/Runtime/BoundedDiagnosticBuffer.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/BoundedDiagnosticBuffer.cs.meta \
   unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticExporter.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticExporter.cs.meta \
   unity_plugin/AreaTargetPlugin/Tests/LocalizationDiagnosticTests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/LocalizationDiagnosticTests.cs.meta \
+  unity_plugin/AreaTargetPlugin/Runtime/AsyncLocalizationRunner.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationFrameResult.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/VisualLocalizationEngine.cs \
   unity_plugin/AreaTargetPlugin/Runtime/ExtendedDebugInfo.cs \
   unity_plugin/AreaTargetPlugin/Runtime/AreaTargetTracker.cs \
+  unity_plugin/AreaTargetPlugin/Tests/AsyncLocalizationRunnerTests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/ARTestSceneDebugUITests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/SLAMDebugPanelTests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/SLAMTestSceneManagerTests.cs \
   unity_project/Assets/Scripts/ARTestSceneManager.cs \
   unity_project/Assets/Scripts/SLAMTestScene/SLAMDebugPanel.cs \
-  docs/superpowers/specs/phase-1-ios-workflow/tasks.md
+  unity_project/Assets/Scripts/SLAMTestScene/SLAMTestSceneManager.cs
 git commit -m "feat: add bounded iOS localization diagnostics"
 ```
 

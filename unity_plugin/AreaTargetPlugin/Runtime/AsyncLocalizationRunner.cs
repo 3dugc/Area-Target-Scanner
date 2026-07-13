@@ -34,6 +34,8 @@ namespace AreaTargetPlugin
         private long _lastProcessorGeneration;
         private Matrix4x4? _pendingAlignment;
         private LocalizationFrameResult? _latestResult;
+        private LocalizationFrameResult? _latestRejectedResult;
+        private string _latestRejectedResultReason;
         private TaskCompletionSource<bool> _resetCompletion;
         private TaskCompletionSource<bool> _alignmentCompletion;
         private TaskCompletionSource<bool> _disposeCompletion;
@@ -86,6 +88,13 @@ namespace AreaTargetPlugin
                 }
             }
         }
+
+        /// <summary>
+        /// Raised on the worker after a current-generation native outcome is
+        /// published. Consumers must treat the result as immutable and avoid
+        /// Unity scene APIs from this callback.
+        /// </summary>
+        internal event Action<LocalizationFrameResult> ResultProduced;
 
         /// <summary>Starts the single worker once. Repeated calls return false.</summary>
         internal bool Start()
@@ -167,6 +176,14 @@ namespace AreaTargetPlugin
                         || ageNs > maxAgeNs
                         || candidate.FrameId <= _lastDeliveredFrameId)
                     {
+                        _latestRejectedResult = candidate;
+                        _latestRejectedResultReason = GetRejectionReason(
+                            candidate,
+                            expectedMapId,
+                            expectedGeneration,
+                            ageNs,
+                            maxAgeNs,
+                            _lastDeliveredFrameId);
                         return false;
                     }
 
@@ -174,6 +191,30 @@ namespace AreaTargetPlugin
                     result = candidate;
                     return true;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Returns the latest result rejected by <see cref="TryDequeueLatest"/> once.
+        /// The tracker consumes it only to record why a frame was not applied.
+        /// </summary>
+        internal bool TryTakeLatestRejection(
+            out LocalizationFrameResult result,
+            out string rejectionReason)
+        {
+            result = default;
+            rejectionReason = string.Empty;
+
+            lock (_outputLock)
+            {
+                if (!_latestRejectedResult.HasValue)
+                    return false;
+
+                result = _latestRejectedResult.Value;
+                rejectionReason = _latestRejectedResultReason ?? string.Empty;
+                _latestRejectedResult = null;
+                _latestRejectedResultReason = null;
+                return true;
             }
         }
 
@@ -205,6 +246,8 @@ namespace AreaTargetPlugin
                 lock (_outputLock)
                 {
                     _latestResult = null;
+                    _latestRejectedResult = null;
+                    _latestRejectedResultReason = null;
                 }
 
                 _resetCompletion = new TaskCompletionSource<bool>();
@@ -265,6 +308,8 @@ namespace AreaTargetPlugin
                 lock (_outputLock)
                 {
                     _latestResult = null;
+                    _latestRejectedResult = null;
+                    _latestRejectedResultReason = null;
                 }
 
                 completion = new TaskCompletionSource<bool>();
@@ -425,6 +470,7 @@ namespace AreaTargetPlugin
 
         private void PublishIfCurrent(LocalizationFrameResult result)
         {
+            bool published = false;
             lock (_inputLock)
             {
                 if (_stopRequested
@@ -438,8 +484,12 @@ namespace AreaTargetPlugin
                 lock (_outputLock)
                 {
                     _latestResult = result;
+                    published = true;
                 }
             }
+
+            if (published)
+                NotifyResultProduced(result);
         }
 
         private void StopForWorkerFailure(
@@ -448,6 +498,7 @@ namespace AreaTargetPlugin
             Exception exception)
         {
             long failedAtNs = GetMonotonicTimestampNs();
+            LocalizationFrameResult? publishedFailure = null;
 
             lock (_inputLock)
             {
@@ -472,12 +523,35 @@ namespace AreaTargetPlugin
                     {
                         _latestResult = failure;
                     }
+                    publishedFailure = failure;
                 }
 
                 _lastWorkerExceptionSummary = exception.Message;
                 _acceptingFrames = false;
                 _stopRequested = true;
                 _pendingFrame = null;
+            }
+
+            if (publishedFailure.HasValue)
+                NotifyResultProduced(publishedFailure.Value);
+        }
+
+        private void NotifyResultProduced(LocalizationFrameResult result)
+        {
+            Action<LocalizationFrameResult> subscribers = ResultProduced;
+            if (subscribers == null)
+                return;
+
+            foreach (Action<LocalizationFrameResult> subscriber in subscribers.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(result);
+                }
+                catch (Exception)
+                {
+                    // Diagnostics callbacks must not terminate the native owner.
+                }
             }
         }
 
@@ -508,6 +582,8 @@ namespace AreaTargetPlugin
                     {
                         _latestResult = null;
                     }
+                    _latestRejectedResult = null;
+                    _latestRejectedResultReason = null;
                 }
             }
 
@@ -542,6 +618,28 @@ namespace AreaTargetPlugin
                 source.Orientation,
                 source.UnityWorldFromCamera,
                 source.MapId);
+        }
+
+        private static string GetRejectionReason(
+            LocalizationFrameResult candidate,
+            string expectedMapId,
+            long expectedGeneration,
+            long ageNs,
+            long maxAgeNs,
+            long lastDeliveredFrameId)
+        {
+            if (!string.Equals(candidate.MapId, expectedMapId, StringComparison.Ordinal))
+                return "Result map does not match the active map.";
+            if (candidate.MapGeneration != expectedGeneration)
+                return "Result belongs to an earlier map generation.";
+            if (ageNs < 0)
+                return "Result timestamp is newer than the consumer clock.";
+            if (ageNs > maxAgeNs)
+                return "Result is stale.";
+            if (candidate.FrameId <= lastDeliveredFrameId)
+                return "Result frame is out of order.";
+
+            return "Result was rejected.";
         }
 
         private static long GetMonotonicTimestampNs()

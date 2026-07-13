@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
@@ -137,6 +138,28 @@ public class ARTestSceneManager : MonoBehaviour
             $"质量: {quality}\n" +
             $"AKAZE: {(akazeTriggered == 1 ? "触发" : "未触发")}\n" +
             $"一致性: {(consistencyRejected == 1 ? "拒绝" : "通过")}";
+    }
+
+    /// <summary>
+    /// Formats only the latest structured-diagnostic scalars for the scene UI.
+    /// It intentionally excludes camera data and complete transform matrices.
+    /// </summary>
+    public static string FormatDiagnosticSummary(ExtendedDebugInfo debugInfo)
+    {
+        string failure = debugInfo.LastFailureCategory == LocalizationFailureCategory.None
+            ? string.Empty
+            : $"\n诊断: {debugInfo.LastFailureCategory}";
+        return $"诊断帧: {debugInfo.LastDiagnosticFrameId}\n" +
+            $"结果年龄: {FormatDiagnosticMilliseconds(debugInfo.LastResultAgeNs)} ms\n" +
+            $"状态: {debugInfo.LastDiagnosticState} | 质量: {debugInfo.LastDiagnosticQuality}\n" +
+            $"内点: {debugInfo.NativeDebugInfo.best_inliers} | worker: {FormatDiagnosticMilliseconds(debugInfo.LastWorkerProcessingTimeNs)} ms" +
+            failure;
+    }
+
+    private static string FormatDiagnosticMilliseconds(long nanoseconds)
+    {
+        double milliseconds = Math.Max(0d, nanoseconds / 1_000_000d);
+        return milliseconds.ToString("F1", CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -303,7 +326,8 @@ public class ARTestSceneManager : MonoBehaviour
                         result.Confidence, result.MatchedFeatures, _frameCount,
                         extDebug.CurrentMode, result.Quality,
                         extDebug.NativeDebugInfo.akaze_triggered,
-                        extDebug.NativeDebugInfo.consistency_rejected);
+                        extDebug.NativeDebugInfo.consistency_rejected) + "\n" +
+                        FormatDiagnosticSummary(extDebug);
                 }
                 break;
 
@@ -311,6 +335,8 @@ public class ARTestSceneManager : MonoBehaviour
                 if (lostIndicatorUI != null) lostIndicatorUI.SetActive(true);
                 if (trackingIndicatorUI != null) trackingIndicatorUI.SetActive(false);
                 SetStatus("跟踪丢失，请对准扫描区域", Color.red);
+                if (trackingInfoText != null && _tracker != null)
+                    trackingInfoText.text = FormatDiagnosticSummary(_tracker.GetExtendedDebugInfo());
                 break;
 
             case AreaTargetPlugin.TrackingState.INITIALIZING:

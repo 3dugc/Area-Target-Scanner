@@ -6,11 +6,20 @@ namespace AreaTargetPlugin
     /// <summary>Stable categories for a localization result that cannot be applied.</summary>
     public enum LocalizationFailureCategory
     {
-        None,
-        InvalidFrame,
-        NativeLocalizationFailed,
-        InvalidNativePose,
-        LifecycleFailure
+        None = 0,
+        UnsupportedDevice = 1,
+        InvalidFrame = 2,
+        MapLoadFailed = 3,
+        NativeInitializationFailed = 4,
+        SqliteFailed = 5,
+        LocalizationFailed = 6,
+        StaleResult = 7,
+        LifecycleFailure = 8,
+
+        [Obsolete("Use LocalizationFailed for diagnostics.")]
+        NativeLocalizationFailed = LocalizationFailed,
+        [Obsolete("Use InvalidFrame for diagnostics.")]
+        InvalidNativePose = InvalidFrame
     }
 
     /// <summary>

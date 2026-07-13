@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -33,8 +35,18 @@ namespace AreaTargetPlugin
         private Task _disposeTask;
         private LocalizationMode _currentMode = LocalizationMode.Raw;
         private VLDebugInfo _lastNativeDebugInfo;
+        private readonly BoundedDiagnosticBuffer _diagnosticBuffer = new BoundedDiagnosticBuffer(256);
+        private readonly object _diagnosticStateGate = new object();
+        private readonly string _diagnosticBuildVersion;
+        private readonly string _diagnosticDeviceModel;
+        private readonly string _diagnosticOperatingSystem;
+        private LocalizationDiagnosticRecord _lastDiagnosticRecord;
+        private string _diagnosticMapId = "map-unavailable";
+        private string _diagnosticMapVersion = "unknown";
+        private string _diagnosticMapHash = "unknown";
 
         private const long DefaultMaxResultAgeNs = 1_000_000_000L;
+        private const string RuntimePackageVersion = "1.3.0";
 
         // --- 可配置属性 (Requirements 5.4, 5.8, 6.6) ---
         /// <summary>触发首次 AT 计算的最小 Raw 模式成功帧数。</summary>
@@ -58,6 +70,9 @@ namespace AreaTargetPlugin
         public AreaTargetTracker()
         {
             _loader = new AssetBundleLoader();
+            _diagnosticBuildVersion = Application.version ?? string.Empty;
+            _diagnosticDeviceModel = SystemInfo.deviceModel ?? string.Empty;
+            _diagnosticOperatingSystem = SystemInfo.operatingSystem ?? string.Empty;
         }
 
         /// <summary>Identifier attached to Runtime frames for the currently loaded map.</summary>
@@ -76,14 +91,23 @@ namespace AreaTargetPlugin
             if (_disposed)
             {
                 Debug.LogError("[AreaTargetPlugin] Cannot initialize a disposed tracker.");
+                RecordLifecycleDiagnostic(
+                    LocalizationFailureCategory.LifecycleFailure,
+                    "Initialization was rejected because the tracker is disposed.");
                 return false;
             }
 
+            ResetDiagnosticMapIdentity();
             bool success = _loader.Load(assetPath);
             if (!success)
             {
+                RecordLifecycleDiagnostic(
+                    LocalizationFailureCategory.MapLoadFailed,
+                    "Map package could not be loaded.");
                 return false;
             }
+
+            UpdateDiagnosticMapIdentity(assetPath);
 
             // Load the feature database from the asset bundle
             _featureDb = new FeatureDatabaseReader();
@@ -91,6 +115,9 @@ namespace AreaTargetPlugin
             {
                 Debug.LogError("[AreaTargetPlugin] Failed to load feature database.");
                 _featureDb = null;
+                RecordLifecycleDiagnostic(
+                    LocalizationFailureCategory.SqliteFailed,
+                    "Feature database could not be loaded.");
                 return false;
             }
 
@@ -103,17 +130,25 @@ namespace AreaTargetPlugin
                 _localizationEngine = null;
                 _featureDb.Dispose();
                 _featureDb = null;
+                RecordLifecycleDiagnostic(
+                    LocalizationFailureCategory.NativeInitializationFailed,
+                    "Native localization engine could not be initialized.");
                 return false;
             }
 
             _localizationRunner = new AsyncLocalizationRunner(_localizationEngine);
+            _localizationRunner.ResultProduced += RecordWorkerFrameDiagnostic;
             if (!_localizationRunner.Start())
             {
+                _localizationRunner.ResultProduced -= RecordWorkerFrameDiagnostic;
                 Debug.LogError("[AreaTargetPlugin] Failed to start localization worker.");
                 _localizationEngine.Dispose();
                 _localizationEngine = null;
                 _featureDb.Dispose();
                 _featureDb = null;
+                RecordLifecycleDiagnostic(
+                    LocalizationFailureCategory.LifecycleFailure,
+                    "Localization worker could not be started.");
                 return false;
             }
 
@@ -124,6 +159,9 @@ namespace AreaTargetPlugin
             _state = TrackingState.INITIALIZING;
             _currentMode = LocalizationMode.Raw;
             _lastNativeDebugInfo = default;
+            RecordLifecycleDiagnostic(
+                LocalizationFailureCategory.None,
+                "Map loaded and localization worker started.");
             Debug.Log("[AreaTargetPlugin] Tracker initialized successfully.");
             return true;
         }
@@ -164,7 +202,23 @@ namespace AreaTargetPlugin
         public bool SubmitFrame(CameraFrame cameraFrame)
         {
             if (!_initialized || _disposed)
+            {
+                RecordDiagnostic(
+                    cameraFrame.FrameId,
+                    cameraFrame.CaptureTimestampNs,
+                    0,
+                    0,
+                    0,
+                    0,
+                    _state,
+                    LocalizationQuality.NONE,
+                    0f,
+                    false,
+                    LocalizationFailureCategory.LifecycleFailure,
+                    "Frame was rejected because the tracker is not initialized.",
+                    default);
                 return false;
+            }
 
             if (string.IsNullOrWhiteSpace(cameraFrame.MapId))
                 cameraFrame.MapId = MapId;
@@ -172,6 +226,20 @@ namespace AreaTargetPlugin
                     out LocalizationFrame localizationFrame,
                     out _))
             {
+                RecordDiagnostic(
+                    cameraFrame.FrameId,
+                    cameraFrame.CaptureTimestampNs,
+                    _localizationRunner?.CurrentGeneration ?? 0,
+                    _localizationRunner?.OverwrittenPendingFrames ?? 0,
+                    0,
+                    0,
+                    _state,
+                    LocalizationQuality.NONE,
+                    0f,
+                    false,
+                    LocalizationFailureCategory.InvalidFrame,
+                    "Frame payload was invalid.",
+                    default);
                 return false;
             }
 
@@ -182,11 +250,81 @@ namespace AreaTargetPlugin
         public bool SubmitFrame(LocalizationFrame localizationFrame)
         {
             if (!_initialized || _disposed || _localizationRunner == null)
+            {
+                RecordDiagnostic(
+                    localizationFrame.FrameId,
+                    localizationFrame.CaptureTimestampNs,
+                    0,
+                    0,
+                    0,
+                    0,
+                    _state,
+                    LocalizationQuality.NONE,
+                    0f,
+                    false,
+                    LocalizationFailureCategory.LifecycleFailure,
+                    "Frame was rejected because the tracker is not initialized.",
+                    default);
                 return false;
+            }
             if (!string.Equals(localizationFrame.MapId, MapId, StringComparison.Ordinal))
+            {
+                RecordDiagnostic(
+                    localizationFrame.FrameId,
+                    localizationFrame.CaptureTimestampNs,
+                    _localizationRunner.CurrentGeneration,
+                    _localizationRunner.OverwrittenPendingFrames,
+                    0,
+                    0,
+                    _state,
+                    LocalizationQuality.NONE,
+                    0f,
+                    false,
+                    LocalizationFailureCategory.InvalidFrame,
+                    "Frame map identity does not match the active map.",
+                    default);
                 return false;
+            }
 
-            return _localizationRunner.Submit(localizationFrame);
+            long overwrittenBefore = _localizationRunner.OverwrittenPendingFrames;
+            bool accepted = _localizationRunner.Submit(localizationFrame);
+            long overwrittenAfter = _localizationRunner.OverwrittenPendingFrames;
+            long generation = _localizationRunner.CurrentGeneration;
+
+            RecordDiagnostic(
+                localizationFrame.FrameId,
+                localizationFrame.CaptureTimestampNs,
+                generation,
+                overwrittenAfter,
+                0,
+                0,
+                _state,
+                LocalizationQuality.NONE,
+                0f,
+                false,
+                accepted ? LocalizationFailureCategory.None : LocalizationFailureCategory.LifecycleFailure,
+                accepted ? "Frame submitted to localization worker." : "Localization worker rejected the frame.",
+                default);
+
+            if (accepted && overwrittenAfter > overwrittenBefore)
+            {
+                RecordDiagnostic(
+                    localizationFrame.FrameId,
+                    localizationFrame.CaptureTimestampNs,
+                    generation,
+                    overwrittenAfter,
+                    0,
+                    0,
+                    _state,
+                    LocalizationQuality.NONE,
+                    0f,
+                    false,
+                    LocalizationFailureCategory.None,
+                    "Latest pending frame overwrote an older pending frame.",
+                    default);
+            }
+
+            return accepted;
         }
 
         /// <inheritdoc/>
@@ -206,10 +344,30 @@ namespace AreaTargetPlugin
                 maxAgeNs,
                 out LocalizationFrameResult frameResult))
             {
+                if (_localizationRunner.TryTakeLatestRejection(
+                        out LocalizationFrameResult rejectedResult,
+                        out _))
+                {
+                    RecordDiagnostic(
+                        rejectedResult.FrameId,
+                        rejectedResult.CaptureTimestampNs,
+                        rejectedResult.MapGeneration,
+                        _localizationRunner.OverwrittenPendingFrames,
+                        GetResultAgeNs(nowTimestampNs, rejectedResult.CaptureTimestampNs),
+                        rejectedResult.WorkerProcessingTimeNs,
+                        rejectedResult.State,
+                        rejectedResult.Quality,
+                        rejectedResult.Confidence,
+                        false,
+                        LocalizationFailureCategory.StaleResult,
+                        "Localization result was rejected by age, map generation, or frame order.",
+                        rejectedResult.NativeDebugInfo);
+                }
                 return false;
             }
 
             result = ApplyFrameResult(frameResult);
+            RecordFrameResultDiagnostic(frameResult, result, nowTimestampNs);
             return true;
         }
 
@@ -468,6 +626,9 @@ namespace AreaTargetPlugin
         /// </summary>
         private void PerformInternalReset()
         {
+            RecordLifecycleDiagnostic(
+                LocalizationFailureCategory.LocalizationFailed,
+                "Automatic reset was requested after sustained localization loss.");
             ClearManagedTrackingState();
             if (_localizationRunner != null)
                 _localizationRunner.ResetAsync();
@@ -508,6 +669,9 @@ namespace AreaTargetPlugin
             if (_disposed)
                 return Task.FromResult(true);
 
+            RecordLifecycleDiagnostic(
+                LocalizationFailureCategory.None,
+                "Reset requested.");
             _state = TrackingState.INITIALIZING;
             ClearManagedTrackingState();
             Debug.Log("[AreaTargetPlugin] Tracker reset.");
@@ -530,6 +694,12 @@ namespace AreaTargetPlugin
         /// </summary>
         public ExtendedDebugInfo GetExtendedDebugInfo()
         {
+            LocalizationDiagnosticRecord lastDiagnostic;
+            lock (_diagnosticStateGate)
+            {
+                lastDiagnostic = _lastDiagnosticRecord;
+            }
+
             return new ExtendedDebugInfo
             {
                 CurrentMode = _currentMode,
@@ -537,8 +707,36 @@ namespace AreaTargetPlugin
                 PoseBufferFrameCount = _rawPoseBuffer.Count,
                 ConsecutiveLostFrames = _consecutiveLostFrames,
                 SlidingWindowFrameCount = _slidingWindow.Count,
+                LastDiagnosticFrameId = lastDiagnostic?.FrameId ?? -1,
+                LastCaptureTimestampNs = lastDiagnostic?.CaptureTimestampNs ?? 0,
+                LastDiagnosticState = lastDiagnostic?.State ?? TrackingState.INITIALIZING,
+                LastDiagnosticQuality = lastDiagnostic?.Quality ?? LocalizationQuality.NONE,
+                LastResultAgeNs = lastDiagnostic?.ResultAgeNs ?? 0,
+                LastWorkerProcessingTimeNs = lastDiagnostic?.WorkerProcessingTimeNs ?? 0,
+                LastFailureCategory = lastDiagnostic?.FailureCategory ?? LocalizationFailureCategory.None,
+                LastFailureReason = lastDiagnostic?.FailureReason ?? string.Empty,
+                DiagnosticDroppedRecordCount = _diagnosticBuffer.DroppedRecordCount,
                 NativeDebugInfo = _lastNativeDebugInfo
             };
+        }
+
+        /// <summary>Returns an immutable snapshot of the bounded, image-free diagnostics.</summary>
+        public IReadOnlyList<LocalizationDiagnosticRecord> GetDiagnosticSnapshot()
+        {
+            return _diagnosticBuffer.Snapshot();
+        }
+
+        /// <summary>Exports the current bounded diagnostic snapshot as JSON Lines.</summary>
+        public bool TryExportDiagnostics(
+            out string outputPath,
+            out LocalizationFailureCategory failureCategory,
+            out string failureReason)
+        {
+            return new LocalizationDiagnosticExporter().TryExport(
+                GetDiagnosticSnapshot(),
+                out outputPath,
+                out failureCategory,
+                out failureReason);
         }
 
         /// <inheritdoc/>
@@ -558,12 +756,17 @@ namespace AreaTargetPlugin
             if (_disposeTask != null)
                 return _disposeTask;
 
+            RecordLifecycleDiagnostic(
+                LocalizationFailureCategory.None,
+                "Dispose requested.");
             _disposed = true;
             _initialized = false;
             _state = TrackingState.LOST;
 
             AsyncLocalizationRunner runner = _localizationRunner;
             _localizationRunner = null;
+            if (runner != null)
+                runner.ResultProduced -= RecordWorkerFrameDiagnostic;
             _disposeTask = DisposeCoreAsync(runner);
             return _disposeTask;
         }
@@ -589,6 +792,225 @@ namespace AreaTargetPlugin
                 _state = TrackingState.LOST;
                 Debug.Log("[AreaTargetPlugin] Tracker disposed.");
             }
+        }
+
+        private void RecordFrameResultDiagnostic(
+            LocalizationFrameResult frameResult,
+            TrackingResult trackingResult,
+            long nowTimestampNs)
+        {
+            LocalizationFailureCategory category = frameResult.FailureCategory;
+            string reason;
+
+            if (frameResult.NativeDebugInfo.consistency_rejected == 1)
+            {
+                category = LocalizationFailureCategory.LocalizationFailed;
+                reason = "Localization result failed consistency checks.";
+            }
+            else if (category != LocalizationFailureCategory.None)
+            {
+                reason = "Native localization did not return a valid pose.";
+            }
+            else if (trackingResult.State == TrackingState.TRACKING)
+            {
+                reason = "Localization result was applied.";
+            }
+            else
+            {
+                category = LocalizationFailureCategory.LocalizationFailed;
+                reason = "Localization result was not applied.";
+            }
+
+            RecordDiagnostic(
+                frameResult.FrameId,
+                frameResult.CaptureTimestampNs,
+                frameResult.MapGeneration,
+                _localizationRunner?.OverwrittenPendingFrames ?? 0,
+                GetResultAgeNs(nowTimestampNs, frameResult.CaptureTimestampNs),
+                frameResult.WorkerProcessingTimeNs,
+                trackingResult.State,
+                trackingResult.Quality,
+                trackingResult.Confidence,
+                trackingResult.State == TrackingState.TRACKING && frameResult.UnityWorldFromScan.HasValue,
+                category,
+                reason,
+                frameResult.NativeDebugInfo);
+        }
+
+        /// <summary>
+        /// Records the worker-owned native outcome before a Unity scene consumes it.
+        /// This callback only writes immutable scalars into the thread-safe buffer;
+        /// it never touches scene state, transforms, or Unity logging APIs.
+        /// </summary>
+        private void RecordWorkerFrameDiagnostic(LocalizationFrameResult frameResult)
+        {
+            LocalizationFailureCategory category = frameResult.FailureCategory;
+            string reason = category == LocalizationFailureCategory.None
+                ? "Native localization result was produced."
+                : "Native localization did not return a valid pose.";
+
+            RecordDiagnostic(
+                frameResult.FrameId,
+                frameResult.CaptureTimestampNs,
+                frameResult.MapGeneration,
+                _localizationRunner?.OverwrittenPendingFrames ?? 0,
+                0,
+                frameResult.WorkerProcessingTimeNs,
+                frameResult.State,
+                frameResult.Quality,
+                frameResult.Confidence,
+                false,
+                category,
+                reason,
+                frameResult.NativeDebugInfo);
+        }
+
+        private void RecordLifecycleDiagnostic(
+            LocalizationFailureCategory failureCategory,
+            string failureReason)
+        {
+            RecordDiagnostic(
+                -1,
+                0,
+                _localizationRunner?.CurrentGeneration ?? 0,
+                _localizationRunner?.OverwrittenPendingFrames ?? 0,
+                0,
+                0,
+                _state,
+                LocalizationQuality.NONE,
+                0f,
+                false,
+                failureCategory,
+                failureReason,
+                _lastNativeDebugInfo);
+        }
+
+        private void RecordDiagnostic(
+            long frameId,
+            long captureTimestampNs,
+            long mapGeneration,
+            long overwrittenPendingFrames,
+            long resultAgeNs,
+            long workerProcessingTimeNs,
+            TrackingState state,
+            LocalizationQuality quality,
+            float confidence,
+            bool poseApplied,
+            LocalizationFailureCategory failureCategory,
+            string failureReason,
+            VLDebugInfo nativeDebugInfo)
+        {
+            var record = new LocalizationDiagnosticRecord(
+                DateTime.UtcNow,
+                _diagnosticBuildVersion,
+                RuntimePackageVersion,
+                _diagnosticMapId,
+                _diagnosticMapVersion,
+                _diagnosticMapHash,
+                _diagnosticDeviceModel,
+                _diagnosticOperatingSystem,
+                frameId,
+                captureTimestampNs,
+                mapGeneration,
+                overwrittenPendingFrames,
+                resultAgeNs,
+                workerProcessingTimeNs,
+                state,
+                quality,
+                confidence,
+                poseApplied,
+                failureCategory,
+                SanitizeDiagnosticReason(failureReason),
+                nativeDebugInfo);
+
+            _diagnosticBuffer.Add(record);
+            lock (_diagnosticStateGate)
+            {
+                _lastDiagnosticRecord = record;
+            }
+        }
+
+        private void ResetDiagnosticMapIdentity()
+        {
+            _diagnosticMapId = "map-unavailable";
+            _diagnosticMapVersion = "unknown";
+            _diagnosticMapHash = "unknown";
+        }
+
+        private void UpdateDiagnosticMapIdentity(string assetPath)
+        {
+            _diagnosticMapVersion = SanitizeDiagnosticIdentifier(
+                _loader?.Manifest?.version,
+                "unknown");
+            _diagnosticMapHash = TryComputeManifestHash(assetPath);
+            string mapHashPrefix = _diagnosticMapHash.Length > 12
+                ? _diagnosticMapHash.Substring(0, 12)
+                : _diagnosticMapHash;
+            _diagnosticMapId = "map-" + mapHashPrefix;
+        }
+
+        private static string TryComputeManifestHash(string assetPath)
+        {
+            try
+            {
+                byte[] manifestBytes = File.ReadAllBytes(Path.Combine(assetPath, "manifest.json"));
+                using (var sha256 = SHA256.Create())
+                {
+                    return BitConverter.ToString(sha256.ComputeHash(manifestBytes))
+                        .Replace("-", string.Empty)
+                        .ToLowerInvariant();
+                }
+            }
+            catch (Exception)
+            {
+                return "unknown";
+            }
+        }
+
+        private static string SanitizeDiagnosticIdentifier(string value, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return fallback;
+
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
+                if (!char.IsLetterOrDigit(character)
+                    && character != '.'
+                    && character != '-'
+                    && character != '_')
+                {
+                    return fallback;
+                }
+            }
+
+            return value;
+        }
+
+        private static string SanitizeDiagnosticReason(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            if (value.IndexOf('/') >= 0
+                || value.IndexOf('\\') >= 0
+                || value.IndexOf("ImageData", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("ScanData", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("file://", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Details were omitted by the diagnostic privacy policy.";
+            }
+
+            return value;
+        }
+
+        private static long GetResultAgeNs(long nowTimestampNs, long captureTimestampNs)
+        {
+            if (nowTimestampNs <= captureTimestampNs)
+                return 0;
+
+            return nowTimestampNs - captureTimestampNs;
         }
 
         private static long GetMonotonicTimestampNs()

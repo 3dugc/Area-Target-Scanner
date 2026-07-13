@@ -303,6 +303,13 @@ public class SLAMTestSceneManager : MonoBehaviour
 
         ExtendedDebugInfo debug = _tracker.GetExtendedDebugInfo();
         VLDebugInfo native = debug.NativeDebugInfo;
+        debugPanel?.SetDiagnosticSummary(
+            debug.LastDiagnosticFrameId,
+            debug.LastResultAgeNs,
+            debug.LastDiagnosticState,
+            debug.LastDiagnosticQuality,
+            native.best_inliers,
+            debug.LastWorkerProcessingTimeNs);
         _lastTrackingDetail =
             $"S={result.State} M={result.MatchedFeatures} C={result.Confidence:F3}";
         if (native.orb_keypoints > 0 || native.candidate_keyframes > 0 || native.best_kf_id >= 0)

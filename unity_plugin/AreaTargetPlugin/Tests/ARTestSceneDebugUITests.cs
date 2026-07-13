@@ -20,7 +20,33 @@ namespace AreaTargetPlugin.Tests
 
             Assert.That(source, Does.Contain("_tracker.SubmitFrame(frame)"));
             Assert.That(source, Does.Contain("_tracker.TryGetLatestTrackingResult("));
+            Assert.That(source, Does.Contain("FormatDiagnosticSummary(extDebug)"));
             Assert.That(source, Does.Not.Contain("_tracker.ProcessFrame(frame)"));
+        }
+
+        [Test]
+        public void FormatDiagnosticSummary_ContainsOperationalScalarsWithoutPose()
+        {
+            var debugInfo = new ExtendedDebugInfo
+            {
+                LastDiagnosticFrameId = 42,
+                LastResultAgeNs = 1_500_000,
+                LastWorkerProcessingTimeNs = 3_200_000,
+                LastDiagnosticState = TrackingState.TRACKING,
+                LastDiagnosticQuality = LocalizationQuality.LOCALIZED,
+                LastFailureCategory = LocalizationFailureCategory.None,
+                NativeDebugInfo = new VLDebugInfo { best_inliers = 48 }
+            };
+
+            string result = ARTestSceneManager.FormatDiagnosticSummary(debugInfo);
+
+            Assert.That(result, Does.Contain("42"));
+            Assert.That(result, Does.Contain("48"));
+            Assert.That(result, Does.Contain("1.5"));
+            Assert.That(result, Does.Contain("3.2"));
+            Assert.That(result, Does.Contain("TRACKING"));
+            Assert.That(result, Does.Contain("LOCALIZED"));
+            Assert.That(result, Does.Not.Contain("Matrix4x4"));
         }
 
         #region FormatQualityText Tests (Requirements 3.1, 3.2)
