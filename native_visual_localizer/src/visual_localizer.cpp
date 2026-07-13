@@ -116,8 +116,8 @@ VL_API VLResult vl_process_frame(VLHandle handle,
                                   const unsigned char* image_data,
                                   int width, int height,
                                   float fx, float fy, float cx, float cy,
-                                  int has_last_pose,
-                                  const float* last_pose_4x4) {
+                                  int has_unity_world_from_camera,
+                                  const float* unity_world_from_camera_4x4) {
     VLResult lost = makeSafeLostResult();
 
     if (!handle) return lost;
@@ -127,7 +127,8 @@ VL_API VLResult vl_process_frame(VLHandle handle,
         auto* localizer = static_cast<VisualLocalizer*>(handle);
         return localizer->processFrame(image_data, width, height,
                                        fx, fy, cx, cy,
-                                       has_last_pose != 0, last_pose_4x4);
+                                       has_unity_world_from_camera != 0,
+                                       unity_world_from_camera_4x4);
     } catch (...) {
         return lost;
     }
@@ -154,8 +155,8 @@ VL_API void vl_process_frame_out(VLHandle handle,
                                   const unsigned char* image_data,
                                   int width, int height,
                                   float fx, float fy, float cx, float cy,
-                                  int has_last_pose,
-                                  const float* last_pose_4x4,
+                                  int has_unity_world_from_camera,
+                                  const float* unity_world_from_camera_4x4,
                                   VLResult* out_result) {
     VLResult lost = makeSafeLostResult();
 
@@ -169,7 +170,8 @@ VL_API void vl_process_frame_out(VLHandle handle,
         auto* localizer = static_cast<VisualLocalizer*>(handle);
         *out_result = localizer->processFrame(image_data, width, height,
                                                fx, fy, cx, cy,
-                                               has_last_pose != 0, last_pose_4x4);
+                                               has_unity_world_from_camera != 0,
+                                               unity_world_from_camera_4x4);
     } catch (...) {
         *out_result = lost;
     }

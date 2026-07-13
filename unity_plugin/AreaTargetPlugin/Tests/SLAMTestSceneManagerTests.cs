@@ -120,7 +120,7 @@ namespace AreaTargetPlugin.Tests
         {
             var method = typeof(SLAMTestSceneManager).GetMethod("HandleTrackingResult",
                 BindingFlags.NonPublic | BindingFlags.Instance);
-            method.Invoke(_manager, new object[] { result, Matrix4x4.identity });
+            method.Invoke(_manager, new object[] { result });
         }
 
         private void InvokeOnDestroy()

@@ -1,4 +1,5 @@
 #include "visual_localizer_impl.h"
+#include "pose_contract.h"
 #include <opencv2/calib3d.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -100,12 +101,14 @@ bool VisualLocalizer::buildIndex() {
 // ---------------------------------------------------------------------------
 void VisualLocalizer::reset() {
     frame_history_.clear();
+    last_scan_from_camera_.release();
+    has_last_scan_from_camera_ = false;
 }
 
 // ---------------------------------------------------------------------------
-// setAlignmentTransform — set pre-computed 4×4 alignment transform (AT)
-//   Validates: no NaN, approximately rigid body (R^T*R ≈ I, det(R) ≈ +1)
-//   Invalid input is silently ignored (previous state preserved)
+// setAlignmentTransform — validate the legacy 4×4 alignment ABI payload.
+// It intentionally does not modify the canonical native T_C_S PnP result.
+// Runtime composition of T_U_S is introduced in phase-1 task 4.
 // ---------------------------------------------------------------------------
 void VisualLocalizer::setAlignmentTransform(const float* at_4x4) {
     if (!at_4x4)
@@ -144,9 +147,8 @@ void VisualLocalizer::setAlignmentTransform(const float* at_4x4) {
         std::fabs(at.at<float>(3, 3) - 1.0f) > 1e-4f)
         return;
 
-    // Valid rigid body transform — store it
-    alignment_transform_ = at.clone();
-    has_alignment_transform_ = true;
+    // Valid input is accepted for ABI compatibility. Do not retain or apply it:
+    // multiplying it into VLResult.pose would violate the T_C_S contract.
 }
 
 // ---------------------------------------------------------------------------
@@ -155,8 +157,8 @@ void VisualLocalizer::setAlignmentTransform(const float* at_4x4) {
 VLResult VisualLocalizer::processFrame(const unsigned char* image_data,
                                         int width, int height,
                                         float fx, float fy, float cx, float cy,
-                                        bool has_last_pose,
-                                        const float* last_pose_4x4) {
+                                        bool has_unity_world_from_camera,
+                                        const float* unity_world_from_camera_4x4) {
     VLResult lost = makeLostResult();
 
     // Reset debug info
@@ -187,9 +189,9 @@ VLResult VisualLocalizer::processFrame(const unsigned char* image_data,
 
     // Step 3: Candidate keyframe selection
     std::vector<KeyframeData*> candidates;
-    if (has_last_pose && last_pose_4x4) {
-        candidates = getNearbyKeyframes(last_pose_4x4, kNearbyRadius,
-                                         kMaxNearbyKeyframes);
+    if (has_last_scan_from_camera_) {
+        candidates = getNearbyKeyframes(last_scan_from_camera_.ptr<float>(),
+                                         kNearbyRadius, kMaxNearbyKeyframes);
         if (candidates.empty())
             candidates = getGlobalCandidates(descriptors);
     } else {
@@ -244,41 +246,44 @@ VLResult VisualLocalizer::processFrame(const unsigned char* image_data,
     }
 
     // -----------------------------------------------------------------------
-    // 多帧一致性过滤: 用 s2a_err 的 median + 3×MAD 阈值剔除离群帧
+    // 多帧一致性过滤: 用 T_U_S 误差的 median + 3×MAD 阈值剔除离群帧
     // -----------------------------------------------------------------------
-    if (best.state == 1 && has_last_pose && last_pose_4x4) {
-        // 构建 w2c (4×4) from best.pose (row-major float[16])
-        cv::Mat w2c(4, 4, CV_32F);
-        std::memcpy(w2c.data, best.pose, 16 * sizeof(float));
+    if (best.state == 1 && has_unity_world_from_camera &&
+        unity_world_from_camera_4x4) {
+        // T_C_S from native PnP (row-major float[16]).
+        cv::Mat camera_from_scan(4, 4, CV_32F);
+        std::memcpy(camera_from_scan.data, best.pose, 16 * sizeof(float));
 
-        // 构建 c2w from last_pose_4x4 (AR camera pose, row-major)
-        cv::Mat c2w(4, 4, CV_32F);
-        std::memcpy(c2w.data, last_pose_4x4, 16 * sizeof(float));
+        // T_U_C from the current AR frame (row-major float[16]).
+        cv::Mat unity_world_from_camera(4, 4, CV_32F);
+        std::memcpy(unity_world_from_camera.data,
+                    unity_world_from_camera_4x4, 16 * sizeof(float));
 
-        // s2a = c2w × w2c
-        cv::Mat s2a = c2w * w2c;
+        // T_U_S = T_U_C × T_C_S
+        cv::Mat unity_world_from_scan = unity_world_from_camera * camera_from_scan;
 
-        // s2a_err = ‖s2a − I‖_F
+        // ‖T_U_S − I‖_F
         cv::Mat identity = cv::Mat::eye(4, 4, CV_32F);
-        cv::Mat diff = s2a - identity;
-        float s2a_err = static_cast<float>(cv::norm(diff, cv::NORM_L2));
+        cv::Mat diff = unity_world_from_scan - identity;
+        float unity_world_from_scan_error =
+            static_cast<float>(cv::norm(diff, cv::NORM_L2));
 
         if (static_cast<int>(frame_history_.size()) < 3) {
             // 冷启动: 跳过过滤，直接接受
             FrameHistory fh;
-            fh.pose = w2c.clone();
-            fh.s2a = s2a.clone();
-            fh.s2a_err = s2a_err;
+            fh.camera_from_scan = camera_from_scan.clone();
+            fh.unity_world_from_scan = unity_world_from_scan.clone();
+            fh.unity_world_from_scan_error = unity_world_from_scan_error;
             frame_history_.push_back(std::move(fh));
             if (static_cast<int>(frame_history_.size()) > kMaxHistoryFrames) {
                 frame_history_.pop_front();
             }
         } else {
-            // 收集历史帧 s2a_err
+            // 收集历史帧 T_U_S 误差
             std::vector<float> hist_errs;
             hist_errs.reserve(frame_history_.size());
             for (const auto& fh : frame_history_) {
-                hist_errs.push_back(fh.s2a_err);
+                hist_errs.push_back(fh.unity_world_from_scan_error);
             }
 
             // 计算 median
@@ -310,7 +315,7 @@ VLResult VisualLocalizer::processFrame(const unsigned char* image_data,
             float effective_mad = std::max(mad, kConsistencyMinMad);
             float threshold = median + kConsistencyMadMultiplier * effective_mad;
 
-            if (s2a_err > threshold) {
+            if (unity_world_from_scan_error > threshold) {
                 // 离群帧: 拒绝，返回 LOST
                 last_debug_info_.consistency_rejected = 1;
                 return lost;
@@ -318,29 +323,28 @@ VLResult VisualLocalizer::processFrame(const unsigned char* image_data,
 
             // 通过一致性检查: 加入历史队列
             FrameHistory fh;
-            fh.pose = w2c.clone();
-            fh.s2a = s2a.clone();
-            fh.s2a_err = s2a_err;
+            fh.camera_from_scan = camera_from_scan.clone();
+            fh.unity_world_from_scan = unity_world_from_scan.clone();
+            fh.unity_world_from_scan_error = unity_world_from_scan_error;
             frame_history_.push_back(std::move(fh));
             if (static_cast<int>(frame_history_.size()) > kMaxHistoryFrames) {
                 frame_history_.pop_front();
             }
         }
     } else if (best.state == 1) {
-        // 有效定位但无 AR camera pose: 无法计算 s2a，跳过一致性过滤
-        // 仍然将 w2c 存入历史（s2a 和 s2a_err 留空）
+        // 有效定位但无当前 T_U_C: 无法计算 T_U_S，一致性过滤跳过。
     }
 
-    // -----------------------------------------------------------------------
-    // 坐标系对齐变换: AT 已设置时 pose_aligned = AT × pose_raw
-    // -----------------------------------------------------------------------
-    if (best.state == 1 && has_alignment_transform_) {
-        cv::Mat pose_raw(4, 4, CV_32F);
-        std::memcpy(pose_raw.data, best.pose, 16 * sizeof(float));
-
-        cv::Mat pose_aligned = alignment_transform_ * pose_raw;
-
-        std::memcpy(best.pose, pose_aligned.data, 16 * sizeof(float));
+    // Cache T_S_C separately for nearby keyframe selection. This must never
+    // be substituted for the current T_U_C parameter above.
+    if (best.state == 1) {
+        cv::Mat camera_from_scan(4, 4, CV_32F);
+        std::memcpy(camera_from_scan.data, best.pose, 16 * sizeof(float));
+        cv::Mat scan_from_camera;
+        if (cv::invert(camera_from_scan, scan_from_camera, cv::DECOMP_LU) != 0.0) {
+            last_scan_from_camera_ = scan_from_camera;
+            has_last_scan_from_camera_ = true;
+        }
     }
 
     return best;
@@ -479,19 +483,8 @@ VLResult VisualLocalizer::tryMatchKeyframe(const KeyframeData& kf,
         // 精化失败则保留 RANSAC 原始结果
     }
 
-    // Compose pose matrix from rvec/tvec via Rodrigues
-    // solvePnPRansac returns world-to-camera extrinsic [R|t] in OpenCV
-    // camera convention (x-right, y-down, z-forward).
-    // Unity/ARKit uses (x-right, y-up, z-back).
-    //
-    // The 3D points fed to PnP are already in ARKit world coordinates (Y-up),
-    // so PnP output [R|t] maps ARKit-world → OpenCV-camera.
-    // The relationship is: R_opencv = flip * R_arkit_w2c, where flip = diag(1,-1,-1).
-    // Therefore: R_arkit_w2c = flip * R_opencv  (left-multiply only).
-    // Translation: t_arkit = flip * t_opencv.
-    //
-    // IMPORTANT: Do NOT right-multiply by flip — the world coordinates are
-    // already in ARKit convention and must not be flipped.
+    // solvePnPRansac returns S -> OpenCV-camera. The one OpenCV-camera ->
+    // AR-camera normalization is centralized in pose_contract below.
     cv::Mat rot_mat;
     cv::Rodrigues(rvec, rot_mat);
 
@@ -501,27 +494,10 @@ VLResult VisualLocalizer::tryMatchKeyframe(const KeyframeData& kf,
         static_cast<float>(inlier_count) / kMaxConfidenceDivisor);
     result.matched_features = inlier_count;
 
-    // Fill row-major 4x4 pose: R' = flip * R_opencv, t' = flip * t_opencv
-    float R_raw[3][3];
-    for (int r = 0; r < 3; r++)
-        for (int c = 0; c < 3; c++)
-            R_raw[r][c] = static_cast<float>(rot_mat.at<double>(r, c));
-
-    float t_raw[3];
-    for (int r = 0; r < 3; r++)
-        t_raw[r] = static_cast<float>(tvec.at<double>(r, 0));
-
-    // Apply flip = diag(1,-1,-1) on the LEFT only: R' = flip * R, t' = flip * t
-    float flip[3] = {1.0f, -1.0f, -1.0f};
-    for (int r = 0; r < 3; r++) {
-        for (int c = 0; c < 3; c++)
-            result.pose[r * 4 + c] = flip[r] * R_raw[r][c];
-        result.pose[r * 4 + 3] = flip[r] * t_raw[r];
-    }
-    result.pose[12] = 0.0f;
-    result.pose[13] = 0.0f;
-    result.pose[14] = 0.0f;
-    result.pose[15] = 1.0f;
+    // Fill T_C_S once as row-major after exactly one normalization.
+    const cv::Mat camera_from_scan =
+        visual_localizer::pose_contract::cameraFromScanFromOpenCvPnP(rot_mat, tvec);
+    std::memcpy(result.pose, camera_from_scan.ptr<float>(), 16 * sizeof(float));
 
     return result;
 }
@@ -746,7 +722,7 @@ VLResult VisualLocalizer::tryMatchKeyframeAkaze(
         // 精化失败则保留 RANSAC 原始结果
     }
 
-    // Compose pose matrix from rvec/tvec (same convention as tryMatchKeyframe)
+    // Compose T_C_S with the same single normalization as ORB matching.
     cv::Mat rot_mat;
     cv::Rodrigues(rvec, rot_mat);
 
@@ -756,27 +732,10 @@ VLResult VisualLocalizer::tryMatchKeyframeAkaze(
         static_cast<float>(inlier_count) / kMaxConfidenceDivisor);
     result.matched_features = inlier_count;
 
-    // Fill row-major 4x4 pose: R' = flip * R_opencv, t' = flip * t_opencv
-    float R_raw[3][3];
-    for (int r = 0; r < 3; r++)
-        for (int c = 0; c < 3; c++)
-            R_raw[r][c] = static_cast<float>(rot_mat.at<double>(r, c));
-
-    float t_raw[3];
-    for (int r = 0; r < 3; r++)
-        t_raw[r] = static_cast<float>(tvec.at<double>(r, 0));
-
-    // Apply flip = diag(1,-1,-1) on the LEFT only
-    float flip[3] = {1.0f, -1.0f, -1.0f};
-    for (int r = 0; r < 3; r++) {
-        for (int c = 0; c < 3; c++)
-            result.pose[r * 4 + c] = flip[r] * R_raw[r][c];
-        result.pose[r * 4 + 3] = flip[r] * t_raw[r];
-    }
-    result.pose[12] = 0.0f;
-    result.pose[13] = 0.0f;
-    result.pose[14] = 0.0f;
-    result.pose[15] = 1.0f;
+    // Fill T_C_S once as row-major after exactly one normalization.
+    const cv::Mat camera_from_scan =
+        visual_localizer::pose_contract::cameraFromScanFromOpenCvPnP(rot_mat, tvec);
+    std::memcpy(result.pose, camera_from_scan.ptr<float>(), 16 * sizeof(float));
 
     return result;
 }
@@ -828,12 +787,12 @@ std::vector<float> VisualLocalizer::computeBoW(const cv::Mat& descriptors) {
 //                      sorted by distance, return top max_count
 // ---------------------------------------------------------------------------
 std::vector<KeyframeData*> VisualLocalizer::getNearbyKeyframes(
-    const float* last_pose, float radius, int max_count) {
+    const float* scan_from_camera_4x4, float radius, int max_count) {
 
-    // Extract translation from 4x4 row-major pose: elements [3], [7], [11]
-    float lx = last_pose[3];
-    float ly = last_pose[7];
-    float lz = last_pose[11];
+    // Extract camera position from T_S_C row-major elements [3], [7], [11].
+    float lx = scan_from_camera_4x4[3];
+    float ly = scan_from_camera_4x4[7];
+    float lz = scan_from_camera_4x4[11];
 
     struct Candidate {
         KeyframeData* kf;

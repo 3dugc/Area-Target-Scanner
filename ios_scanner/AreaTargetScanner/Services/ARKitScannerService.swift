@@ -26,6 +26,8 @@ final class ARKitScannerService: NSObject, ScannerService {
     private static let keyframeDistanceThreshold: Float = 0.10
     /// Maximum point count before automatic downsampling
     private static let maxPointCount = 5_000_000
+    /// JPEGs are encoded from ARKit's captured-image buffer without rotating pixels.
+    private static let exportedImageOrientation: ScanImageOrientation = .landscapeRight
 
     // MARK: - State
 
@@ -234,6 +236,9 @@ final class ARKitScannerService: NSObject, ScannerService {
     // MARK: - Keyframe Image Capture
 
     /// Captures the current camera frame as JPEG data for a keyframe.
+    ///
+    /// The captured-image buffer is encoded without applying a pixel rotation. Its
+    /// accompanying pose therefore records the native ARKit landscape-right layout.
     private func captureKeyframeImage(from frame: ARFrame) -> Data? {
         let pixelBuffer = frame.capturedImage
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
@@ -326,8 +331,9 @@ extension ARKitScannerService: ARSessionDelegate {
 
         let currentTime = frame.timestamp - sessionStartTime
 
-        // Always update intrinsics from the latest frame (Requirement 1.3)
-        currentIntrinsics = extractIntrinsics(from: frame)
+        // Bind the ARFrame's intrinsics to this exact frame before it can become a keyframe.
+        let frameIntrinsics = extractIntrinsics(from: frame)
+        currentIntrinsics = frameIntrinsics
 
         // Accumulate point cloud vertices from raw feature points
         let newVertices = extractPointCloudVertices(from: frame)
@@ -361,7 +367,11 @@ extension ARKitScannerService: ARSessionDelegate {
         let pose = CameraPose(
             timestamp: currentTime,
             transform: cameraTransform,
-            imageFilename: filename
+            imageFilename: filename,
+            imageOrientation: Self.exportedImageOrientation,
+            intrinsics: frameIntrinsics,
+            imageWidth: frameIntrinsics.width,
+            imageHeight: frameIntrinsics.height
         )
 
         let capturedImage = CapturedImage(imageData: imageData, filename: filename)

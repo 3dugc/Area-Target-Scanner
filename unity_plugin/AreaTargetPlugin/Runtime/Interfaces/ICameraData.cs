@@ -11,5 +11,9 @@ namespace AreaTargetPlugin.PointCloudLocalization
         Vector4 Intrinsics { get; }              // fx, fy, cx, cy
         Vector3 CameraPositionOnCapture { get; }
         Quaternion CameraRotationOnCapture { get; }
+        long FrameId { get; }
+        long CaptureTimestampNs { get; }
+        ImageOrientation Orientation { get; }
+        string MapId { get; }
     }
 }

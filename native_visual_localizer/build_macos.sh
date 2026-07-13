@@ -21,10 +21,14 @@ echo "=== Building macOS binary for $ARCHITECTURES ==="
 cmake -B "$SCRIPT_DIR/build" \
     -S "$SCRIPT_DIR" \
     -DCMAKE_OSX_ARCHITECTURES="$ARCHITECTURES" \
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=ON
 
 # Build
 cmake --build "$SCRIPT_DIR/build" --config Release
+
+echo "=== Running native pose contract test ==="
+ctest --test-dir "$SCRIPT_DIR/build" --output-on-failure
 
 # Verify the output
 if [ ! -f "$OUTPUT_LIBRARY" ]; then

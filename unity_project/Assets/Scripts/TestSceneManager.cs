@@ -315,6 +315,10 @@ public class TestSceneManager : MonoBehaviour
         public Vector4 Intrinsics => _intr;
         public Vector3 CameraPositionOnCapture => Vector3.zero;
         public Quaternion CameraRotationOnCapture => Quaternion.identity;
+        public long FrameId => 0;
+        public long CaptureTimestampNs => 0;
+        public ImageOrientation Orientation => ImageOrientation.LandscapeRight;
+        public string MapId => "test-scene-map";
     }
 
     private class TestPlatformSupport : IPlatformSupport

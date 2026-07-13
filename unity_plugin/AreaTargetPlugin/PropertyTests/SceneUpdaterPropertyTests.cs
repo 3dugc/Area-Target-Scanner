@@ -46,6 +46,10 @@ namespace AreaTargetPlugin.Tests
             public Vector4 Intrinsics => Vector4.zero;
             public Vector3 CameraPositionOnCapture => Vector3.zero;
             public Quaternion CameraRotationOnCapture => Quaternion.identity;
+            public long FrameId => 0;
+            public long CaptureTimestampNs => 0;
+            public ImageOrientation Orientation => ImageOrientation.LandscapeRight;
+            public string MapId => "property-map";
         }
 
         /// <summary>

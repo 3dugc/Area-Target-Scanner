@@ -112,6 +112,42 @@ def _compute_idf_weights(
 # ---------------------------------------------------------------------------
 
 
+def _validate_row_major_affine_matrix(matrix: np.ndarray, *, context: str) -> np.ndarray:
+    """Return a validated 4x4 affine matrix stored in row-major semantics."""
+    values = np.asarray(matrix, dtype=np.float64)
+    if values.shape != (4, 4):
+        raise ValueError(f"{context} must contain exactly 16 float64 values")
+    if not np.all(np.isfinite(values)):
+        raise ValueError(f"{context} must contain only finite values")
+    if not np.allclose(values[3], [0.0, 0.0, 0.0, 1.0], rtol=0.0, atol=1e-9):
+        raise ValueError(
+            f"{context} violates the row-major affine pose contract: "
+            "last row must be [0, 0, 0, 1]"
+        )
+    return values
+
+
+def matrix_to_row_major_blob(matrix: np.ndarray) -> bytes:
+    """Encode a finite 4x4 affine matrix as 16 C-order float64 values."""
+    values = _validate_row_major_affine_matrix(
+        matrix, context="pose matrix"
+    )
+    return np.ascontiguousarray(values, dtype=np.float64).tobytes(order="C")
+
+
+def row_major_blob_to_matrix(blob: bytes) -> np.ndarray:
+    """Decode and validate a 16-float64 C-order SQLite pose blob."""
+    values = np.frombuffer(blob, dtype=np.float64)
+    if values.size != 16:
+        raise ValueError(
+            "row-major pose blob must contain exactly 16 float64 values"
+        )
+    matrix = values.reshape((4, 4), order="C").copy()
+    return _validate_row_major_affine_matrix(
+        matrix, context="row-major pose blob"
+    )
+
+
 def save_feature_database(db: FeatureDatabase, db_path: str) -> None:
     """Persist a :class:`FeatureDatabase` to a SQLite file.
 
@@ -129,7 +165,7 @@ def save_feature_database(db: FeatureDatabase, db_path: str) -> None:
 
         # -- keyframes & features ------------------------------------------
         for idx, kf in enumerate(db.keyframes):
-            pose_blob = kf.camera_pose.astype(np.float64).tobytes()
+            pose_blob = matrix_to_row_major_blob(kf.camera_pose)
 
             # Global descriptor for this keyframe (row from global_descriptors)
             gd_blob: bytes | None = None
@@ -215,7 +251,7 @@ def load_feature_database(db_path: str) -> FeatureDatabase:
         gd_list: list[np.ndarray | None] = []
 
         for kf_id, pose_blob, gd_blob in kf_rows:
-            pose = np.frombuffer(pose_blob, dtype=np.float64).reshape(4, 4).copy()
+            pose = row_major_blob_to_matrix(pose_blob)
 
             gd: np.ndarray | None = None
             if gd_blob is not None:

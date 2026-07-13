@@ -63,11 +63,12 @@ namespace AreaTargetPlugin
         // But with padding it's likely 76 bytes aligned.
 
         // Approach: call via raw pointer and manually unmarshal
+        // The final matrix argument is current T_U_C in row-major float[16].
         [DllImport(LibName, EntryPoint = "vl_process_frame")]
         private static extern void vl_process_frame_raw(
             IntPtr handle, byte[] image_data, int width, int height,
             float fx, float fy, float cx, float cy,
-            int has_last_pose, float[] last_pose_4x4,
+            int has_unity_world_from_camera, float[] unity_world_from_camera_4x4,
             IntPtr out_result);
 
         // Try the new out-parameter version first (if native lib has it), fall back to manual marshal
@@ -75,7 +76,7 @@ namespace AreaTargetPlugin
         private static extern void vl_process_frame_out_native(
             IntPtr handle, byte[] image_data, int width, int height,
             float fx, float fy, float cx, float cy,
-            int has_last_pose, float[] last_pose_4x4,
+            int has_unity_world_from_camera, float[] unity_world_from_camera_4x4,
             IntPtr out_result);
 
         // --- Debug info ---
@@ -169,7 +170,7 @@ namespace AreaTargetPlugin
         internal static VLResultData ProcessFrameSafe(
             IntPtr handle, byte[] imageData, int width, int height,
             float fx, float fy, float cx, float cy,
-            int hasLastPose, float[] lastPose)
+            int hasUnityWorldFromCamera, float[] unityWorldFromCamera)
         {
             var result = new VLResultData();
             result.pose = new float[16];
@@ -191,7 +192,8 @@ namespace AreaTargetPlugin
                     try
                     {
                         vl_process_frame_out_native(handle, imageData, width, height,
-                            fx, fy, cx, cy, hasLastPose, lastPose, buf);
+                            fx, fy, cx, cy,
+                            hasUnityWorldFromCamera, unityWorldFromCamera, buf);
                         _hasOutVersion = true;
                     }
                     catch (EntryPointNotFoundException)
@@ -204,7 +206,8 @@ namespace AreaTargetPlugin
                 if (_hasOutVersion)
                 {
                     vl_process_frame_out_native(handle, imageData, width, height,
-                        fx, fy, cx, cy, hasLastPose, lastPose, buf);
+                        fx, fy, cx, cy,
+                        hasUnityWorldFromCamera, unityWorldFromCamera, buf);
                 }
                 else
                 {
@@ -212,7 +215,8 @@ namespace AreaTargetPlugin
                     // On iOS ARM64, large struct returns go via x8 register (pointer to caller-allocated space).
                     // We re-declare it as void with an extra IntPtr param to match the ABI.
                     vl_process_frame_raw(handle, imageData, width, height,
-                        fx, fy, cx, cy, hasLastPose, lastPose, buf);
+                        fx, fy, cx, cy,
+                        hasUnityWorldFromCamera, unityWorldFromCamera, buf);
                 }
 
                 // Manually read fields from buffer
@@ -258,7 +262,7 @@ namespace AreaTargetPlugin
     }
 
     /// <summary>
-    /// Managed version of VLResult, no marshalling issues.
+    /// Managed version of VLResult. pose is native T_C_S in row-major layout.
     /// </summary>
     internal struct VLResultData
     {

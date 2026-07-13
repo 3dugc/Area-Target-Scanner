@@ -26,7 +26,16 @@ namespace AreaTargetPlugin.PointCloudLocalization
                 ImageData = cameraData.GetBytes(),
                 Width = cameraData.Width,
                 Height = cameraData.Height,
-                Intrinsics = intrinsicMatrix
+                Intrinsics = intrinsicMatrix,
+                FrameId = cameraData.FrameId,
+                CaptureTimestampNs = cameraData.CaptureTimestampNs,
+                Orientation = cameraData.Orientation,
+                MapId = cameraData.MapId,
+                UnityWorldFromCamera = Matrix4x4.TRS(
+                    cameraData.CameraPositionOnCapture,
+                    cameraData.CameraRotationOnCapture,
+                    Vector3.one
+                )
             };
         }
     }

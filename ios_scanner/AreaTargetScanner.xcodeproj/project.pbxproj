@@ -38,6 +38,8 @@ A10017 /* GLBExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1001
 		A10040 /* ModelPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10040 /* ModelPreviewView.swift */; };
 		A10041 /* ScanHistoryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10041 /* ScanHistoryItem.swift */; };
 		A10042 /* ScanHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10042 /* ScanHistoryView.swift */; };
+		A10043 /* CoordinateContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10043 /* CoordinateContractTests.swift */; };
+		A10044 /* coordinate-contract-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = B10044 /* coordinate-contract-v1.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +88,8 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 		B10040 /* ModelPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPreviewView.swift; sourceTree = "<group>"; };
 		B10041 /* ScanHistoryItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanHistoryItem.swift; sourceTree = "<group>"; };
 		B10042 /* ScanHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanHistoryView.swift; sourceTree = "<group>"; };
+		B10043 /* CoordinateContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinateContractTests.swift; sourceTree = "<group>"; };
+		B10044 /* coordinate-contract-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ../../tests/fixtures/phase1/coordinate-contract-v1.json; sourceTree = "<group>"; };
 		F10001 /* AreaTargetScanner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AreaTargetScanner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F10002 /* AreaTargetScannerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AreaTargetScannerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -177,6 +181,8 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 		H10006 /* AreaTargetScannerTests */ = {
 			isa = PBXGroup;
 			children = (
+				B10043 /* CoordinateContractTests.swift */,
+				B10044 /* coordinate-contract-v1.json */,
 				B10012 /* ScanDataExporterTests.swift */,
 				B10024 /* TextureMappingPropertyTests.swift */,
 				B10026 /* MeshExporterTests.swift */,
@@ -303,6 +309,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10044 /* coordinate-contract-v1.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,6 +352,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10043 /* CoordinateContractTests.swift in Sources */,
 				A10012 /* ScanDataExporterTests.swift in Sources */,
 				A10024 /* TextureMappingPropertyTests.swift in Sources */,
 				A10025 /* MeshExporterTests.swift in Sources */,
