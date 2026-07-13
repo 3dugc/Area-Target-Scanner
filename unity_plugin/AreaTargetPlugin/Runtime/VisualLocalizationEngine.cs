@@ -10,7 +10,7 @@ namespace AreaTargetPlugin
     /// C++ library (libvisual_localizer) via NativeLocalizerBridge.
     /// Works on all platforms (Editor, Standalone, iOS, Android) without OpenCvSharp.
     /// </summary>
-    public class VisualLocalizationEngine : IDisposable
+    public class VisualLocalizationEngine : ILocalizationProcessor
     {
         private IntPtr _nativeHandle;
         private bool _disposed;
@@ -92,7 +92,7 @@ namespace AreaTargetPlugin
         /// </summary>
         public LocalizationFrameResult ProcessFrame(
             LocalizationFrame frame,
-            int mapGeneration = 0)
+            long mapGeneration = 0)
         {
             long workerStartedTimestampNs = GetMonotonicTimestampNs();
             float[] unityWorldFromCamera = PrepareUnityWorldFromCameraForNative(frame);
@@ -150,10 +150,16 @@ namespace AreaTargetPlugin
         /// Marks Runtime alignment as established. Native PnP continues to return its
         /// canonical T_C_S pose; Runtime owns all T_U_S application.
         /// </summary>
-        public void SetAlignmentTransform(Matrix4x4 unityWorldFromScanAlignment)
+        internal void SetAlignmentTransform(Matrix4x4 unityWorldFromScanAlignment)
         {
             CoordinateTransform.ValidateFiniteRigidTransform(
                 unityWorldFromScanAlignment, nameof(unityWorldFromScanAlignment));
+            if (_nativeHandle != IntPtr.Zero)
+            {
+                NativeLocalizerBridge.vl_set_alignment_transform(
+                    _nativeHandle,
+                    CoordinateTransform.ToNativeRowMajor(unityWorldFromScanAlignment));
+            }
             CurrentMode = LocalizationMode.Aligned;
         }
 
@@ -162,6 +168,24 @@ namespace AreaTargetPlugin
             CurrentMode = LocalizationMode.Raw;
             if (_nativeHandle != IntPtr.Zero)
                 NativeLocalizerBridge.vl_reset(_nativeHandle);
+        }
+
+        LocalizationFrameResult ILocalizationProcessor.Process(
+            LocalizationFrame frame,
+            long generation)
+        {
+            return ProcessFrame(frame, generation);
+        }
+
+        void ILocalizationProcessor.SetAlignmentTransform(
+            Matrix4x4 unityWorldFromScanAlignment)
+        {
+            SetAlignmentTransform(unityWorldFromScanAlignment);
+        }
+
+        void ILocalizationProcessor.Reset()
+        {
+            ResetState();
         }
 
         /// <summary>

@@ -2,8 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
-using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
@@ -53,17 +51,7 @@ public class SLAMTestSceneManager : MonoBehaviour
     private int _lastGrayscaleNonZero;
     private long _lastCaptureTimestampNs = -1;
 
-    // --- 后台线程定位 ---
-    private Thread _locThread;
-    private volatile bool _locThreadRunning;
-    // 主线程写入，后台线程读取
-    private CameraFrame _pendingFrame;
-    private volatile bool _hasPendingFrame;
-    // 后台线程写入，主线程读取
-    private TrackingResult _latestResult;
-    private volatile bool _hasNewResult;
-    private readonly object _frameLock = new object();
-    private readonly object _resultLock = new object();
+    private const long MaxLocalizationResultAgeNs = 1_000_000_000L;
 
     // --- 原点稳定性验证 ---
     private Vector3 _lastOriginPos;
@@ -216,13 +204,7 @@ public class SLAMTestSceneManager : MonoBehaviour
             _ = LoadGLBModelAsync(_loader.MeshPath);
         }
 
-        // 启动后台定位线程
-        _locThreadRunning = true;
-        _locThread = new Thread(LocalizationThreadWorker);
-        _locThread.Name = "VL_Localizer";
-        _locThread.IsBackground = true;
-        _locThread.Start();
-        log.Add("定位线程: 已启动");
+        log.Add("定位运行器: 已启动");
 
         debugPanel?.SetStatus(string.Join("\n", log), Color.green);
     }
@@ -288,12 +270,8 @@ public class SLAMTestSceneManager : MonoBehaviour
             MapId = _tracker.MapId
         };
 
-        // 提交帧到后台线程（如果后台空闲则替换，否则跳过）
-        lock (_frameLock)
-        {
-            _pendingFrame = frame;
-            _hasPendingFrame = true;
-        }
+        if (!_tracker.SubmitFrame(frame))
+            _framesSkipped++;
     }
 
     private long GetMonotonicCaptureTimestampNs(ARCameraFrameEventArgs args)
@@ -307,75 +285,34 @@ public class SLAMTestSceneManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 后台定位线程：循环等待新帧，执行 ProcessFrame，写入结果。
+    /// Main-thread result consumption. Native work has already completed inside
+    /// AreaTargetTracker's single runner worker.
     /// </summary>
-    private void LocalizationThreadWorker()
+    private void ConsumeLatestTrackingResult()
     {
-        while (_locThreadRunning)
+        if (!_initialized || _tracker == null || _lastCaptureTimestampNs < 0)
+            return;
+
+        if (!_tracker.TryGetLatestTrackingResult(
+            _lastCaptureTimestampNs,
+            MaxLocalizationResultAgeNs,
+            out TrackingResult result))
         {
-            CameraFrame frame;
-            bool hasFrame;
-
-            lock (_frameLock)
-            {
-                hasFrame = _hasPendingFrame;
-                frame = _pendingFrame;
-                _hasPendingFrame = false;
-            }
-
-            if (!hasFrame)
-            {
-                Thread.Sleep(2); // 避免空转
-                continue;
-            }
-
-            try
-            {
-                TrackingResult result = _tracker.ProcessFrame(frame);
-
-                // 读取 debug info（反射，线程安全因为 native 侧是同步的）
-                string detail = $"S={result.State} M={result.MatchedFeatures} C={result.Confidence:F3}";
-                try
-                {
-                    var getDbgMethod = _tracker.GetType().GetMethod("GetDebugInfo",
-                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    if (getDbgMethod != null)
-                    {
-                        var dbgObj = getDbgMethod.Invoke(_tracker, null);
-                        var dbgType = dbgObj.GetType();
-                        int orbKp = (int)dbgType.GetField("orb_keypoints").GetValue(dbgObj);
-                        int candKf = (int)dbgType.GetField("candidate_keyframes").GetValue(dbgObj);
-                        int bestKfId = (int)dbgType.GetField("best_kf_id").GetValue(dbgObj);
-                        int bestRaw = (int)dbgType.GetField("best_raw_matches").GetValue(dbgObj);
-                        int bestGood = (int)dbgType.GetField("best_good_matches").GetValue(dbgObj);
-                        int bestInliers = (int)dbgType.GetField("best_inliers").GetValue(dbgObj);
-                        float bestBow = (float)dbgType.GetField("best_bow_sim").GetValue(dbgObj);
-
-                        if (orbKp > 0 || candKf > 0 || bestKfId >= 0)
-                        {
-                            detail += $"\nORB:{orbKp} Cand:{candKf} BoW:{bestBow:F3}" +
-                                $"\nRaw:{bestRaw} Good:{bestGood} In:{bestInliers} KF:{bestKfId}";
-                        }
-                    }
-                }
-                catch { /* debug info is optional */ }
-
-                lock (_resultLock)
-                {
-                    _latestResult = result;
-                    _lastTrackingDetail = detail;
-                    _hasNewResult = true;
-                }
-            }
-            catch (Exception ex)
-            {
-                lock (_resultLock)
-                {
-                    _lastTrackingDetail = $"异常:{ex.GetType().Name}:{ex.Message}";
-                    _hasNewResult = true;
-                }
-            }
+            return;
         }
+
+        ExtendedDebugInfo debug = _tracker.GetExtendedDebugInfo();
+        VLDebugInfo native = debug.NativeDebugInfo;
+        _lastTrackingDetail =
+            $"S={result.State} M={result.MatchedFeatures} C={result.Confidence:F3}";
+        if (native.orb_keypoints > 0 || native.candidate_keyframes > 0 || native.best_kf_id >= 0)
+        {
+            _lastTrackingDetail +=
+                $"\nORB:{native.orb_keypoints} Cand:{native.candidate_keyframes} BoW:{native.best_bow_sim:F3}" +
+                $"\nRaw:{native.best_raw_matches} Good:{native.best_good_matches} In:{native.best_inliers} KF:{native.best_kf_id}";
+        }
+
+        HandleTrackingResult(result);
     }
 
     private void HandleTrackingResult(TrackingResult result)
@@ -645,17 +582,7 @@ public class SLAMTestSceneManager : MonoBehaviour
 
     void Update()
     {
-        // 消费后台线程的定位结果
-        if (_hasNewResult)
-        {
-            TrackingResult result;
-            lock (_resultLock)
-            {
-                result = _latestResult;
-                _hasNewResult = false;
-            }
-            HandleTrackingResult(result);
-        }
+        ConsumeLatestTrackingResult();
 
         _fpsFrameCount++;
         _fpsTimer += Time.unscaledDeltaTime;
@@ -667,8 +594,7 @@ public class SLAMTestSceneManager : MonoBehaviour
 
             if (_initialized)
             {
-                string detail;
-                lock (_resultLock) { detail = _lastTrackingDetail; }
+                string detail = _lastTrackingDetail;
                 string cubeInfo = _originCube != null && _originCube.activeSelf
                     ? $"\n原点:{_originCube.transform.position.x:F2},{_originCube.transform.position.y:F2},{_originCube.transform.position.z:F2}"
                     : "";
@@ -686,10 +612,9 @@ public class SLAMTestSceneManager : MonoBehaviour
 
     public void OnResetClicked()
     {
-        // 清空待处理帧，避免后台线程处理旧数据
-        lock (_frameLock) { _hasPendingFrame = false; }
-        _tracker?.Reset();
-        lock (_resultLock) { _hasNewResult = false; }
+        if (_tracker != null)
+            _ = _tracker.ResetAsync();
+        _lastTrackingDetail = "";
         if (_originCube != null) _originCube.SetActive(false);
         if (_glbModelObj != null) _glbModelObj.SetActive(false);
         // 重置稳定性统计
@@ -706,16 +631,9 @@ public class SLAMTestSceneManager : MonoBehaviour
 
     void OnDestroy()
     {
-        // 停止后台线程
-        _locThreadRunning = false;
-        if (_locThread != null && _locThread.IsAlive)
-        {
-            _locThread.Join(1000);
-        }
-        _locThread = null;
-
         if (arCameraManager != null) arCameraManager.frameReceived -= OnCameraFrameReceived;
-        _tracker?.Dispose();
+        if (_tracker != null)
+            _ = _tracker.DisposeAsync();
         _tracker = null;
 
         if (_glbModelObj != null) Destroy(_glbModelObj);

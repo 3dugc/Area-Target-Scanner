@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace AreaTargetPlugin
@@ -24,10 +25,16 @@ namespace AreaTargetPlugin
         private TrackingState _state = TrackingState.INITIALIZING;
         private AssetBundleLoader _loader;
         private VisualLocalizationEngine _localizationEngine;
+        private AsyncLocalizationRunner _localizationRunner;
         private KalmanPoseFilter _kalmanFilter;
         private FeatureDatabaseReader _featureDb;
         private bool _initialized;
         private bool _disposed;
+        private Task _disposeTask;
+        private LocalizationMode _currentMode = LocalizationMode.Raw;
+        private VLDebugInfo _lastNativeDebugInfo;
+
+        private const long DefaultMaxResultAgeNs = 1_000_000_000L;
 
         // --- 可配置属性 (Requirements 5.4, 5.8, 6.6) ---
         /// <summary>触发首次 AT 计算的最小 Raw 模式成功帧数。</summary>
@@ -99,39 +106,43 @@ namespace AreaTargetPlugin
                 return false;
             }
 
+            _localizationRunner = new AsyncLocalizationRunner(_localizationEngine);
+            if (!_localizationRunner.Start())
+            {
+                Debug.LogError("[AreaTargetPlugin] Failed to start localization worker.");
+                _localizationEngine.Dispose();
+                _localizationEngine = null;
+                _featureDb.Dispose();
+                _featureDb = null;
+                return false;
+            }
+
             // Initialize the Kalman pose filter for smoothing
             _kalmanFilter = new KalmanPoseFilter();
 
             _initialized = true;
             _state = TrackingState.INITIALIZING;
+            _currentMode = LocalizationMode.Raw;
+            _lastNativeDebugInfo = default;
             Debug.Log("[AreaTargetPlugin] Tracker initialized successfully.");
             return true;
         }
 
         /// <inheritdoc/>
         /// <remarks>
-        /// 两阶段 ProcessFrame 逻辑：
-        /// 1. 调用 native 定位引擎
-        /// 2. 一致性过滤（consistency_rejected → LOST）
-        /// 3. Raw 模式：位姿缓冲 → AT 触发
-        /// 4. Aligned 模式：滑动窗口 → AT 持续优化
-        /// 5. 分级降级策略
+        /// Legacy non-blocking adapter. It submits a frame and consumes an already
+        /// completed result if one is available; it never invokes native code on the
+        /// Unity caller thread.
         /// </remarks>
         public TrackingResult ProcessFrame(CameraFrame cameraFrame)
         {
-            if (!_initialized || _disposed)
+            if (!SubmitFrame(cameraFrame))
                 return CreateLostTrackingResult();
 
-            if (string.IsNullOrWhiteSpace(cameraFrame.MapId))
-                cameraFrame.MapId = MapId;
-            if (!cameraFrame.TryCreateLocalizationFrame(
-                    out LocalizationFrame localizationFrame,
-                    out _))
-            {
-                return CreateLostTrackingResult();
-            }
-
-            return ProcessFrame(localizationFrame);
+            return TryGetLatestTrackingResult(
+                GetMonotonicTimestampNs(), DefaultMaxResultAgeNs, out TrackingResult result)
+                ? result
+                : CreateLostTrackingResult();
         }
 
         /// <summary>
@@ -140,14 +151,79 @@ namespace AreaTargetPlugin
         /// </summary>
         public TrackingResult ProcessFrame(LocalizationFrame localizationFrame)
         {
-            if (!_initialized || _disposed)
+            if (!SubmitFrame(localizationFrame))
                 return CreateLostTrackingResult();
 
-            LocalizationFrameResult frameResult = _localizationEngine.ProcessFrame(localizationFrame);
+            return TryGetLatestTrackingResult(
+                GetMonotonicTimestampNs(), DefaultMaxResultAgeNs, out TrackingResult result)
+                ? result
+                : CreateLostTrackingResult();
+        }
+
+        /// <inheritdoc/>
+        public bool SubmitFrame(CameraFrame cameraFrame)
+        {
+            if (!_initialized || _disposed)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(cameraFrame.MapId))
+                cameraFrame.MapId = MapId;
+            if (!cameraFrame.TryCreateLocalizationFrame(
+                    out LocalizationFrame localizationFrame,
+                    out _))
+            {
+                return false;
+            }
+
+            return SubmitFrame(localizationFrame);
+        }
+
+        /// <inheritdoc/>
+        public bool SubmitFrame(LocalizationFrame localizationFrame)
+        {
+            if (!_initialized || _disposed || _localizationRunner == null)
+                return false;
+            if (!string.Equals(localizationFrame.MapId, MapId, StringComparison.Ordinal))
+                return false;
+
+            return _localizationRunner.Submit(localizationFrame);
+        }
+
+        /// <inheritdoc/>
+        public bool TryGetLatestTrackingResult(
+            long nowTimestampNs,
+            long maxAgeNs,
+            out TrackingResult result)
+        {
+            result = CreateLostTrackingResult();
+            if (!_initialized || _disposed || _localizationRunner == null)
+                return false;
+
+            if (!_localizationRunner.TryDequeueLatest(
+                MapId,
+                _localizationRunner.CurrentGeneration,
+                nowTimestampNs,
+                maxAgeNs,
+                out LocalizationFrameResult frameResult))
+            {
+                return false;
+            }
+
+            result = ApplyFrameResult(frameResult);
+            return true;
+        }
+
+        /// <summary>
+        /// Applies a result that has already been validated by the runner. This code
+        /// remains on Unity's main thread and never reads a native handle directly.
+        /// </summary>
+        private TrackingResult ApplyFrameResult(LocalizationFrameResult frameResult)
+        {
             TrackingResult locResult = ToTrackingResult(frameResult);
+            _lastNativeDebugInfo = frameResult.NativeDebugInfo;
 
             // Step 2: 获取 debug 信息进行一致性检查 (Req 6.1, 6.2)
-            VLDebugInfo debugInfo = _localizationEngine.GetDebugInfo();
+            VLDebugInfo debugInfo = frameResult.NativeDebugInfo;
 
             // Step 3: 一致性过滤 — consistency_rejected == 1 时标记 LOST，丢弃位姿
             if (debugInfo.consistency_rejected == 1)
@@ -169,10 +245,10 @@ namespace AreaTargetPlugin
             {
                 _consecutiveLostFrames = 0;
                 var framePair = new LocalizationFramePair(
-                    localizationFrame.UnityWorldFromCamera,
+                    frameResult.UnityWorldFromCamera,
                     frameResult.CameraFromScan.Value);
 
-                if (_localizationEngine.CurrentMode == LocalizationMode.Raw)
+                if (_currentMode == LocalizationMode.Raw)
                 {
                     return ProcessRawModeSuccess(locResult, framePair);
                 }
@@ -185,7 +261,7 @@ namespace AreaTargetPlugin
             // Step 5: 定位失败（非一致性拒绝）
             _consecutiveLostFrames++;
 
-            if (_localizationEngine.CurrentMode == LocalizationMode.Aligned)
+            if (_currentMode == LocalizationMode.Aligned)
             {
                 return ProcessAlignedModeLost(locResult);
             }
@@ -218,7 +294,8 @@ namespace AreaTargetPlugin
                 if (AlignmentTransformCalculator.TryCompute(_rawPoseBuffer, out Matrix4x4 at))
                 {
                     // AT 计算成功 → 设置 AT 并切换到 Aligned 模式
-                    _localizationEngine.SetAlignmentTransform(at);
+                    _localizationRunner?.SetAlignmentTransformAsync(at);
+                    _currentMode = LocalizationMode.Aligned;
                     _currentAT = at;
                     _rawPoseBuffer.Clear();
                     _framesSinceLastATRefresh = 0;
@@ -275,14 +352,16 @@ namespace AreaTargetPlugin
                         else
                         {
                             // 安全范围内 → 更新 AT
-                            _localizationEngine.SetAlignmentTransform(newAT);
+                            _localizationRunner?.SetAlignmentTransformAsync(newAT);
+                            _currentMode = LocalizationMode.Aligned;
                             _currentAT = newAT;
                         }
                     }
                     else
                     {
                         // 首次设置（理论上不应走到这里，但防御性处理）
-                        _localizationEngine.SetAlignmentTransform(newAT);
+                        _localizationRunner?.SetAlignmentTransformAsync(newAT);
+                        _currentMode = LocalizationMode.Aligned;
                         _currentAT = newAT;
                     }
                 }
@@ -384,17 +463,26 @@ namespace AreaTargetPlugin
         }
 
         /// <summary>
-        /// 内部重置：清空缓冲区，重置状态，回退到 Raw 模式。
+        /// Clears main-thread tracking state and schedules the native reset on the
+        /// runner's worker. No Unity caller directly resets a native handle.
         /// </summary>
         private void PerformInternalReset()
+        {
+            ClearManagedTrackingState();
+            if (_localizationRunner != null)
+                _localizationRunner.ResetAsync();
+        }
+
+        private void ClearManagedTrackingState()
         {
             _rawPoseBuffer.Clear();
             _slidingWindow.Clear();
             _consecutiveLostFrames = 0;
             _framesSinceLastATRefresh = 0;
             _currentAT = null;
+            _currentMode = LocalizationMode.Raw;
+            _lastNativeDebugInfo = default;
             _kalmanFilter?.Reset();
-            _localizationEngine?.ResetState();
         }
 
         /// <inheritdoc/>
@@ -411,9 +499,22 @@ namespace AreaTargetPlugin
         /// </remarks>
         public void Reset()
         {
+            ResetAsync();
+        }
+
+        /// <inheritdoc/>
+        public Task ResetAsync()
+        {
+            if (_disposed)
+                return Task.FromResult(true);
+
             _state = TrackingState.INITIALIZING;
-            PerformInternalReset();
+            ClearManagedTrackingState();
             Debug.Log("[AreaTargetPlugin] Tracker reset.");
+
+            return _localizationRunner == null
+                ? Task.FromResult(true)
+                : _localizationRunner.ResetAsync();
         }
 
         /// <summary>
@@ -421,7 +522,7 @@ namespace AreaTargetPlugin
         /// </summary>
         internal VLDebugInfo GetDebugInfo()
         {
-            return _localizationEngine?.GetDebugInfo() ?? default;
+            return _lastNativeDebugInfo;
         }
 
         /// <summary>
@@ -431,12 +532,12 @@ namespace AreaTargetPlugin
         {
             return new ExtendedDebugInfo
             {
-                CurrentMode = _localizationEngine?.CurrentMode ?? LocalizationMode.Raw,
+                CurrentMode = _currentMode,
                 IsATSet = _currentAT.HasValue,
                 PoseBufferFrameCount = _rawPoseBuffer.Count,
                 ConsecutiveLostFrames = _consecutiveLostFrames,
                 SlidingWindowFrameCount = _slidingWindow.Count,
-                NativeDebugInfo = _localizationEngine?.GetDebugInfo() ?? default
+                NativeDebugInfo = _lastNativeDebugInfo
             };
         }
 
@@ -448,25 +549,55 @@ namespace AreaTargetPlugin
         /// </remarks>
         public void Dispose()
         {
-            if (_disposed) return;
+            DisposeAsync();
+        }
+
+        /// <inheritdoc/>
+        public Task DisposeAsync()
+        {
+            if (_disposeTask != null)
+                return _disposeTask;
 
             _disposed = true;
             _initialized = false;
-
-            _localizationEngine?.Dispose();
-            _localizationEngine = null;
-
-            _featureDb?.Dispose();
-            _featureDb = null;
-
-            _loader = null;
-            _kalmanFilter = null;
-
-            _rawPoseBuffer.Clear();
-            _slidingWindow.Clear();
-
             _state = TrackingState.LOST;
-            Debug.Log("[AreaTargetPlugin] Tracker disposed.");
+
+            AsyncLocalizationRunner runner = _localizationRunner;
+            _localizationRunner = null;
+            _disposeTask = DisposeCoreAsync(runner);
+            return _disposeTask;
+        }
+
+        private async Task DisposeCoreAsync(AsyncLocalizationRunner runner)
+        {
+            try
+            {
+                if (runner != null)
+                    await runner.DisposeAsync();
+                else
+                    _localizationEngine?.Dispose();
+            }
+            finally
+            {
+                _localizationEngine = null;
+                _featureDb?.Dispose();
+                _featureDb = null;
+                _loader = null;
+                _kalmanFilter = null;
+                _rawPoseBuffer.Clear();
+                _slidingWindow.Clear();
+                _state = TrackingState.LOST;
+                Debug.Log("[AreaTargetPlugin] Tracker disposed.");
+            }
+        }
+
+        private static long GetMonotonicTimestampNs()
+        {
+            long ticks = System.Diagnostics.Stopwatch.GetTimestamp();
+            long frequency = System.Diagnostics.Stopwatch.Frequency;
+            long seconds = ticks / frequency;
+            long remainder = ticks % frequency;
+            return seconds * 1000000000L + remainder * 1000000000L / frequency;
         }
     }
 }

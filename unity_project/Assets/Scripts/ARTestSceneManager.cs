@@ -45,6 +45,8 @@ public class ARTestSceneManager : MonoBehaviour
     private int _fpsFrameCount;
     private long _lastCaptureTimestampNs = -1;
 
+    private const long MaxLocalizationResultAgeNs = 1_000_000_000L;
+
     void Start()
     {
         Log("=== AR 测试场景启动 ===");
@@ -179,6 +181,15 @@ public class ARTestSceneManager : MonoBehaviour
 
     void Update()
     {
+        if (_initialized && _tracker != null
+            && _tracker.TryGetLatestTrackingResult(
+                _lastCaptureTimestampNs,
+                MaxLocalizationResultAgeNs,
+                out TrackingResult trackingResult))
+        {
+            HandleTrackingResult(trackingResult);
+        }
+
         _fpsFrameCount++;
         _fpsTimer += Time.unscaledDeltaTime;
         if (_fpsTimer >= 1f)
@@ -245,8 +256,7 @@ public class ARTestSceneManager : MonoBehaviour
             MapId = _tracker.MapId
         };
 
-        TrackingResult result = _tracker.ProcessFrame(frame);
-        HandleTrackingResult(result);
+        _tracker.SubmitFrame(frame);
     }
 
     private long GetMonotonicCaptureTimestampNs(ARCameraFrameEventArgs args)
@@ -437,7 +447,8 @@ public class ARTestSceneManager : MonoBehaviour
 
     private void OnResetClicked()
     {
-        _tracker?.Reset();
+        if (_tracker != null)
+            _ = _tracker.ResetAsync();
         _frameCount = 0;
         SetStatus("已重置，正在重新定位...", Color.yellow);
         if (areaTargetOrigin != null)
@@ -466,6 +477,8 @@ public class ARTestSceneManager : MonoBehaviour
     {
         if (arCameraManager != null)
             arCameraManager.frameReceived -= OnCameraFrameReceived;
-        _tracker?.Dispose();
+        if (_tracker != null)
+            _ = _tracker.DisposeAsync();
+        _tracker = null;
     }
 }

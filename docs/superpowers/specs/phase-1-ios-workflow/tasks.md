@@ -563,6 +563,10 @@ git commit -m "feat: unify iOS localization coordinates"
 
 **可运行产物：** Runtime 的单 worker 在不阻塞 Unity 主线程的情况下定位，覆盖 pending 旧帧、拒绝过期结果，并安全 reset/dispose。
 
+> **进度（2026-07-13）：** 步骤 1–7 已完成。`AsyncLocalizationRunner` 以单 worker 独占 `Process`、alignment、`Reset` 和 `Dispose`；输入只保留最新 pending frame，输出按 map、generation、时间和 frame ID 过滤，任何有输入上下文的 worker 异常（包含 alignment）都会产出 `LifecycleFailure` 后停机。`AreaTargetTracker` 与 `ARTestSceneManager`、`SLAMTestSceneManager` 已改为“提交帧→消费结果”，SLAM 场景的自建线程、2ms 轮询与反射读取已删除。审计额外发现 `PointCloudLocalizer` 直接绕过 engine，已做最小迁移至同一 runner 边界。
+>
+> **验证证据：** 先后观察到 runner 接口、Tracker 异步入口、两份场景迁移、PointCloud runner 委派、alignment worker 所有权及 alignment 异常传播的失败测试；实现后专用测试均通过。项目没有独立的 PlayMode 生命周期程序集，因此 `AsyncLocalizationRunnerTests` 的真实线程、latest-frame、reset/dispose 和异常路径覆盖作为需求 R1.6 所允许的等价生命周期验证。最终 Unity EditMode 回归为 `975/975` 通过、`0` 失败、`0` 跳过，且无 C# 编译错误；结果文件：`/private/tmp/phase1-task5-editmode-final4.xml`。
+
 **涉及文件：**
 
 - 新建：`unity_plugin/AreaTargetPlugin/Runtime/AsyncLocalizationRunner.cs`
@@ -574,7 +578,7 @@ git commit -m "feat: unify iOS localization coordinates"
 - 修改：`unity_project/Assets/Scripts/ARTestSceneManager.cs`
 - 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMTestSceneManager.cs`
 
-- [ ] **步骤 1：添加失败的 runner 生命周期测试**
+- [x] **步骤 1：添加失败的 runner 生命周期测试**
 
 使用一个实现 `ILocalizationProcessor` 的 fake（不调用 native）测试以下行为：
 
@@ -606,13 +610,13 @@ public async Task Reset_waits_for_worker_before_resetting_processor()
 
 还必须覆盖：深拷贝图像、map generation 变化、过期结果、乱序结果、重复 `Start`、`DisposeAsync` 后提交和 worker 异常。
 
-- [ ] **步骤 2：运行测试并确认失败**
+- [x] **步骤 2：运行测试并确认失败**
 
 在 Unity Test Runner 运行 `AreaTargetPlugin.Tests/AsyncLocalizationRunnerTests`。
 
 预期结果：失败，因为 runner/processor 抽象尚不存在。
 
-- [ ] **步骤 3：定义可替换的处理器边界**
+- [x] **步骤 3：定义可替换的处理器边界**
 
 在 Runtime 内定义内部接口：
 
@@ -626,7 +630,7 @@ internal interface ILocalizationProcessor : IDisposable
 
 由 `VisualLocalizationEngine` 实现该接口，确保它的 native handle 仅在 worker 使用。接口不得暴露 Unity `Transform` 或 UI 对象。
 
-- [ ] **步骤 4：实现单 worker 和 bounded latest-frame 槽**
+- [x] **步骤 4：实现单 worker 和 bounded latest-frame 槽**
 
 `AsyncLocalizationRunner` 使用一个 worker、一个 input lock、一个 output lock 和一个 cancellation 信号。`Submit` 在锁内替换 pending frame，递增覆盖计数并唤醒 worker；worker 在锁外调用 `processor.Process`。任何时候仅有 worker 可进入 processor。
 
@@ -643,19 +647,19 @@ public bool TryDequeueLatest(
 
 不匹配 map/generation、frame ID 倒退或超过 `maxAgeNs` 时返回 `false` 并写入诊断，而非应用结果。
 
-- [ ] **步骤 5：实现安全 reset/dispose**
+- [x] **步骤 5：实现安全 reset/dispose**
 
 `ResetAsync` 必须：停止接收、递增 generation、清空 pending/output、等待 processor 离开 `Process`、调用 `Reset`、恢复接收。`DisposeAsync` 必须：停止接收、唤醒 worker、等待其退出、调用 `Dispose`。所有返回前都不得存在可能访问 native handle 的活动 worker。
 
 若 worker 抛出异常，将它转换为 `LifecycleFailure` 结果，停止 runner 并保留异常摘要供诊断导出；不得吞掉异常或继续使用未知状态 handle。
 
-- [ ] **步骤 6：将 tracker 和两个场景迁移到 runner**
+- [x] **步骤 6：将 tracker 和两个场景迁移到 runner**
 
 `AreaTargetTracker` 公开提交/消费异步结果的入口，主线程仅调用 `SubmitFrame` 与 `TryGetLatestTrackingResult`。`ARTestSceneManager` 删除同步 `ProcessFrame` 调用；`SLAMTestSceneManager` 删除自有 worker、2ms polling、reflection 读取 debug 和直接 native reset 路径。
 
 每帧场景逻辑只能：采集 ARFoundation 数据、提交 frame、消费已验证结果、更新 `SceneUpdater`/UI 摘要。
 
-- [ ] **步骤 7：运行 EditMode 与 PlayMode 生命周期测试**
+- [x] **步骤 7：运行 EditMode 与 PlayMode 生命周期测试**
 
 在 Unity Test Runner 执行：
 
@@ -669,7 +673,7 @@ AreaTargetPlugin.Tests/ARTestSceneDebugUITests
 
 预期结果：全部通过；`AsyncLocalizationRunnerTests` 覆盖 latest-frame、过期/乱序、reset/dispose 和异常路径。
 
-- [ ] **步骤 8：提交任务 5**
+- [x] **步骤 8：提交任务 5**
 
 ```bash
 git add \

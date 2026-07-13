@@ -10,7 +10,10 @@ namespace AreaTargetPlugin.PointCloudLocalization
     /// </summary>
     public class PointCloudLocalizer : ILocalizer
     {
-        private VisualLocalizationEngine _engine;
+        private const int ResultPollLimit = 100;
+        private const long MaxLocalizationResultAgeNs = 1_000_000_000L;
+
+        private AsyncLocalizationRunner _runner;
         private FeatureDatabaseReader _featureDb;
         private readonly int _mapId;
         private bool _disposed;
@@ -26,7 +29,11 @@ namespace AreaTargetPlugin.PointCloudLocalization
         public PointCloudLocalizer(int mapId, VisualLocalizationEngine engine, FeatureDatabaseReader featureDb)
         {
             _mapId = mapId;
-            _engine = engine;
+            if (engine != null)
+            {
+                _runner = new AsyncLocalizationRunner(engine);
+                _runner.Start();
+            }
             _featureDb = featureDb;
         }
 
@@ -35,40 +42,63 @@ namespace AreaTargetPlugin.PointCloudLocalization
         /// Returns Failed() for null input, invalid dimensions, disposed state, or internal exceptions.
         /// Fires OnSuccessfulLocalizations when tracking succeeds.
         /// </summary>
-        public Task<ILocalizationResult> Localize(ICameraData cameraData)
+        public async Task<ILocalizationResult> Localize(ICameraData cameraData)
         {
             try
             {
                 if (_disposed)
-                    return Task.FromResult<ILocalizationResult>(LocalizationResult.Failed());
+                    return LocalizationResult.Failed();
 
                 if (cameraData == null)
-                    return Task.FromResult<ILocalizationResult>(LocalizationResult.Failed());
+                    return LocalizationResult.Failed();
 
                 if (cameraData.Width <= 0 || cameraData.Height <= 0)
-                    return Task.FromResult<ILocalizationResult>(LocalizationResult.Failed());
+                    return LocalizationResult.Failed();
 
                 var frame = CameraDataAdapter.ToCameraFrame(cameraData);
-                var trackingResult = _engine.ProcessFrame(frame);
-
-                if (trackingResult.State == TrackingState.TRACKING)
+                if (!frame.TryCreateLocalizationFrame(
+                    out LocalizationFrame localizationFrame,
+                    out _))
                 {
-                    var result = new LocalizationResult
-                    {
-                        Success = true,
-                        MapId = _mapId,
-                        Pose = trackingResult.Pose
-                    };
-                    OnSuccessfulLocalizations?.Invoke(new[] { _mapId });
-                    return Task.FromResult<ILocalizationResult>(result);
+                    return LocalizationResult.Failed();
                 }
 
-                return Task.FromResult<ILocalizationResult>(LocalizationResult.Failed());
+                if (_runner == null || !_runner.Submit(localizationFrame))
+                    return LocalizationResult.Failed();
+
+                for (int attempt = 0; attempt < ResultPollLimit; attempt++)
+                {
+                    if (_runner.TryDequeueLatest(
+                        localizationFrame.MapId,
+                        _runner.CurrentGeneration,
+                        localizationFrame.CaptureTimestampNs,
+                        MaxLocalizationResultAgeNs,
+                        out LocalizationFrameResult frameResult))
+                    {
+                        if (frameResult.IsSuccess)
+                        {
+                            var result = new LocalizationResult
+                            {
+                                Success = true,
+                                MapId = _mapId,
+                                Pose = frameResult.UnityWorldFromScan.Value
+                            };
+                            OnSuccessfulLocalizations?.Invoke(new[] { _mapId });
+                            return result;
+                        }
+
+                        return LocalizationResult.Failed();
+                    }
+
+                    await Task.Delay(1);
+                }
+
+                return LocalizationResult.Failed();
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[PointCloudLocalizer] Localize exception: {ex.Message}");
-                return Task.FromResult<ILocalizationResult>(LocalizationResult.Failed());
+                return LocalizationResult.Failed();
             }
         }
 
@@ -78,20 +108,21 @@ namespace AreaTargetPlugin.PointCloudLocalization
         /// Each resource is disposed in its own try-catch to ensure one failure doesn't prevent the other from being released.
         /// The _disposed flag is set before disposal so concurrent Localize calls see it immediately.
         /// </summary>
-        public Task StopAndCleanUp()
+        public async Task StopAndCleanUp()
         {
-            if (_disposed) return Task.CompletedTask;
+            if (_disposed) return;
             _disposed = true;
 
             try
             {
-                _engine?.Dispose();
+                if (_runner != null)
+                    await _runner.DisposeAsync();
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[PointCloudLocalizer] Error disposing engine: {ex.Message}");
+                Debug.LogError($"[PointCloudLocalizer] Error disposing runner: {ex.Message}");
             }
-            _engine = null;
+            _runner = null;
 
             try
             {
@@ -102,8 +133,6 @@ namespace AreaTargetPlugin.PointCloudLocalization
                 Debug.LogError($"[PointCloudLocalizer] Error disposing feature database: {ex.Message}");
             }
             _featureDb = null;
-
-            return Task.CompletedTask;
         }
     }
 }

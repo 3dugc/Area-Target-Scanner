@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -17,6 +18,19 @@ namespace AreaTargetPlugin.Tests
     [TestFixture]
     public class SLAMTestSceneManagerTests
     {
+        [Test]
+        public void LocalizationFlow_UsesRunnerWithoutSceneOwnedWorkerOrReflection()
+        {
+            string source = File.ReadAllText(Path.Combine(
+                Application.dataPath, "Scripts", "SLAMTestScene", "SLAMTestSceneManager.cs"));
+
+            Assert.That(source, Does.Contain("_tracker.SubmitFrame(frame)"));
+            Assert.That(source, Does.Contain("_tracker.TryGetLatestTrackingResult("));
+            Assert.That(source, Does.Not.Contain("LocalizationThreadWorker"));
+            Assert.That(source, Does.Not.Contain("Thread.Sleep(2)"));
+            Assert.That(source, Does.Not.Contain("BindingFlags."));
+        }
+
         private GameObject _managerGo;
         private SLAMTestSceneManager _manager;
         private Button _resetButton;

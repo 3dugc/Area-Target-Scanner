@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 
 namespace AreaTargetPlugin
 {
@@ -30,6 +31,24 @@ namespace AreaTargetPlugin
         TrackingResult ProcessFrame(LocalizationFrame localizationFrame);
 
         /// <summary>
+        /// Queues one immutable frame for background localization. Only the newest
+        /// pending frame is retained while the worker is busy.
+        /// </summary>
+        bool SubmitFrame(LocalizationFrame localizationFrame);
+
+        /// <summary>Compatibility overload that converts a legacy camera frame.</summary>
+        bool SubmitFrame(CameraFrame cameraFrame);
+
+        /// <summary>
+        /// Consumes one validated result for the active map. The returned pose is
+        /// already T_U_S and can be applied by Unity scene code.
+        /// </summary>
+        bool TryGetLatestTrackingResult(
+            long nowTimestampNs,
+            long maxAgeNs,
+            out TrackingResult result);
+
+        /// <summary>
         /// Returns the current tracking state.
         /// </summary>
         TrackingState GetTrackingState();
@@ -39,5 +58,11 @@ namespace AreaTargetPlugin
         /// and restarts localization from scratch.
         /// </summary>
         void Reset();
+
+        /// <summary>Resets the worker-owned localizer after its active call exits.</summary>
+        Task ResetAsync();
+
+        /// <summary>Disposes the worker-owned localizer after its active call exits.</summary>
+        Task DisposeAsync();
     }
 }

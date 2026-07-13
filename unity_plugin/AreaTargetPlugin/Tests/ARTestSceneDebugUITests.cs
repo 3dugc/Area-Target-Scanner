@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -11,6 +12,17 @@ namespace AreaTargetPlugin.Tests
     [TestFixture]
     public class ARTestSceneDebugUITests
     {
+        [Test]
+        public void CameraFrameHandler_SubmitsAndConsumesAsyncTrackerResults()
+        {
+            string source = File.ReadAllText(Path.Combine(
+                Application.dataPath, "Scripts", "ARTestSceneManager.cs"));
+
+            Assert.That(source, Does.Contain("_tracker.SubmitFrame(frame)"));
+            Assert.That(source, Does.Contain("_tracker.TryGetLatestTrackingResult("));
+            Assert.That(source, Does.Not.Contain("_tracker.ProcessFrame(frame)"));
+        }
+
         #region FormatQualityText Tests (Requirements 3.1, 3.2)
 
         [Test]

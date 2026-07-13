@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -126,6 +127,53 @@ namespace AreaTargetPlugin.Tests
             Assert.AreEqual(TrackingState.LOST, result.State);
             Assert.AreEqual(Matrix4x4.identity, result.Pose);
             tracker.Dispose();
+        }
+
+        [Test]
+        public void SubmitFrame_BeforeInitialize_IsRejected()
+        {
+            var tracker = new AreaTargetTracker();
+
+            Assert.That(tracker.SubmitFrame(CreateLocalizationFrame(1, 100)), Is.False);
+
+            tracker.Dispose();
+        }
+
+        [Test]
+        public void TryGetLatestTrackingResult_BeforeInitialize_ReturnsFalse()
+        {
+            var tracker = new AreaTargetTracker();
+
+            Assert.That(tracker.TryGetLatestTrackingResult(200, 100, out TrackingResult result), Is.False);
+            Assert.That(result.State, Is.EqualTo(TrackingState.LOST));
+
+            tracker.Dispose();
+        }
+
+        [Test]
+        public async Task ResetAndDisposeAsync_BeforeInitialize_AreRepeatable()
+        {
+            var tracker = new AreaTargetTracker();
+
+            await tracker.ResetAsync();
+            await tracker.DisposeAsync();
+            await tracker.DisposeAsync();
+
+            Assert.That(tracker.GetTrackingState(), Is.EqualTo(TrackingState.LOST));
+        }
+
+        private static LocalizationFrame CreateLocalizationFrame(long frameId, long timestampNs)
+        {
+            return new LocalizationFrame(
+                frameId,
+                timestampNs,
+                new byte[4],
+                2,
+                2,
+                new Vector4(100f, 100f, 1f, 1f),
+                ImageOrientation.LandscapeRight,
+                Matrix4x4.identity,
+                "fixture-map");
         }
 
         #endregion
