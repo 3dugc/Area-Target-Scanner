@@ -790,21 +790,28 @@ git commit -m "feat: add bounded iOS localization diagnostics"
 
 **可运行产物：** 空 Unity 工程只安装 `com.areatarget.tracking-1.3.0.tgz` 就能导出并通过 generic iOS device Xcode 编译，不依赖 `unity_project/Assets/Editor` 或临时 manifest 注入。
 
+> **进度（2026-07-13）：** 步骤 1–7 已完成。新增 Python UPM 内容与依赖断言后，生成 `1.2.1` 包的测试如预期失败：缺 `package/Editor/iOSPostProcess.cs`，且 `validate_unity_package.sh` 仍向临时 manifest 注入 SQLite Git URL。随后将后处理迁入 UPM，生成包内置 iOS 静态库和 OpenCV framework，根工程的重复后处理已删除。SQLite 改为包自身固定的 `1.3.2` SemVer 依赖；验证工程只添加 OpenUPM 的 `com.gilzoide` scoped registry，不注入 SQLite dependency。最新 UPM 内容/repro 测试为 `3 passed`；Phase 0 验证的 Unity EditMode 为 `989/989` 且干净 UPM 安装成功；新的最小工程导出后 generic iOS Xcode Debug 构建报告 `BUILD SUCCEEDED`。验证工程只复制 `BuildiOS`、最小场景和场景管理脚本，未复制根工程的 `iOSPostProcess.cs`。
+
 **涉及文件：**
 
 - 新建：`unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs`
-- 新建：`unity_plugin/AreaTargetPlugin/Tests/UPMiOSBuildIntegrationTests.cs`
 - 新建：`tools/phase1/validate_ios_upm_build.sh`
+- 修改：`tests/phase0/test_upm_package.py`
+- 修改：`tests/phase0/test_package_metadata.py`
+- 修改：`tools/phase0/check_package_metadata.py`
 - 修改：`unity_plugin/AreaTargetPlugin/Editor/AreaTargetPlugin.Editor.asmdef`
+- 修改：`unity_plugin/AreaTargetPlugin/Tests/iOSBuildConfigTests.cs`
 - 修改：`unity_plugin/AreaTargetPlugin/package.json`
 - 修改：`unity_plugin/AreaTargetPlugin/CHANGELOG.md`
+- 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
 - 修改：`tools/phase0/build_upm_package.py`
 - 修改：`tools/phase0/validate_unity_package.sh`
-- 修改：`unity_project/Assets/Editor/iOSPostProcess.cs`
+- 删除：`unity_project/Assets/Editor/iOSPostProcess.cs`
 - 修改：`unity_project/Assets/Editor/BuildiOS.cs`
-- 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
+- 修改：`unity_project/Assets/Plugins/iOS/libvisual_localizer.a`
+- 修改：`.gitignore`
 
-- [ ] **步骤 1：添加失败的 UPM 内容和依赖测试**
+- [x] **步骤 1：添加失败的 UPM 内容和依赖测试**
 
 在 `UPMiOSBuildIntegrationTests.cs` 或 Python UPM 内容测试中断言生成 tar 包包含：
 
@@ -817,7 +824,7 @@ package/package.json
 
 并断言 `package.json` 自身的 dependencies 含固定 SQLite 依赖；测试不得通过读取临时项目 manifest 的额外注入 URL 才通过。
 
-- [ ] **步骤 2：运行内容测试并确认失败**
+- [x] **步骤 2：运行内容测试并确认失败**
 
 运行：
 
@@ -828,7 +835,7 @@ venv/bin/python -m pytest tests/phase0/test_upm_package.py -v
 
 预期结果：新断言失败，因为 iOS 后处理仍只位于 `unity_project/Assets/Editor/`，framework 未作为 UPM 自包含依赖验证。
 
-- [ ] **步骤 3：迁移 iOS postprocess 到 UPM Editor**
+- [x] **步骤 3：迁移 iOS postprocess 到 UPM Editor**
 
 将可复用的 `iOSPostProcess` 迁入 `unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs`。它必须：
 
@@ -840,11 +847,11 @@ venv/bin/python -m pytest tests/phase0/test_upm_package.py -v
 
 `unity_project/Assets/Editor/iOSPostProcess.cs` 改为仅转发到包内实现，或删除重复实现以避免两个后处理同时修改 Xcode 工程。
 
-- [ ] **步骤 4：固定 SQLite 包解析与版本**
+- [x] **步骤 4：固定 SQLite 包解析与版本**
 
 将 `package.json` 升级至 `1.3.0`，SQLite 依赖使用阶段 0 已验证的固定来源/版本。修改 `validate_unity_package.sh`，移除向验证工程 `manifest.json` 注入 SQLite URL 的逻辑；验证工程只声明当前 `.tgz`，让 UPM 解析该包的正式 dependencies。
 
-- [ ] **步骤 5：实现 generic-device iOS UPM build 验证脚本**
+- [x] **步骤 5：实现 generic-device iOS UPM build 验证脚本**
 
 创建 `tools/phase1/validate_ios_upm_build.sh`。脚本必须：
 
@@ -867,7 +874,7 @@ xcodebuild \
 
 脚本使用 `set -euo pipefail`，失败时保留日志路径。
 
-- [ ] **步骤 6：运行 UPM 安装、Unity 导出与 Xcode 链接验证**
+- [x] **步骤 6：运行 UPM 安装、Unity 导出与 Xcode 链接验证**
 
 运行：
 
@@ -879,21 +886,28 @@ tools/phase1/validate_ios_upm_build.sh
 
 预期结果：三个命令均返回 0；验证工程没有依赖仓库测试项目的 Editor 后处理文件。
 
-- [ ] **步骤 7：提交任务 7**
+- [x] **步骤 7：提交任务 7**
 
 ```bash
 git add \
+  .gitignore \
   unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs \
-  unity_plugin/AreaTargetPlugin/Tests/UPMiOSBuildIntegrationTests.cs \
+  unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs.meta \
   tools/phase1/validate_ios_upm_build.sh \
   unity_plugin/AreaTargetPlugin/Editor/AreaTargetPlugin.Editor.asmdef \
+  unity_plugin/AreaTargetPlugin/Tests/iOSBuildConfigTests.cs \
   unity_plugin/AreaTargetPlugin/package.json \
   unity_plugin/AreaTargetPlugin/CHANGELOG.md \
+  unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md \
+  tests/phase0/test_upm_package.py \
+  tests/phase0/test_package_metadata.py \
   tools/phase0/build_upm_package.py \
+  tools/phase0/check_package_metadata.py \
   tools/phase0/validate_unity_package.sh \
   unity_project/Assets/Editor/iOSPostProcess.cs \
+  unity_project/Assets/Editor/iOSPostProcess.cs.meta \
   unity_project/Assets/Editor/BuildiOS.cs \
-  unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md \
+  unity_project/Assets/Plugins/iOS/libvisual_localizer.a \
   docs/superpowers/specs/phase-1-ios-workflow/tasks.md
 git commit -m "feat: make UPM iOS build self-contained"
 ```

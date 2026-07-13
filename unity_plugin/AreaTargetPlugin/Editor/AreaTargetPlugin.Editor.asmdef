@@ -2,7 +2,8 @@
   "name": "AreaTargetPlugin.Editor",
   "rootNamespace": "AreaTargetPlugin.Editor",
   "references": [
-    "AreaTargetPlugin.Runtime"
+    "AreaTargetPlugin.Runtime",
+    "UnityEditor.iOS.Extensions.Xcode"
   ],
   "includePlatforms": [
     "Editor"

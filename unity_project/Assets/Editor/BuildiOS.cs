@@ -2,6 +2,7 @@ using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 /// <summary>
@@ -61,11 +62,12 @@ public class BuildiOS
     [MenuItem("Build/Build iOS (Development)")]
     public static void BuildDevelopment()
     {
-        var scenes = new[]
+        string[] scenes = GetDevelopmentScenes();
+        if (scenes.Length == 0)
         {
-            "Assets/Scenes/TestScene.unity",
-            "Assets/Scenes/ARTestScene.unity"
-        };
+            Debug.LogError("[BuildiOS] Development build requires at least one scene under Assets/Scenes.");
+            return;
+        }
 
         var options = new BuildPlayerOptions
         {
@@ -84,6 +86,17 @@ public class BuildiOS
             Debug.Log("[BuildiOS] Development 构建成功");
         else
             Debug.LogError("[BuildiOS] Development 构建失败");
+    }
+
+    private static string[] GetDevelopmentScenes()
+    {
+        return new[]
+        {
+            "Assets/Scenes/TestScene.unity",
+            "Assets/Scenes/ARTestScene.unity"
+        }
+        .Where(File.Exists)
+        .ToArray();
     }
 
     /// <summary>

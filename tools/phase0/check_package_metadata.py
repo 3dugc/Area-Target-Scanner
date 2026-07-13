@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-EXPECTED_VERSION = "1.2.1"
+EXPECTED_VERSION = "1.3.0"
 EXPECTED_DEPENDENCIES = {
     "com.unity.xr.arfoundation": "6.0.0",
     "com.gilzoide.sqlite-net": "1.3.2",

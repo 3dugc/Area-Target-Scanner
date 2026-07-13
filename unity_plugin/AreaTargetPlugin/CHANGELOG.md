@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0] - 2026-07-13
+
+### Added
+- UPM 包内置 iOS Xcode 后处理、OpenCV framework 与固定的 SQLite `1.3.2` 依赖（经 OpenUPM 解析），支持干净工程独立导出验证。
+- 增加 generic iOS device Xcode 链接门禁，验证 UPM 安装路径而非测试工程的 Editor 文件。
+
+### Changed
+- iOS 原生定位器链接配置只从已安装 UPM 包解析所需制品；缺少静态库或 framework 时构建立刻失败并报告包内路径。
+
+### Support
+- iOS 支持仍以阶段 1 本地 UPM 导出、generic-device Xcode 和真机门禁为准；不声明 Rokid AR Studio、Android ARM64、Windows 或 Linux 支持。
+
 ## [1.2.1] - 2026-07-12
 
 ### Changed

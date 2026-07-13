@@ -20,12 +20,12 @@ def run_checker(path: Path):
 def test_current_package_metadata_is_canonical():
     result = run_checker(PACKAGE_JSON)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "1.2.1"
+    assert result.stdout.strip() == "1.3.0"
 
 
 def test_duplicate_json_key_is_rejected(tmp_path):
     path = tmp_path / "package.json"
-    path.write_text('{"version":"1.2.1","dependencies":{},"dependencies":{}}')
+    path.write_text('{"version":"1.3.0","dependencies":{},"dependencies":{}}')
     result = run_checker(path)
     assert result.returncode != 0
     assert "duplicate key" in result.stderr.lower()

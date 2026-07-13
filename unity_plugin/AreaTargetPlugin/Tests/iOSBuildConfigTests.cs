@@ -21,12 +21,17 @@ namespace AreaTargetPlugin.Tests
         {
             // Application.dataPath → unity_project/Assets/
             string editorDir = Path.Combine(Application.dataPath, "Editor");
-
             string buildPath = Path.Combine(editorDir, "BuildiOS.cs");
             Assert.IsTrue(File.Exists(buildPath), $"BuildiOS.cs not found at {buildPath}");
             _buildiOSSource = File.ReadAllText(buildPath);
 
-            string postProcessPath = Path.Combine(editorDir, "iOSPostProcess.cs");
+            string repositoryRoot = Path.GetFullPath(Path.Combine(Application.dataPath, "..", ".."));
+            string postProcessPath = Path.Combine(
+                repositoryRoot,
+                "unity_plugin",
+                "AreaTargetPlugin",
+                "Editor",
+                "iOSPostProcess.cs");
             Assert.IsTrue(File.Exists(postProcessPath), $"iOSPostProcess.cs not found at {postProcessPath}");
             _postProcessSource = File.ReadAllText(postProcessPath);
 
@@ -63,6 +68,13 @@ namespace AreaTargetPlugin.Tests
             // 确认不是空字符串赋值
             Assert.That(_buildiOSSource, Does.Not.Contain("cameraUsageDescription = \"\""),
                 "cameraUsageDescription should not be empty string");
+        }
+
+        [Test]
+        public void BuildiOS_DevelopmentBuild_UsesOnlyExistingMinimalScenes()
+        {
+            Assert.That(_buildiOSSource, Does.Contain("GetDevelopmentScenes"));
+            Assert.That(_buildiOSSource, Does.Contain(".Where(File.Exists)"));
         }
 
         #endregion
@@ -103,9 +115,10 @@ namespace AreaTargetPlugin.Tests
         [Test]
         public void PostProcess_AddsStdCppLinkerFlag()
         {
-            // Requirement 4.5: -lstdc++
-            Assert.That(_postProcessSource, Does.Contain("-lstdc++"),
-                "iOSPostProcess.cs should add -lstdc++ linker flag");
+            Assert.That(_postProcessSource, Does.Contain("-lc++"),
+                "iOSPostProcess.cs should add the libc++ linker flag");
+            Assert.That(_postProcessSource, Does.Contain("-lz"));
+            Assert.That(_postProcessSource, Does.Contain("-lsqlite3"));
         }
 
         [Test]
@@ -114,6 +127,15 @@ namespace AreaTargetPlugin.Tests
             // Requirement 4.2: opencv2.framework 复制逻辑
             Assert.That(_postProcessSource, Does.Contain("opencv2.framework"),
                 "iOSPostProcess.cs should handle opencv2.framework copy");
+        }
+
+        [Test]
+        public void PostProcess_ResolvesArtifactsFromInstalledPackage()
+        {
+            Assert.That(_postProcessSource, Does.Contain("PackageInfo.FindForAssembly"));
+            Assert.That(_postProcessSource, Does.Contain("libvisual_localizer.a"));
+            Assert.That(_postProcessSource, Does.Contain("BuildFailedException"));
+            Assert.That(_postProcessSource, Does.Contain("ARKit.framework"));
         }
 
         #endregion

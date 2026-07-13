@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-UNITY_PATH="${UNITY_PATH:-/Applications/Unity/Hub/Editor/6000.3.11f1/Unity.app/Contents/MacOS/Unity}"
+UNITY_PATH="${UNITY_PATH:-/Applications/Unity/Hub/Editor/6000.4.6f1/Unity.app/Contents/MacOS/Unity}"
 RESULTS="$ROOT/phase0-results"
 PROJECT="/tmp/area-target-phase0-unity"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -41,7 +41,13 @@ manifest_path = Path(sys.argv[1])
 package_path = Path(sys.argv[2]).resolve()
 data = json.loads(manifest_path.read_text())
 dependencies = data.setdefault("dependencies", {})
-dependencies["com.gilzoide.sqlite-net"] = "https://github.com/gilzoide/unity-sqlite-net.git#1.3.2"
+scoped_registries = data.setdefault("scopedRegistries", [])
+if not any("com.gilzoide" in registry.get("scopes", []) for registry in scoped_registries):
+    scoped_registries.append({
+        "name": "OpenUPM",
+        "url": "https://package.openupm.com",
+        "scopes": ["com.gilzoide"],
+    })
 # Unity's package manifest accepts absolute local archives as file:/absolute/path.
 # pathlib.as_uri() produces file:///absolute/path, which Unity 6000.4 rejects.
 dependencies["com.areatarget.tracking"] = "file:" + package_path.as_posix()
