@@ -22,6 +22,10 @@ namespace AreaTargetPlugin.Tests
             public Vector4 Intrinsics => new Vector4(500f, 500f, 320f, 240f);
             public Vector3 CameraPositionOnCapture => Vector3.zero;
             public Quaternion CameraRotationOnCapture => Quaternion.identity;
+            public long FrameId => 0;
+            public long CaptureTimestampNs => 0;
+            public ImageOrientation Orientation => ImageOrientation.LandscapeRight;
+            public string MapId => "integration-map";
         }
 
         private class StubPlatformSupport : IPlatformSupport

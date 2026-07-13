@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
+from pathlib import Path
 
 import numpy as np
+import pytest
 from sklearn.cluster import KMeans
 
 from processing_pipeline.feature_db import (
@@ -86,6 +89,16 @@ def _make_feature_database(n_keyframes: int = 3, n_features: int = 50) -> Featur
         global_descriptors=bow,
         vocabulary=medoids,
     )
+
+
+def _read_coordinate_contract() -> dict:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "phase1"
+        / "coordinate-contract-v1.json"
+    )
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +196,7 @@ class TestRoundTrip:
         for orig_kf, loaded_kf in zip(original.keyframes, loaded.keyframes):
             np.testing.assert_array_almost_equal(loaded_kf.camera_pose, orig_kf.camera_pose)
 
+
     def test_keypoints_preserved(self, tmp_path):
         db_path = str(tmp_path / "features.db")
         original = _make_feature_database()
@@ -252,6 +266,56 @@ class TestRoundTrip:
         orig_labels = _hamming_word_assignment(test_desc, original.vocabulary)
         loaded_labels = _hamming_word_assignment(test_desc, loaded.vocabulary)
         np.testing.assert_array_equal(loaded_labels, orig_labels)
+
+
+class TestPhase1PoseBlobContract:
+    """Verify the SQLite pose blob uses the phase 1 row-major contract."""
+
+    def test_fixture_camera_from_scan_writes_row_major_float64_blob(self, tmp_path):
+        contract = _read_coordinate_contract()
+        expected_values = np.asarray(contract["cameraFromScan"], dtype=np.float64)
+        keyframe = _make_keyframe(0, n_features=0)
+        keyframe.camera_pose = expected_values.reshape(4, 4, order="C")
+        db_path = str(tmp_path / "features.db")
+
+        save_feature_database(FeatureDatabase(keyframes=[keyframe]), db_path)
+
+        conn = sqlite3.connect(db_path)
+        try:
+            pose_blob = conn.execute(
+                "SELECT pose FROM keyframes WHERE id = ?", (keyframe.image_id,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        np.testing.assert_array_equal(
+            np.frombuffer(pose_blob, dtype=np.float64), expected_values
+        )
+
+    def test_rejects_column_major_blob_that_violates_row_major_affine_contract(
+        self, tmp_path
+    ):
+        contract = _read_coordinate_contract()
+        pose = np.asarray(contract["cameraFromScan"], dtype=np.float64).reshape(
+            4, 4, order="C"
+        )
+        keyframe = _make_keyframe(0, n_features=0)
+        keyframe.camera_pose = pose
+        db_path = str(tmp_path / "features.db")
+        save_feature_database(FeatureDatabase(keyframes=[keyframe]), db_path)
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE keyframes SET pose = ? WHERE id = ?",
+                (pose.tobytes(order="F"), keyframe.image_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(ValueError, match="row-major"):
+            load_feature_database(db_path)
 
 
 # ---------------------------------------------------------------------------

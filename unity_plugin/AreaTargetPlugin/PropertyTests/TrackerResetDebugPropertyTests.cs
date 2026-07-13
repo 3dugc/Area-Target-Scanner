@@ -136,7 +136,8 @@ namespace AreaTargetPlugin.Tests
             bool thresholdReached = rawPoseBuffer.Count >= alignmentFrameThreshold;
 
             // 验证：TryCompute 应成功（位姿有效且非空）
-            bool atComputeSuccess = AlignmentTransformCalculator.TryCompute(rawPoseBuffer, out Matrix4x4 newAT);
+            bool atComputeSuccess = AlignmentTransformCalculator.TryCompute(
+                ToFramePairs(rawPoseBuffer), out Matrix4x4 newAT);
 
             // 验证：计算出的 AT 矩阵有效
             bool atValid = AlignmentTransformCalculator.IsValidMatrix(newAT);
@@ -291,7 +292,7 @@ namespace AreaTargetPlugin.Tests
                 && info2.PoseBufferFrameCount == threshold;
 
             // --- 阶段 3: AT 计算成功，切换到 Aligned ---
-            if (AlignmentTransformCalculator.TryCompute(rawPoseBuffer, out Matrix4x4 at))
+            if (AlignmentTransformCalculator.TryCompute(ToFramePairs(rawPoseBuffer), out Matrix4x4 at))
             {
                 currentAT = at;
                 mode = LocalizationMode.Aligned;
@@ -342,6 +343,17 @@ namespace AreaTargetPlugin.Tests
                 SlidingWindowFrameCount = slidingWindow.Count,
                 NativeDebugInfo = default
             };
+        }
+
+        private static List<LocalizationFramePair> ToFramePairs(
+            List<Matrix4x4> cameraFromScanPoses)
+        {
+            var pairs = new List<LocalizationFramePair>(cameraFromScanPoses.Count);
+            foreach (Matrix4x4 cameraFromScan in cameraFromScanPoses)
+            {
+                pairs.Add(new LocalizationFramePair(Matrix4x4.identity, cameraFromScan));
+            }
+            return pairs;
         }
     }
 }

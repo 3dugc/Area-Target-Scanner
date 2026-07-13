@@ -5,7 +5,6 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
@@ -52,6 +51,7 @@ public class SLAMTestSceneManager : MonoBehaviour
     private float _lastIntrinsicsFx;
     private int _lastImageW, _lastImageH;
     private int _lastGrayscaleNonZero;
+    private long _lastCaptureTimestampNs = -1;
 
     // --- 后台线程定位 ---
     private Thread _locThread;
@@ -64,10 +64,6 @@ public class SLAMTestSceneManager : MonoBehaviour
     private volatile bool _hasNewResult;
     private readonly object _frameLock = new object();
     private readonly object _resultLock = new object();
-
-    // AR 相机 pose（主线程在帧回调中捕获，与图像同步）
-    private Matrix4x4 _arCameraPoseForResult = Matrix4x4.identity;
-    private Matrix4x4 _pendingArCameraPose = Matrix4x4.identity;
 
     // --- 原点稳定性验证 ---
     private Vector3 _lastOriginPos;
@@ -271,23 +267,43 @@ public class SLAMTestSceneManager : MonoBehaviour
         Matrix4x4 intrinsics = BuildIntrinsicsMatrix(_lastImageW, _lastImageH);
         _lastIntrinsicsFx = intrinsics.m00;
 
+        Camera arCamera = Camera.main;
+        if (arCamera == null)
+        {
+            _framesSkipped++;
+            Debug.LogWarning("[SLAM] 本帧缺少 AR 相机位姿，跳过定位");
+            return;
+        }
+
         var frame = new CameraFrame
         {
             ImageData = gray,
             Width = _lastImageW,
             Height = _lastImageH,
-            Intrinsics = intrinsics
+            Intrinsics = intrinsics,
+            FrameId = _totalFramesProcessed,
+            CaptureTimestampNs = GetMonotonicCaptureTimestampNs(args),
+            Orientation = ImageOrientation.LandscapeRight,
+            UnityWorldFromCamera = arCamera.transform.localToWorldMatrix,
+            MapId = _tracker.MapId
         };
 
         // 提交帧到后台线程（如果后台空闲则替换，否则跳过）
         lock (_frameLock)
         {
             _pendingFrame = frame;
-            _pendingArCameraPose = Camera.main != null
-                ? Camera.main.transform.localToWorldMatrix
-                : Matrix4x4.identity;
             _hasPendingFrame = true;
         }
+    }
+
+    private long GetMonotonicCaptureTimestampNs(ARCameraFrameEventArgs args)
+    {
+        long candidate = args.timestampNs ?? ((long)_totalFramesProcessed * 1_000_000L);
+        if (candidate <= _lastCaptureTimestampNs)
+            candidate = _lastCaptureTimestampNs + 1;
+
+        _lastCaptureTimestampNs = candidate;
+        return candidate;
     }
 
     /// <summary>
@@ -299,13 +315,11 @@ public class SLAMTestSceneManager : MonoBehaviour
         {
             CameraFrame frame;
             bool hasFrame;
-            Matrix4x4 arCamPose;
 
             lock (_frameLock)
             {
                 hasFrame = _hasPendingFrame;
                 frame = _pendingFrame;
-                arCamPose = _pendingArCameraPose;
                 _hasPendingFrame = false;
             }
 
@@ -349,7 +363,6 @@ public class SLAMTestSceneManager : MonoBehaviour
                 lock (_resultLock)
                 {
                     _latestResult = result;
-                    _arCameraPoseForResult = arCamPose;
                     _lastTrackingDetail = detail;
                     _hasNewResult = true;
                 }
@@ -365,7 +378,7 @@ public class SLAMTestSceneManager : MonoBehaviour
         }
     }
 
-    private void HandleTrackingResult(TrackingResult result, Matrix4x4 arCameraPose)
+    private void HandleTrackingResult(TrackingResult result)
     {
         switch (result.State)
         {
@@ -393,116 +406,37 @@ public class SLAMTestSceneManager : MonoBehaviour
             if (_originCube == null) _originCube = CreateOriginCube();
         }
 
-        // 跟踪中：计算扫描坐标系原点在 AR 世界中的位置
-        //
-        // 坐标系约定：
-        //   Native w2c: ARKit 右手系 (Y-up, Z-back) — scan world → ARKit camera
-        //   arCameraPose: Unity 左手系 (Y-up, Z-forward) — Unity camera → Unity world
-        //   GLB 顶点: 经 glTFast X 翻转后在 "X-flipped ARKit" 系中，
-        //             子节点 localScale.x=-1 翻回 ARKit 右手系
-        //
-        // 变换链路：
-        //   1. w2c_arkit 把 ARKit 世界坐标映射到 ARKit 相机坐标
-        //   2. flipZ 把 ARKit 相机坐标转到 Unity 相机坐标 (Z 翻转)
-        //   3. c2w_unity 把 Unity 相机坐标映射到 Unity 世界坐标
-        //
-        //   scanToAR_full = c2w_unity * flipZ * w2c_arkit
-        //
-        // 但 scanToAR_full 的 det = -1 (含反射)，不能直接用 .rotation 提取。
-        // 解决方案：把 Z 翻转放到 GLB 子节点的 localScale 中 (改为 x=-1, z=-1)，
-        // 让 scanToAR 保持纯旋转+平移 (det=+1)。
-        //
-        // 分解：scanToAR_full = scanToAR_rigid * flipXZ_local
-        //   其中 flipXZ_local = diag(-1, 1, -1) 在子节点 localScale 中处理
-        //   scanToAR_rigid = c2w_unity * flipZ * w2c_arkit * inv(flipXZ_local)
-        //
-        // 更简洁的推导：
-        //   GLB 子节点 localScale = (-1, 1, -1) 等价于 flipXZ
-        //   glTFast 已做 X 翻转，所以子节点顶点 = flipX * v_arkit
-        //   经 localScale(-1,1,-1) 后 = flipXZ * flipX * v_arkit = flipZ * v_arkit
-        //   即子节点输出的是 "Z-flipped ARKit" = Unity 左手系的扫描世界坐标
-        //
-        //   所以 _glbModelObj.transform 只需要设置：
-        //   scanToAR_unity = c2w_unity * flipZ * w2c_arkit * inv(flipZ)
-        //                  = c2w_unity * flipZ * w2c_arkit * flipZ
-        //   这是标准的坐标系转换，det = +1
-        //
+        // TrackingResult.Pose is already T_U_S. Scene code only consumes this
+        // completed Unity-world pose; all camera/native composition lives in Runtime.
         if (result.State == AreaTargetPlugin.TrackingState.TRACKING && _originCube != null)
         {
-            Matrix4x4 p = result.Pose; // w2c in ARKit convention
+            Matrix4x4 unityWorldFromScan = result.Pose;
+            Vector3 scanOriginInUnity = new Vector3(
+                unityWorldFromScan.m03,
+                unityWorldFromScan.m13,
+                unityWorldFromScan.m23);
+            Quaternion scanRotationInUnity = unityWorldFromScan.rotation;
 
-            // 验证旋转矩阵行列式 (应该接近 1.0)
-            float detR = p.m00 * (p.m11 * p.m22 - p.m12 * p.m21)
-                       - p.m01 * (p.m10 * p.m22 - p.m12 * p.m20)
-                       + p.m02 * (p.m10 * p.m21 - p.m11 * p.m20);
-
-            Debug.Log($"[POSE] det(R)={detR:F4} t=({p.m03:F4},{p.m13:F4},{p.m23:F4})");
-            Debug.Log($"[POSE] R=[{p.m00:F3},{p.m01:F3},{p.m02:F3}|{p.m10:F3},{p.m11:F3},{p.m12:F3}|{p.m20:F3},{p.m21:F3},{p.m22:F3}]");
-            Debug.Log($"[AR_CAM] pos=({arCameraPose.m03:F3},{arCameraPose.m13:F3},{arCameraPose.m23:F3})");
-
-            _poseDebugInfo = $"w2c t=({p.m03:F2},{p.m13:F2},{p.m23:F2}) det={detR:F3}\n" +
-                             $"arCam=({arCameraPose.m03:F2},{arCameraPose.m13:F2},{arCameraPose.m23:F2})";
-
-            // 把 w2c_arkit 转换到 Unity 约定: w2c_unity = flipZ * w2c_arkit * flipZ
-            // flipZ * M * flipZ 等价于: 翻转第2行和第2列 (但对角线 [2,2] 翻转两次不变)
-            Matrix4x4 w2cUnity = p;
-            // 翻转第 2 行 (row 2): m2c for c=0,1,3 取反, m22 不变
-            w2cUnity.m20 = -p.m20;
-            w2cUnity.m21 = -p.m21;
-            // w2cUnity.m22 = p.m22; // 翻转两次，不变
-            w2cUnity.m23 = -p.m23;
-            // 翻转第 2 列 (col 2): mr2 for r=0,1 取反, m22 已处理
-            w2cUnity.m02 = -p.m02;
-            w2cUnity.m12 = -p.m12;
-
-            // scanToAR: Unity 左手系中的 scan-to-AR 变换 (det = +1)
-            // = c2w_unity * w2c_unity
-            // 其中 w2c_unity 把 "Unity 左手系扫描世界" 映射到 "Unity 相机"
-            Matrix4x4 scanToAR = arCameraPose * w2cUnity;
-
-            // 扫描原点在 Unity 相机坐标系中的位置
-            Vector3 scanOriginInCam = new Vector3(w2cUnity.m03, w2cUnity.m13, w2cUnity.m23);
-
-            // 变换到 Unity AR 世界坐标
-            Vector3 scanOriginInAR = arCameraPose.MultiplyPoint3x4(scanOriginInCam);
-
-            // 验证 scanToAR 的行列式
-            float detScanToAR = scanToAR.m00 * (scanToAR.m11 * scanToAR.m22 - scanToAR.m12 * scanToAR.m21)
-                              - scanToAR.m01 * (scanToAR.m10 * scanToAR.m22 - scanToAR.m12 * scanToAR.m20)
-                              + scanToAR.m02 * (scanToAR.m10 * scanToAR.m21 - scanToAR.m11 * scanToAR.m20);
-
-            // scanToAR 与 identity 的差异
-            float s2aErrT = new Vector3(scanToAR.m03, scanToAR.m13, scanToAR.m23).magnitude;
-            float s2aErrR = Mathf.Abs(scanToAR.m00 - 1) + Mathf.Abs(scanToAR.m11 - 1) + Mathf.Abs(scanToAR.m22 - 1);
-
-            _scanToARDebugInfo = $"s2a t=({scanToAR.m03:F3},{scanToAR.m13:F3},{scanToAR.m23:F3})\n" +
-                                 $"s2a diag=({scanToAR.m00:F3},{scanToAR.m11:F3},{scanToAR.m22:F3})\n" +
-                                 $"s2a |t|={s2aErrT:F3} Rerr={s2aErrR:F3} det={detScanToAR:F3}";
-
-            Debug.Log($"[ORIGIN] inCam=({scanOriginInCam.x:F3},{scanOriginInCam.y:F3},{scanOriginInCam.z:F3}) " +
-                      $"inAR=({scanOriginInAR.x:F3},{scanOriginInAR.y:F3},{scanOriginInAR.z:F3}) " +
-                      $"det(scanToAR)={detScanToAR:F3}");
-            Debug.Log($"[S2A] |t|={s2aErrT:F4} Rerr={s2aErrR:F4}");
-
-            Quaternion scanRotInAR = scanToAR.rotation;
+            _poseDebugInfo = $"T_U_S t=({scanOriginInUnity.x:F2},{scanOriginInUnity.y:F2},{scanOriginInUnity.z:F2})";
+            _scanToARDebugInfo =
+                "T_U_S = T_U_C × T_C_S (Runtime)\n" +
+                $"scan→Unity=({scanOriginInUnity.x:F3},{scanOriginInUnity.y:F3},{scanOriginInUnity.z:F3})";
+            Debug.Log($"[T_U_S] pos=({scanOriginInUnity.x:F3},{scanOriginInUnity.y:F3},{scanOriginInUnity.z:F3})");
 
             // 更新原点 cube
-            _originCube.transform.SetPositionAndRotation(scanOriginInAR, scanRotInAR);
+            _originCube.transform.SetPositionAndRotation(scanOriginInUnity, scanRotationInUnity);
             _originCube.SetActive(true);
             SetCubeColor(Color.green);
 
-            // 更新 GLB 模型位置 — 用完整的 scanToAR 变换矩阵
-            // GLB 模型顶点在扫描世界坐标系中，scanToAR 把它们变换到 AR 世界
+            // 更新 GLB 模型位置 — 直接使用 Runtime 输出的 T_U_S。
             if (_glbModelObj != null)
             {
-                // 直接用 scanToAR 矩阵设置模型的 transform
-                // 提取 position, rotation, scale
-                Vector3 pos = new Vector3(scanToAR.m03, scanToAR.m13, scanToAR.m23);
-                Quaternion rot = scanToAR.rotation;
+                Vector3 pos = scanOriginInUnity;
+                Quaternion rot = scanRotationInUnity;
                 Vector3 scale = new Vector3(
-                    new Vector3(scanToAR.m00, scanToAR.m10, scanToAR.m20).magnitude,
-                    new Vector3(scanToAR.m01, scanToAR.m11, scanToAR.m21).magnitude,
-                    new Vector3(scanToAR.m02, scanToAR.m12, scanToAR.m22).magnitude);
+                    new Vector3(unityWorldFromScan.m00, unityWorldFromScan.m10, unityWorldFromScan.m20).magnitude,
+                    new Vector3(unityWorldFromScan.m01, unityWorldFromScan.m11, unityWorldFromScan.m21).magnitude,
+                    new Vector3(unityWorldFromScan.m02, unityWorldFromScan.m12, unityWorldFromScan.m22).magnitude);
 
                 _glbModelObj.transform.SetPositionAndRotation(pos, rot);
                 _glbModelObj.transform.localScale = scale;
@@ -528,27 +462,24 @@ public class SLAMTestSceneManager : MonoBehaviour
 
                 _glbDebugInfo = $"GLB pos=({pos.x:F2},{pos.y:F2},{pos.z:F2}) sc=({scale.x:F2},{scale.y:F2},{scale.z:F2})\n{boundsInfo}";
 
-                Debug.Log($"[GLB] scanToAR pos=({pos.x:F3},{pos.y:F3},{pos.z:F3}) scale=({scale.x:F3},{scale.y:F3},{scale.z:F3})");
-                Debug.Log($"[GLB_DIAG] scanToAR row0=({scanToAR.m00:F3},{scanToAR.m01:F3},{scanToAR.m02:F3},{scanToAR.m03:F3})");
-                Debug.Log($"[GLB_DIAG] scanToAR row1=({scanToAR.m10:F3},{scanToAR.m11:F3},{scanToAR.m12:F3},{scanToAR.m13:F3})");
-                Debug.Log($"[GLB_DIAG] scanToAR row2=({scanToAR.m20:F3},{scanToAR.m21:F3},{scanToAR.m22:F3},{scanToAR.m23:F3})");
+                Debug.Log($"[GLB] T_U_S pos=({pos.x:F3},{pos.y:F3},{pos.z:F3}) scale=({scale.x:F3},{scale.y:F3},{scale.z:F3})");
             }
 
             // 稳定性统计
             float frameDrift = 0f;
             if (_hasLastOriginPos)
             {
-                frameDrift = Vector3.Distance(scanOriginInAR, _lastOriginPos);
+                frameDrift = Vector3.Distance(scanOriginInUnity, _lastOriginPos);
                 if (frameDrift > _maxFrameDrift) _maxFrameDrift = frameDrift;
             }
-            _lastOriginPos = scanOriginInAR;
+            _lastOriginPos = scanOriginInUnity;
             _hasLastOriginPos = true;
             _originSampleCount++;
-            _originSum += scanOriginInAR;
+            _originSum += scanOriginInUnity;
             _originSumSq += new Vector3(
-                scanOriginInAR.x * scanOriginInAR.x,
-                scanOriginInAR.y * scanOriginInAR.y,
-                scanOriginInAR.z * scanOriginInAR.z);
+                scanOriginInUnity.x * scanOriginInUnity.x,
+                scanOriginInUnity.y * scanOriginInUnity.y,
+                scanOriginInUnity.z * scanOriginInUnity.z);
 
             Vector3 mean = _originSum / _originSampleCount;
             Vector3 variance = _originSumSq / _originSampleCount - new Vector3(
@@ -625,12 +556,10 @@ public class SLAMTestSceneManager : MonoBehaviour
             // 实例化场景到容器下
             await _gltfImport.InstantiateMainSceneAsync(_glbModelObj.transform);
 
-            // === glTFast 坐标系修正 ===
-            // glTFast 自动做右手系→左手系转换（x *= -1）
-            // 但我们需要完整的 ARKit→Unity 转换: flipXZ = diag(-1, 1, -1)
-            // glTFast 已做 flipX，我们再加 flipZ，合起来就是 flipXZ
-            // 这样子节点顶点 = flipXZ * v_arkit = v_unity_lhs
-            // scanToAR (det=+1) 就能正确变换这些 Unity 左手系坐标
+            // === glTFast 资产坐标修正 ===
+            // glTFast 已将顶点转换到 Unity 约定；这里仅保留 GLB 子节点的
+            // 静态资产修正。根节点的运行时位姿始终直接使用 Runtime 的 T_U_S，
+            // 不在场景中再组合相机或 native 矩阵。
             foreach (Transform child in _glbModelObj.transform)
             {
                 child.localScale = new Vector3(-1f, 1f, -1f);
@@ -720,14 +649,12 @@ public class SLAMTestSceneManager : MonoBehaviour
         if (_hasNewResult)
         {
             TrackingResult result;
-            Matrix4x4 arCamPose;
             lock (_resultLock)
             {
                 result = _latestResult;
-                arCamPose = _arCameraPoseForResult;
                 _hasNewResult = false;
             }
-            HandleTrackingResult(result, arCamPose);
+            HandleTrackingResult(result);
         }
 
         _fpsFrameCount++;

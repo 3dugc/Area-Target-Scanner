@@ -21,7 +21,7 @@ typedef void* VLHandle;
 
 typedef struct {
     int state;           /* 0=INITIALIZING, 1=TRACKING, 2=LOST */
-    float pose[16];      /* 4x4 row-major transform matrix */
+    float pose[16];      /* T_C_S: row-major scan/world S → current AR camera C PnP result */
     float confidence;    /* [0,1] */
     int matched_features;
 } VLResult;
@@ -66,20 +66,23 @@ VL_API VLResult vl_process_frame(VLHandle handle,
                                   const unsigned char* image_data,
                                   int width, int height,
                                   float fx, float fy, float cx, float cy,
-                                  int has_last_pose, const float* last_pose_4x4);
+                                  int has_unity_world_from_camera,
+                                  const float* unity_world_from_camera_4x4);
 
 /* Frame processing — out-parameter version (avoids struct-return ABI issues on iOS ARM64) */
 VL_API void vl_process_frame_out(VLHandle handle,
                                   const unsigned char* image_data,
                                   int width, int height,
                                   float fx, float fy, float cx, float cy,
-                                  int has_last_pose, const float* last_pose_4x4,
+                                  int has_unity_world_from_camera,
+                                  const float* unity_world_from_camera_4x4,
                                   VLResult* out_result);
 
 /* State management */
 VL_API void vl_reset(VLHandle handle);
 
-/* 坐标系对齐变换: 设置预计算的 4×4 row-major Alignment_Transform */
+/* Legacy alignment hook. It never changes the canonical T_C_S VLResult.pose;
+ * runtime ownership of T_U_S composition is introduced in phase-1 task 4. */
 VL_API void vl_set_alignment_transform(VLHandle handle, const float* at_4x4);
 
 /* Debug diagnostics — writes last frame's pipeline stats to out_info */

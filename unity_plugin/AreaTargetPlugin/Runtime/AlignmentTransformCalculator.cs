@@ -4,134 +4,139 @@ using UnityEngine;
 namespace AreaTargetPlugin
 {
     /// <summary>
-    /// 纯计算类：从一组 Raw 定位位姿计算 Alignment Transform (AT) 矩阵，
-    /// 以及比较两个 AT 矩阵的差异（用于安全阀判断）。
+    /// A successful coordinate pair for one frame. The names make both source and
+    /// destination spaces explicit and prevent raw T_C_S poses being treated as T_U_S.
+    /// </summary>
+    internal readonly struct LocalizationFramePair
+    {
+        public Matrix4x4 UnityWorldFromCamera { get; }
+        public Matrix4x4 CameraFromScan { get; }
+        public Matrix4x4 UnityWorldFromScan { get; }
+
+        public LocalizationFramePair(
+            Matrix4x4 unityWorldFromCamera,
+            Matrix4x4 cameraFromScan)
+        {
+            CoordinateTransform.ValidateFiniteRigidTransform(
+                unityWorldFromCamera, nameof(unityWorldFromCamera));
+            CoordinateTransform.ValidateFiniteRigidTransform(
+                cameraFromScan, nameof(cameraFromScan));
+
+            UnityWorldFromCamera = unityWorldFromCamera;
+            CameraFromScan = cameraFromScan;
+            UnityWorldFromScan = CoordinateTransform.ComposeUnityWorldFromScan(
+                unityWorldFromCamera, cameraFromScan);
+        }
+    }
+
+    /// <summary>
+    /// Computes a robust runtime alignment candidate from named successful frame pairs
+    /// and compares alignment candidates for the tracker safety valve.
     /// </summary>
     internal static class AlignmentTransformCalculator
     {
         /// <summary>
-        /// 从一组 Raw 定位位姿计算 Alignment Transform。
-        /// 使用位姿的中位数（距质心最近的位姿）作为参考，
-        /// 计算从 Raw 坐标系到目标坐标系的刚体变换。
+        /// Selects the T_U_S sample whose translation is nearest the translation
+        /// centroid. The result is always composed through CoordinateTransform.
         /// </summary>
-        /// <param name="poses">Raw 模式下成功定位的位姿列表。</param>
-        /// <param name="at">输出的 AT 矩阵。</param>
-        /// <returns>计算成功返回 true；输入为空或结果无效时返回 false。</returns>
-        public static bool TryCompute(List<Matrix4x4> poses, out Matrix4x4 at)
+        public static bool TryCompute(
+            IReadOnlyList<LocalizationFramePair> successfulFramePairs,
+            out Matrix4x4 unityWorldFromScan)
         {
-            at = Matrix4x4.identity;
+            unityWorldFromScan = Matrix4x4.identity;
 
-            if (poses == null || poses.Count == 0)
+            if (successfulFramePairs == null || successfulFramePairs.Count == 0)
                 return false;
 
-            // 计算所有位姿平移的质心
             Vector3 centroid = Vector3.zero;
-            foreach (var p in poses)
-                centroid += new Vector3(p.m03, p.m13, p.m23);
-            centroid /= poses.Count;
-
-            // 找到距质心最近的位姿（中位数近似）
-            int medianIdx = 0;
-            float minDist = float.MaxValue;
-            for (int i = 0; i < poses.Count; i++)
+            for (int index = 0; index < successfulFramePairs.Count; index++)
             {
-                Vector3 t = new Vector3(poses[i].m03, poses[i].m13, poses[i].m23);
-                float dist = (t - centroid).sqrMagnitude;
-                if (dist < minDist)
+                Matrix4x4 pose = successfulFramePairs[index].UnityWorldFromScan;
+                if (!CoordinateTransform.IsFiniteRigidTransform(pose))
+                    return false;
+                centroid += ExtractTranslation(pose);
+            }
+            centroid /= successfulFramePairs.Count;
+
+            int medianIndex = 0;
+            float minimumDistance = float.MaxValue;
+            for (int index = 0; index < successfulFramePairs.Count; index++)
+            {
+                Vector3 translation = ExtractTranslation(
+                    successfulFramePairs[index].UnityWorldFromScan);
+                float squaredDistance = (translation - centroid).sqrMagnitude;
+                if (squaredDistance < minimumDistance)
                 {
-                    minDist = dist;
-                    medianIdx = i;
+                    minimumDistance = squaredDistance;
+                    medianIndex = index;
                 }
             }
 
-            // AT 即为中位数位姿（从 Raw 原点到该位姿坐标系的刚体变换）
-            at = poses[medianIdx];
-
-            // 验证结果矩阵不含 NaN/Inf
-            if (!IsValidMatrix(at))
-            {
-                at = Matrix4x4.identity;
-                return false;
-            }
-
-            return true;
+            unityWorldFromScan = successfulFramePairs[medianIndex].UnityWorldFromScan;
+            return CoordinateTransform.IsFiniteRigidTransform(unityWorldFromScan);
         }
 
         /// <summary>
-        /// 比较两个 AT 矩阵的差异，返回旋转角度差（度）和平移距离差（米）。
-        /// 用于 AT 安全阀判断：旋转 > 5° 或平移 > 0.5m 时应丢弃新 AT。
+        /// Compares two T_U_S candidates and returns rotation difference in degrees
+        /// and translation difference in metres.
         /// </summary>
         public static (float rotationDeg, float translationM) ComputeDifference(
-            Matrix4x4 atOld, Matrix4x4 atNew)
+            Matrix4x4 unityWorldFromScanOld,
+            Matrix4x4 unityWorldFromScanNew)
         {
-            // 平移差异
-            Vector3 tOld = new Vector3(atOld.m03, atOld.m13, atOld.m23);
-            Vector3 tNew = new Vector3(atNew.m03, atNew.m13, atNew.m23);
-            float translationDiff = (tNew - tOld).magnitude;
+            CoordinateTransform.ValidateFiniteRigidTransform(
+                unityWorldFromScanOld, nameof(unityWorldFromScanOld));
+            CoordinateTransform.ValidateFiniteRigidTransform(
+                unityWorldFromScanNew, nameof(unityWorldFromScanNew));
 
-            // 旋转差异：计算相对旋转 R = Rnew * Rold^T
-            // 然后从 trace 提取角度：angle = acos((trace(R) - 1) / 2)
-            Matrix4x4 relativeRot = MultiplyRotations(atNew, TransposeRotation(atOld));
-            float trace = relativeRot.m00 + relativeRot.m11 + relativeRot.m22;
-            float cosAngle = Mathf.Clamp((trace - 1f) / 2f, -1f, 1f);
-            float rotationRad = Mathf.Acos(cosAngle);
-            float rotationDeg = rotationRad * Mathf.Rad2Deg;
+            Vector3 previousTranslation = ExtractTranslation(unityWorldFromScanOld);
+            Vector3 currentTranslation = ExtractTranslation(unityWorldFromScanNew);
+            float translationDifference = (currentTranslation - previousTranslation).magnitude;
 
-            return (rotationDeg, translationDiff);
+            Matrix4x4 relativeRotation = MultiplyRotations(
+                unityWorldFromScanNew,
+                TransposeRotation(unityWorldFromScanOld));
+            float trace = relativeRotation.m00 + relativeRotation.m11 + relativeRotation.m22;
+            float cosine = Mathf.Clamp((trace - 1f) / 2f, -1f, 1f);
+            float rotationDegrees = Mathf.Acos(cosine) * Mathf.Rad2Deg;
+
+            return (rotationDegrees, translationDifference);
         }
 
-        /// <summary>
-        /// 检查 4x4 矩阵是否包含 NaN 或 Infinity。
-        /// </summary>
-        internal static bool IsValidMatrix(Matrix4x4 m)
+        internal static bool IsValidMatrix(Matrix4x4 matrix)
         {
-            for (int i = 0; i < 16; i++)
-            {
-                float v = m[i];
-                if (float.IsNaN(v) || float.IsInfinity(v))
-                    return false;
-            }
-            return true;
+            return CoordinateTransform.IsFiniteRigidTransform(matrix);
         }
 
-        /// <summary>
-        /// 将 4x4 矩阵的 3x3 旋转部分转置（不影响平移列）。
-        /// 返回一个新矩阵，其旋转部分为原矩阵旋转的转置。
-        /// </summary>
-        internal static Matrix4x4 TransposeRotation(Matrix4x4 m)
+        internal static Matrix4x4 TransposeRotation(Matrix4x4 matrix)
         {
-            var result = new Matrix4x4();
-            // 转置 3x3 旋转部分
-            result.m00 = m.m00; result.m01 = m.m10; result.m02 = m.m20;
-            result.m10 = m.m01; result.m11 = m.m11; result.m12 = m.m21;
-            result.m20 = m.m02; result.m21 = m.m12; result.m22 = m.m22;
-            // 清零平移和齐次行
-            result.m03 = 0f; result.m13 = 0f; result.m23 = 0f;
-            result.m30 = 0f; result.m31 = 0f; result.m32 = 0f; result.m33 = 1f;
+            var result = Matrix4x4.identity;
+            result.m00 = matrix.m00; result.m01 = matrix.m10; result.m02 = matrix.m20;
+            result.m10 = matrix.m01; result.m11 = matrix.m11; result.m12 = matrix.m21;
+            result.m20 = matrix.m02; result.m21 = matrix.m12; result.m22 = matrix.m22;
             return result;
         }
 
-        /// <summary>
-        /// 仅乘以两个矩阵的 3x3 旋转部分，返回结果矩阵（平移为零）。
-        /// </summary>
-        internal static Matrix4x4 MultiplyRotations(Matrix4x4 a, Matrix4x4 b)
+        internal static Matrix4x4 MultiplyRotations(Matrix4x4 first, Matrix4x4 second)
         {
-            var result = new Matrix4x4();
-            result.m00 = a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20;
-            result.m01 = a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21;
-            result.m02 = a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22;
+            var result = Matrix4x4.identity;
+            result.m00 = first.m00 * second.m00 + first.m01 * second.m10 + first.m02 * second.m20;
+            result.m01 = first.m00 * second.m01 + first.m01 * second.m11 + first.m02 * second.m21;
+            result.m02 = first.m00 * second.m02 + first.m01 * second.m12 + first.m02 * second.m22;
 
-            result.m10 = a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20;
-            result.m11 = a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21;
-            result.m12 = a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22;
+            result.m10 = first.m10 * second.m00 + first.m11 * second.m10 + first.m12 * second.m20;
+            result.m11 = first.m10 * second.m01 + first.m11 * second.m11 + first.m12 * second.m21;
+            result.m12 = first.m10 * second.m02 + first.m11 * second.m12 + first.m12 * second.m22;
 
-            result.m20 = a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20;
-            result.m21 = a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21;
-            result.m22 = a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22;
-
-            result.m03 = 0f; result.m13 = 0f; result.m23 = 0f;
-            result.m30 = 0f; result.m31 = 0f; result.m32 = 0f; result.m33 = 1f;
+            result.m20 = first.m20 * second.m00 + first.m21 * second.m10 + first.m22 * second.m20;
+            result.m21 = first.m20 * second.m01 + first.m21 * second.m11 + first.m22 * second.m21;
+            result.m22 = first.m20 * second.m02 + first.m21 * second.m12 + first.m22 * second.m22;
             return result;
+        }
+
+        private static Vector3 ExtractTranslation(Matrix4x4 matrix)
+        {
+            return new Vector3(matrix.m03, matrix.m13, matrix.m23);
         }
     }
 }

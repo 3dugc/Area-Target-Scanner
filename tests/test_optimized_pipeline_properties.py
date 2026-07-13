@@ -199,6 +199,17 @@ class TestInputValidationCompleteness:
 pose_float = st.floats(allow_nan=False, allow_infinity=False, min_value=-1e6, max_value=1e6)
 
 
+@st.composite
+def arkit_column_major_affine_transform(draw):
+    """Generate a finite affine pose serialized in ARKit column-major layout."""
+    matrix = np.eye(4, dtype=np.float64)
+    matrix[:3, :] = np.asarray(
+        draw(st.lists(pose_float, min_size=12, max_size=12)),
+        dtype=np.float64,
+    ).reshape((3, 4))
+    return matrix.reshape(-1, order="F").tolist()
+
+
 # ---------------------------------------------------------------------------
 # Property 2: 位姿矩阵列主序解析
 # ---------------------------------------------------------------------------
@@ -207,14 +218,14 @@ pose_float = st.floats(allow_nan=False, allow_infinity=False, min_value=-1e6, ma
 class TestPoseMatrixColumnMajor:
     """Property 2: 位姿矩阵列主序解析
 
-    *For any* 16 元素浮点数组作为 poses.json 中的 transform 字段，Pipeline
-    解析后得到的 4×4 矩阵应等价于 ``np.array(data).reshape(4, 4, order='F')``
-    的结果。
+    *For any* 有限仿射 4×4 矩阵，以 ARKit column-major 形式写入
+    poses.json 的 transform 字段后，Pipeline 解析结果应等价于
+    ``np.array(data).reshape(4, 4, order='F')``。
 
     **Validates: Requirements 1.3**
     """
 
-    @given(data=st.lists(pose_float, min_size=16, max_size=16))
+    @given(data=arkit_column_major_affine_transform())
     @settings(max_examples=100)
     def test_p2_pose_matrix_column_major_reshape(self, data: list[float]):
         """validate_input parses the transform field using column-major order.
@@ -231,7 +242,7 @@ class TestPoseMatrixColumnMajor:
                 with open(os.path.join(scan_dir, fname), "w") as f:
                     f.write("dummy")
 
-            # Create poses.json with the generated 16-element transform
+            # Create poses.json with the generated affine transform.
             poses = {
                 "frames": [
                     {

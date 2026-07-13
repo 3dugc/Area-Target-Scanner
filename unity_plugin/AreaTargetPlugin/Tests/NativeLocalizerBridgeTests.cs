@@ -120,6 +120,52 @@ namespace AreaTargetPlugin.Tests
 
         #endregion
 
+        #region Coordinate Contract
+
+        [Test]
+        public void Matrix4x4ToArray_SerializesTranslationInRowMajorOrder()
+        {
+            Matrix4x4 matrix = Matrix4x4.TRS(
+                new Vector3(4f, 5f, 6f),
+                Quaternion.identity,
+                Vector3.one
+            );
+
+            float[] values = VisualLocalizationEngine.Matrix4x4ToArray(matrix);
+
+            Assert.AreEqual(matrix.m03, values[3]);
+            Assert.AreEqual(matrix.m13, values[7]);
+            Assert.AreEqual(matrix.m23, values[11]);
+        }
+
+        [Test]
+        public void NativeCameraPoseSerialization_UsesCurrentLocalizationFramePose()
+        {
+            Matrix4x4 unityWorldFromCamera = Matrix4x4.TRS(
+                new Vector3(4f, 5f, 6f),
+                Quaternion.identity,
+                Vector3.one
+            );
+            var frame = new LocalizationFrame(
+                frameId: 0,
+                captureTimestampNs: 0,
+                grayscaleImage: new byte[4],
+                width: 2,
+                height: 2,
+                intrinsics: new Vector4(1f, 1f, 0.5f, 0.5f),
+                orientation: ImageOrientation.LandscapeRight,
+                unityWorldFromCamera: unityWorldFromCamera,
+                mapId: "native-bridge-test");
+
+            float[] values = VisualLocalizationEngine.PrepareUnityWorldFromCameraForNative(frame);
+
+            Assert.AreEqual(unityWorldFromCamera.m03, values[3]);
+            Assert.AreEqual(unityWorldFromCamera.m13, values[7]);
+            Assert.AreEqual(unityWorldFromCamera.m23, values[11]);
+        }
+
+        #endregion
+
         #region Data Loading
 
         [Test]
@@ -228,15 +274,15 @@ namespace AreaTargetPlugin.Tests
         }
 
         [Test]
-        public void ProcessFrame_WithLastPose_DoesNotCrash()
+        public void ProcessFrame_WithUnityWorldFromCamera_DoesNotCrash()
         {
             IntPtr handle = NativeLocalizerBridge.vl_create();
             NativeLocalizerBridge.vl_build_index(handle);
 
             byte[] img = new byte[64 * 64];
-            float[] lastPose = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 3, 0, 0, 0, 1 };
+            float[] unityWorldFromCamera = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 3, 0, 0, 0, 1 };
             VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
-                handle, img, 64, 64, 500, 500, 32, 32, 1, lastPose);
+                handle, img, 64, 64, 500, 500, 32, 32, 1, unityWorldFromCamera);
             Assert.AreEqual(2, result.state);
 
             NativeLocalizerBridge.vl_destroy(handle);

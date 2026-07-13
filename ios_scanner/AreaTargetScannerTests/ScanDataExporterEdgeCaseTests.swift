@@ -30,6 +30,21 @@ final class ScanDataExporterEdgeCaseTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    private func makeContractPose(
+        filename: String,
+        intrinsics: CameraIntrinsics
+    ) -> CameraPose {
+        CameraPose(
+            timestamp: 0,
+            transform: Array(repeating: Float(0), count: 16),
+            imageFilename: filename,
+            imageOrientation: .landscapeRight,
+            intrinsics: intrinsics,
+            imageWidth: intrinsics.width,
+            imageHeight: intrinsics.height
+        )
+    }
+
     // MARK: - ExportError Type Tests
 
     func testExportError_directoryCreationFailed_includesPath() {
@@ -195,8 +210,8 @@ final class ScanDataExporterEdgeCaseTests: XCTestCase {
         let vertices = (0..<1500).map { i -> [Float] in
             [Float(i) * 0.01, 0, 0, 0.5, 0.5, 0.5, 0, 1, 0]
         }
-        let poses = [CameraPose(timestamp: 0, transform: Array(repeating: Float(0), count: 16), imageFilename: "f.jpg")]
         let intrinsics = CameraIntrinsics(fx: 525, fy: 525, cx: 320, cy: 240, width: 640, height: 480)
+        let poses = [makeContractPose(filename: "f.jpg", intrinsics: intrinsics)]
         let images = [CapturedImage(imageData: Data([0xFF, 0xD8]), filename: "f.jpg")]
         let outputPath = tempDir.appendingPathComponent("output").path
 
@@ -221,8 +236,8 @@ final class ScanDataExporterEdgeCaseTests: XCTestCase {
         let vertices = (0..<100).map { i -> [Float] in
             [Float(i) * 0.01, 0, 0, 0.5, 0.5, 0.5, 0, 1, 0]
         }
-        let poses = [CameraPose(timestamp: 0, transform: Array(repeating: Float(0), count: 16), imageFilename: "f.jpg")]
         let intrinsics = CameraIntrinsics(fx: 525, fy: 525, cx: 320, cy: 240, width: 640, height: 480)
+        let poses = [makeContractPose(filename: "f.jpg", intrinsics: intrinsics)]
         let outputPath = tempDir.appendingPathComponent("output2").path
 
         // Empty images → texture mapping condition (!images.isEmpty) is false
@@ -242,8 +257,8 @@ final class ScanDataExporterEdgeCaseTests: XCTestCase {
         let vertices = (0..<100).map { i -> [Float] in
             [Float(i) * 0.01, 0, 0, 0.5, 0.5, 0.5, 0, 1, 0]
         }
-        let poses = [CameraPose(timestamp: 0, transform: Array(repeating: Float(0), count: 16), imageFilename: "f.jpg")]
         let intrinsics = CameraIntrinsics(fx: 525, fy: 525, cx: 320, cy: 240, width: 640, height: 480)
+        let poses = [makeContractPose(filename: "f.jpg", intrinsics: intrinsics)]
         let images = [CapturedImage(imageData: Data([0xFF, 0xD8]), filename: "f.jpg")]
         let outputPath = tempDir.appendingPathComponent("output3").path
 

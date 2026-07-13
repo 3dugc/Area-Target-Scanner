@@ -204,7 +204,16 @@ class TestFeatureDescriptorRoundTrip:
         from processing_pipeline.models import FeatureDatabase, KeyframeData
 
         rng = np.random.default_rng(123)
-        pose = rng.standard_normal((4, 4)).astype(np.float64)
+        pose = np.array(
+            [
+                [0.0, -1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=np.float64,
+        )
+        pose[:3, 3] = rng.standard_normal(3)
 
         descriptors = rng.integers(0, 256, size=(n_features, 32), dtype=np.uint8)
         kf = KeyframeData(

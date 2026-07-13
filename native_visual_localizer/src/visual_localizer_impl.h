@@ -36,10 +36,11 @@ public:
 
     VLResult processFrame(const unsigned char* image_data, int width, int height,
                           float fx, float fy, float cx, float cy,
-                          bool has_last_pose, const float* last_pose_4x4);
+                          bool has_unity_world_from_camera,
+                          const float* unity_world_from_camera_4x4);
     void reset();
 
-    // 坐标系对齐变换: 设置预计算的 4×4 Alignment_Transform
+    // Legacy ABI hook. It validates input but must not mutate T_C_S output.
     void setAlignmentTransform(const float* at_4x4);
 
     // AKAZE keyframe 数据加载: 每个 keyframe 的 AKAZE 描述子和对应 3D/2D 点
@@ -79,9 +80,10 @@ private:
     static constexpr float kConsistencyMadMultiplier = 3.0f;
     static constexpr float kConsistencyMinMad = 0.1f;
 
-    // 坐标系对齐变换状态
-    bool has_alignment_transform_ = false;
-    cv::Mat alignment_transform_;  // 4×4 CV_32F
+    // T_S_C cache for nearby keyframe selection. It is intentionally separate
+    // from the current T_U_C input supplied by Unity for consistency checks.
+    bool has_last_scan_from_camera_ = false;
+    cv::Mat last_scan_from_camera_;  // 4×4 CV_32F
 
     // AKAZE fallback 相关成员
     cv::Ptr<cv::AKAZE> akaze_;
@@ -96,15 +98,16 @@ private:
 
     // 一致性过滤历史帧状态
     struct FrameHistory {
-        cv::Mat pose;       // 4×4 w2c 位姿
-        cv::Mat s2a;        // 4×4 scanToAR 矩阵
-        float s2a_err;      // ‖s2a − I‖_F
+        cv::Mat camera_from_scan;       // T_C_S, 4×4
+        cv::Mat unity_world_from_scan;  // T_U_S, 4×4
+        float unity_world_from_scan_error;  // ‖T_U_S − I‖_F
     };
     std::deque<FrameHistory> frame_history_;
 
     // Internal methods
     std::vector<float> computeBoW(const cv::Mat& descriptors);
-    std::vector<KeyframeData*> getNearbyKeyframes(const float* last_pose, float radius, int max_count);
+    std::vector<KeyframeData*> getNearbyKeyframes(
+        const float* scan_from_camera_4x4, float radius, int max_count);
     std::vector<KeyframeData*> getGlobalCandidates(const cv::Mat& descriptors);
     VLResult tryMatchKeyframe(const KeyframeData& kf,
                               const std::vector<cv::KeyPoint>& query_kps,

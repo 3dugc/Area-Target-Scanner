@@ -36,8 +36,12 @@ namespace AreaTargetPlugin.Tests
             public int Height { get; }
             public int Channels { get; }
             public Vector4 Intrinsics { get; }
-            public Vector3 CameraPositionOnCapture => Vector3.zero;
-            public Quaternion CameraRotationOnCapture => Quaternion.identity;
+            public long FrameId => 17;
+            public long CaptureTimestampNs => 123456789;
+            public ImageOrientation Orientation => ImageOrientation.LandscapeRight;
+            public string MapId => "property-map";
+            public Vector3 CameraPositionOnCapture => new Vector3(1f, 2f, 3f);
+            public Quaternion CameraRotationOnCapture => Quaternion.Euler(0f, 30f, 0f);
         }
 
         /// <summary>
@@ -64,10 +68,19 @@ namespace AreaTargetPlugin.Tests
             bool fyMatch = Mathf.Approximately(frame.Intrinsics.m11, fy);
             bool cxMatch = Mathf.Approximately(frame.Intrinsics.m02, cx);
             bool cyMatch = Mathf.Approximately(frame.Intrinsics.m12, cy);
+            bool frameMetadataMatch = frame.FrameId == cameraData.FrameId
+                && frame.CaptureTimestampNs == cameraData.CaptureTimestampNs
+                && frame.Orientation == cameraData.Orientation
+                && frame.MapId == cameraData.MapId;
+            bool currentPoseMatch = frame.UnityWorldFromCamera.HasValue
+                && Mathf.Approximately(frame.UnityWorldFromCamera.Value.m03, 1f)
+                && Mathf.Approximately(frame.UnityWorldFromCamera.Value.m13, 2f)
+                && Mathf.Approximately(frame.UnityWorldFromCamera.Value.m23, 3f);
 
-            return (imageDataMatch && widthMatch && heightMatch && fxMatch && fyMatch && cxMatch && cyMatch)
+            return (imageDataMatch && widthMatch && heightMatch && fxMatch && fyMatch && cxMatch && cyMatch
+                    && frameMetadataMatch && currentPoseMatch)
                 .ToProperty()
-                .Label($"ToCameraFrame should preserve ImageData (ref), Width={w.Get}, Height={h.Get}, fx={fx}, fy={fy}, cx={cx}, cy={cy}");
+                .Label($"ToCameraFrame should preserve image, intrinsics, metadata, and T_U_C for {w.Get}x{h.Get}");
         }
     }
 }

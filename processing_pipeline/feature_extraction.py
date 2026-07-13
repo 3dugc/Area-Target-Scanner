@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import List
 
 import numpy as np
@@ -14,6 +15,34 @@ from .models import (
 
 # Module-level popcount lookup table (256 entries)
 _POPCOUNT_TABLE = np.array([bin(i).count("1") for i in range(256)], dtype=np.int32)
+
+
+def resolve_frame_intrinsics(
+    image: dict,
+    shared_intrinsics: dict | None,
+    width: int,
+    height: int,
+) -> tuple[float, float, float, float]:
+    """Use manifest per-frame intrinsics before a legacy scan-wide fallback."""
+    raw_intrinsics = image.get("intrinsics") or shared_intrinsics
+    if raw_intrinsics is None:
+        focal_length = max(width, height) * 0.8
+        return focal_length, focal_length, width / 2.0, height / 2.0
+
+    try:
+        fx, fy, cx, cy = (
+            float(raw_intrinsics[name]) for name in ("fx", "fy", "cx", "cy")
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("camera intrinsics must define fx, fy, cx, and cy") from error
+
+    if not all(math.isfinite(value) for value in (fx, fy, cx, cy)):
+        raise ValueError("camera intrinsics must be finite")
+    if fx <= 0 or fy <= 0:
+        raise ValueError("camera intrinsics focal lengths must be positive")
+    if not 0 <= cx <= width or not 0 <= cy <= height:
+        raise ValueError("camera intrinsics principal point is outside image bounds")
+    return fx, fy, cx, cy
 
 
 def _hamming_word_assignment(
@@ -152,15 +181,8 @@ def build_feature_database(
             )
             continue
 
-        # --- Step 2b: Estimate intrinsics from image size ---
-        if intrinsics:
-            fx = intrinsics["fx"]
-            fy = intrinsics["fy"]
-            cx = intrinsics["cx"]
-            cy = intrinsics["cy"]
-        else:
-            fx = fy = max(w, h) * 0.8
-            cx, cy = w / 2.0, h / 2.0
+        # --- Step 2b: Resolve manifest per-frame intrinsics or legacy fallback ---
+        fx, fy, cx, cy = resolve_frame_intrinsics(img_info, intrinsics, w, h)
 
         # --- Step 2c: Backproject 2D keypoints to 3D via ray-mesh intersection ---
         valid_keypoints: List[tuple[float, float]] = []

@@ -5,8 +5,10 @@ Validates Requirements 8.1, 8.2, 8.3.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -19,6 +21,9 @@ from processing_pipeline.models import (
     ProcessedCloud,
 )
 from processing_pipeline.feature_extraction import build_feature_database
+from processing_pipeline import feature_extraction
+from processing_pipeline.optimized_pipeline import OptimizedPipeline
+from processing_pipeline import optimized_pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +87,43 @@ def _make_camera_pose(
     pose[1, 3] = ty
     pose[2, 3] = tz
     return pose
+
+
+def _read_coordinate_contract() -> dict:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "phase1"
+        / "coordinate-contract-v1.json"
+    )
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+def _write_phase1_scan_dir(tmp_path, manifest: dict) -> str:
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    for filename in ("model.obj", "texture.jpg", "model.mtl"):
+        (scan_dir / filename).write_text("fixture", encoding="utf-8")
+
+    (scan_dir / "poses.json").write_text(
+        json.dumps(
+            {
+                "frames": [
+                    {
+                        "imageFile": "images/frame_0000.jpg",
+                        "transform": np.eye(4, dtype=np.float64)
+                        .flatten(order="F")
+                        .tolist(),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (scan_dir / "manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    return str(scan_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -347,3 +389,71 @@ class TestBuildFeatureDatabaseORB:
         db = build_feature_database(images, self.mesh)
         for kf in db.keyframes:
             assert len(kf.keypoints) <= 2000
+
+
+class TestPhase1ScanInputContract:
+    """Verify manifest-driven scan input preserves the phase 1 frame contract."""
+
+    def _valid_manifest(self) -> tuple[dict, np.ndarray]:
+        contract = _read_coordinate_contract()
+        expected_pose = np.asarray(
+            contract["cameraFromScan"], dtype=np.float64
+        ).reshape(4, 4, order="C")
+        return (
+            {
+                "schemaVersion": 1,
+                "coordinateSystem": "arkit-world",
+                "matrixLayout": "arkit-column-major",
+                "units": "meters",
+                "frames": [
+                    {
+                        "index": 0,
+                        "timestamp": 1.0,
+                        "imageFile": "images/frame_0000.jpg",
+                        "transform": expected_pose.flatten(order="F").tolist(),
+                        "imageOrientation": contract["imageOrientation"],
+                        "image": contract["image"],
+                        "intrinsics": contract["intrinsics"],
+                    }
+                ],
+            },
+            expected_pose,
+        )
+
+    def test_arkit_column_major_to_matrix_decodes_fixture_transform(self):
+        manifest, expected_pose = self._valid_manifest()
+
+        actual_pose = optimized_pipeline.arkit_column_major_to_matrix(
+            manifest["frames"][0]["transform"]
+        )
+
+        np.testing.assert_array_equal(actual_pose, expected_pose)
+
+    def test_validate_input_uses_manifest_frame_metadata(self, tmp_path):
+        manifest, expected_pose = self._valid_manifest()
+
+        scan_input = OptimizedPipeline().validate_input(
+            _write_phase1_scan_dir(tmp_path, manifest)
+        )
+
+        assert len(scan_input.images) == 1
+        np.testing.assert_array_equal(scan_input.images[0]["pose"], expected_pose)
+        assert scan_input.images[0]["intrinsics"] == manifest["frames"][0]["intrinsics"]
+        assert scan_input.images[0]["orientation"] == "landscapeRight"
+
+    def test_validate_input_rejects_unknown_scan_manifest_schema(self, tmp_path):
+        manifest, _ = self._valid_manifest()
+        manifest["schemaVersion"] = 2
+
+        with pytest.raises(ValueError, match="schemaVersion"):
+            OptimizedPipeline().validate_input(_write_phase1_scan_dir(tmp_path, manifest))
+
+    def test_per_frame_intrinsics_override_legacy_shared_intrinsics(self):
+        frame_intrinsics = {"fx": 500.0, "fy": 510.0, "cx": 320.0, "cy": 240.0}
+        legacy_intrinsics = {"fx": 1.0, "fy": 2.0, "cx": 3.0, "cy": 4.0}
+
+        actual = feature_extraction.resolve_frame_intrinsics(
+            {"intrinsics": frame_intrinsics}, legacy_intrinsics, 640, 480
+        )
+
+        assert actual == (500.0, 510.0, 320.0, 240.0)
