@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import shutil
 import tempfile
@@ -44,6 +45,118 @@ FEATURE_PROFILE_OPTIONS = {
         "kmeans_batch_size": 4096,
     },
 }
+
+_SCAN_SCHEMA_VERSION = 1
+_SCAN_COORDINATE_SYSTEM = "arkit-world"
+_SCAN_MATRIX_LAYOUT = "arkit-column-major"
+_SCAN_UNITS = "meters"
+_SCAN_ORIENTATIONS = {
+    "landscapeLeft",
+    "landscapeRight",
+    "portrait",
+    "portraitUpsideDown",
+}
+
+
+def arkit_column_major_to_matrix(values: list[float]) -> np.ndarray:
+    """Decode one finite ARKit column-major affine transform into a 4x4 matrix."""
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim != 1 or array.size != 16:
+        raise ValueError("ARKit transform must contain exactly 16 values")
+    if not np.all(np.isfinite(array)):
+        raise ValueError("ARKit transform must contain only finite values")
+
+    matrix = array.reshape((4, 4), order="F")
+    if not np.allclose(matrix[3], [0.0, 0.0, 0.0, 1.0], rtol=0.0, atol=1e-9):
+        raise ValueError("ARKit transform must have affine last row [0, 0, 0, 1]")
+    return matrix
+
+
+def _positive_image_dimension(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _finite_intrinsic(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{name} must be a finite number")
+    return number
+
+
+def _read_scan_manifest(manifest_path: str) -> list[dict]:
+    """Read schema-v1 scanner metadata into normalized processing frames."""
+    with open(manifest_path, encoding="utf-8") as manifest_file:
+        manifest = json.load(manifest_file)
+
+    if not isinstance(manifest, dict):
+        raise ValueError("scan manifest must be an object")
+    if manifest.get("schemaVersion") != _SCAN_SCHEMA_VERSION:
+        raise ValueError(f"schemaVersion must be {_SCAN_SCHEMA_VERSION}")
+    if manifest.get("coordinateSystem") != _SCAN_COORDINATE_SYSTEM:
+        raise ValueError(f"coordinateSystem must be {_SCAN_COORDINATE_SYSTEM}")
+    if manifest.get("matrixLayout") != _SCAN_MATRIX_LAYOUT:
+        raise ValueError(f"matrixLayout must be {_SCAN_MATRIX_LAYOUT}")
+    if manifest.get("units") != _SCAN_UNITS:
+        raise ValueError(f"units must be {_SCAN_UNITS}")
+
+    frames = manifest.get("frames")
+    if not isinstance(frames, list) or not frames:
+        raise ValueError("scan manifest must contain at least one frame")
+
+    images: list[dict] = []
+    for index, frame in enumerate(frames):
+        if not isinstance(frame, dict):
+            raise ValueError(f"frames[{index}] must be an object")
+
+        image_file = frame.get("imageFile")
+        if not isinstance(image_file, str) or not image_file:
+            raise ValueError(f"frames[{index}].imageFile must be a non-empty string")
+
+        orientation = frame.get("imageOrientation")
+        if orientation not in _SCAN_ORIENTATIONS:
+            raise ValueError(f"frames[{index}].imageOrientation is not supported")
+
+        image = frame.get("image")
+        if not isinstance(image, dict):
+            raise ValueError(f"frames[{index}].image must be an object")
+        width = _positive_image_dimension(
+            image.get("width"), f"frames[{index}].image.width"
+        )
+        height = _positive_image_dimension(
+            image.get("height"), f"frames[{index}].image.height"
+        )
+
+        raw_intrinsics = frame.get("intrinsics")
+        if not isinstance(raw_intrinsics, dict):
+            raise ValueError(f"frames[{index}].intrinsics must be an object")
+        intrinsics = {
+            name: _finite_intrinsic(
+                raw_intrinsics.get(name), f"frames[{index}].intrinsics.{name}"
+            )
+            for name in ("fx", "fy", "cx", "cy")
+        }
+        if intrinsics["fx"] <= 0 or intrinsics["fy"] <= 0:
+            raise ValueError(f"frames[{index}].intrinsics focal lengths must be positive")
+        if not 0 <= intrinsics["cx"] <= width or not 0 <= intrinsics["cy"] <= height:
+            raise ValueError(f"frames[{index}].intrinsics principal point is outside image bounds")
+
+        images.append(
+            {
+                "path": image_file,
+                "pose": arkit_column_major_to_matrix(frame.get("transform")),
+                "intrinsics": intrinsics,
+                "orientation": orientation,
+                "timestamp": frame.get("timestamp"),
+                "width": width,
+                "height": height,
+            }
+        )
+
+    return images
 
 
 class OptimizedPipeline:
@@ -84,10 +197,26 @@ class OptimizedPipeline:
         texture_path = os.path.join(scan_dir, "texture.jpg")
         mtl_path = os.path.join(scan_dir, "model.mtl")
         poses_path = os.path.join(scan_dir, "poses.json")
+        scan_manifest_path = os.path.join(scan_dir, "manifest.json")
 
-        for p in [obj_path, texture_path, mtl_path, poses_path]:
+        for p in [obj_path, texture_path, mtl_path]:
             if not os.path.isfile(p):
                 raise FileNotFoundError(f"必需文件缺失: {p}")
+
+        if os.path.isfile(scan_manifest_path):
+            images = _read_scan_manifest(scan_manifest_path)
+            for image in images:
+                image["path"] = os.path.join(scan_dir, image["path"])
+            return ScanInput(
+                obj_path=obj_path,
+                texture_path=texture_path,
+                mtl_path=mtl_path,
+                images=images,
+                intrinsics=None,
+            )
+
+        if not os.path.isfile(poses_path):
+            raise FileNotFoundError(f"必需文件缺失: {poses_path}")
 
         with open(poses_path) as f:
             poses_data = json.load(f)
@@ -98,9 +227,7 @@ class OptimizedPipeline:
         images = []
         for frame in frames:
             image_path = os.path.join(scan_dir, frame["imageFile"])
-            transform = np.array(
-                frame["transform"], dtype=np.float64
-            ).reshape(4, 4, order="F")
+            transform = arkit_column_major_to_matrix(frame["transform"])
             images.append({"path": image_path, "pose": transform})
 
         intrinsics = None

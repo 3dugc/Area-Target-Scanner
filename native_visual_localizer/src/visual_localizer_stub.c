@@ -49,10 +49,12 @@ VLResult vl_process_frame(VLHandle handle,
                           const unsigned char* image_data,
                           int width, int height,
                           float fx, float fy, float cx, float cy,
-                          int has_last_pose, const float* last_pose_4x4) {
+                          int has_unity_world_from_camera,
+                          const float* unity_world_from_camera_4x4) {
     (void)handle; (void)image_data; (void)width; (void)height;
     (void)fx; (void)fy; (void)cx; (void)cy;
-    (void)has_last_pose; (void)last_pose_4x4;
+    (void)has_unity_world_from_camera;
+    (void)unity_world_from_camera_4x4;
     VLResult r;
     r.state = 2; /* LOST */
     memset(r.pose, 0, sizeof(r.pose));

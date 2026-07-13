@@ -17,6 +17,10 @@ namespace AreaTargetPlugin
 
         internal LocalizationMode CurrentMode { get; set; } = LocalizationMode.Raw;
 
+        /// <summary>
+        /// Last successful native T_C_S result. It is retained for tracker output only
+        /// and is never used as the current T_U_C native input.
+        /// </summary>
         public Matrix4x4? LastValidPose { get; private set; }
 
         public bool Initialize(FeatureDatabaseReader featureDb)
@@ -79,15 +83,19 @@ namespace AreaTargetPlugin
 
         public TrackingResult ProcessFrame(CameraFrame frame)
         {
-            float[] lastPose = LastValidPose.HasValue
-                ? Matrix4x4ToArray(LastValidPose.Value) : null;
+            LocalizationFrame? localizationFrame = frame.UnityWorldFromCamera.HasValue
+                ? new LocalizationFrame(frame.UnityWorldFromCamera.Value)
+                : null;
+            float[] unityWorldFromCamera = localizationFrame.HasValue
+                ? PrepareUnityWorldFromCameraForNative(localizationFrame.Value)
+                : null;
 
             // Use ProcessFrameSafe to avoid struct-return ABI issues on iOS ARM64
             VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 _nativeHandle, frame.ImageData, frame.Width, frame.Height,
                 frame.Intrinsics.m00, frame.Intrinsics.m11,
                 frame.Intrinsics.m02, frame.Intrinsics.m12,
-                LastValidPose.HasValue ? 1 : 0, lastPose);
+                localizationFrame.HasValue ? 1 : 0, unityWorldFromCamera);
 
             var tracking = new TrackingResult
             {
@@ -113,6 +121,9 @@ namespace AreaTargetPlugin
         public void SetAlignmentTransform(Matrix4x4 at)
         {
             float[] atArray = Matrix4x4ToArray(at);
+            // The native ABI still accepts this legacy setting, but must keep
+            // VLResult.pose canonical T_C_S. Task 4 moves T_U_S application
+            // to the Runtime coordinate-transform boundary.
             NativeLocalizerBridge.vl_set_alignment_transform(_nativeHandle, atArray);
             CurrentMode = LocalizationMode.Aligned;
         }
@@ -254,6 +265,16 @@ namespace AreaTargetPlugin
                 m.m20, m.m21, m.m22, m.m23,
                 m.m30, m.m31, m.m32, m.m33
             };
+        }
+
+        /// <summary>
+        /// Serializes the current T_U_C pose for the native bridge as row-major float[16].
+        /// This intentionally does not use LastValidPose, which is a native T_C_S result.
+        /// </summary>
+        internal static float[] PrepareUnityWorldFromCameraForNative(
+            LocalizationFrame frame)
+        {
+            return Matrix4x4ToArray(frame.UnityWorldFromCamera);
         }
 
         /// <summary>

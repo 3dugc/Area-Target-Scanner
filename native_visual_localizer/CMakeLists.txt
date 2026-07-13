@@ -9,12 +9,26 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 find_package(OpenCV REQUIRED COMPONENTS core features2d calib3d)
 
 add_library(visual_localizer SHARED
+    src/pose_contract.cpp
     src/visual_localizer.cpp
     src/visual_localizer_impl.cpp
 )
 
 target_include_directories(visual_localizer PUBLIC include)
 target_link_libraries(visual_localizer PRIVATE ${OpenCV_LIBS})
+
+include(CTest)
+
+if(BUILD_TESTING AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(visual_localizer_pose_contract_test
+        tests/pose_contract_test.cpp
+        src/pose_contract.cpp
+    )
+    target_include_directories(visual_localizer_pose_contract_test PRIVATE src)
+    target_link_libraries(visual_localizer_pose_contract_test PRIVATE ${OpenCV_LIBS})
+    add_test(NAME visual_localizer_pose_contract_test
+             COMMAND visual_localizer_pose_contract_test)
+endif()
 
 # --- Platform-specific configuration ---
 

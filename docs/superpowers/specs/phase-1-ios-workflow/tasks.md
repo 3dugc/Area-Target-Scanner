@@ -320,6 +320,10 @@ git commit -m "feat: export iOS scan coordinate metadata"
 
 ## 任务 3：将合同贯穿 Python、SQLite 与 native bridge
 
+> 进度：步骤 1–6 已完成（2026-07-13）；步骤 7 待提交。已获用户授权，仅提前引入任务 4 所需的最小当前相机位姿载荷（`LocalizationFrame.UnityWorldFromCamera` 及其 bridge 传递），不提前实现坐标组合、异步运行器或场景更新。native 的 OpenCV→AR 相机规范化现由一个独立的 C++ 合同测试覆盖；为保持本任务 `T_C_S` 合同，legacy alignment ABI 不再改写 native PnP 输出，`T_U_S` 的实际应用仍留给任务 4。尚未开始任务 4。
+>
+> 验证证据：Python 合同与回归测试 `64 passed, 1 warning`；`native_visual_localizer/build_macos.sh` 成功构建并执行 `1/1` C++ 合同测试；macOS dylib 与现有 iOS arm64 静态库均通过 native 符号合同检查；Unity EditMode `NativeLocalizerBridgeTests` 为 `19 passed, 0 failed`。`build_ios.sh` 和 `build_macos.sh` 均已通过 `bash -n` 语法检查。Unity 自动改写的项目设置、包锁定和插件元文件已从本次提交中排除。
+
 **对应需求：** R1.1、R1.6
 
 **可运行产物：** 处理管线和 SQLite reader 对同一 fixture 产生明确的 row-major pose blob；native C API 与 C# bridge 均标注并验证 `T_C_S`。
@@ -332,15 +336,25 @@ git commit -m "feat: export iOS scan coordinate metadata"
 - 修改：`tests/test_feature_extraction.py`
 - 修改：`tests/test_feature_db.py`
 - 修改：`native_visual_localizer/include/visual_localizer.h`
+- 修改：`native_visual_localizer/CMakeLists.txt`
+- 修改：`native_visual_localizer/build_ios.sh`
+- 修改：`native_visual_localizer/build_macos.sh`
+- 修改：`native_visual_localizer/src/visual_localizer.cpp`
 - 修改：`native_visual_localizer/src/visual_localizer_impl.cpp`
+- 修改：`native_visual_localizer/src/visual_localizer_impl.h`
+- 修改：`native_visual_localizer/src/visual_localizer_stub.c`
+- 新建：`native_visual_localizer/src/pose_contract.h`
+- 新建：`native_visual_localizer/src/pose_contract.cpp`
+- 新建：`native_visual_localizer/tests/pose_contract_test.cpp`
 - 修改：`unity_plugin/AreaTargetPlugin/Runtime/NativeLocalizerBridge.cs`
 - 修改：`unity_plugin/AreaTargetPlugin/Tests/NativeLocalizerBridgeTests.cs`
+- 经授权的最小提前载荷：`unity_plugin/AreaTargetPlugin/Runtime/LocalizationFrame.cs`、`unity_plugin/AreaTargetPlugin/Runtime/LocalizationFrame.cs.meta`、`unity_plugin/AreaTargetPlugin/Runtime/CameraFrame.cs`、`unity_plugin/AreaTargetPlugin/Runtime/CameraDataAdapter.cs`、`unity_plugin/AreaTargetPlugin/Runtime/VisualLocalizationEngine.cs`
 
-- [ ] **步骤 1：添加会失败的 Python pose blob 回归测试**
+- [x] **步骤 1：添加会失败的 Python pose blob 回归测试**
 
 在 `tests/test_feature_db.py` 增加 fixture 测试：读取 `coordinate-contract-v1.json`，写入一条 keyframe 后读取 SQLite blob，断言 16 个 float 的顺序为 fixture 的 `cameraFromScan` row-major 顺序。再构造 column-major blob，断言 reader 明确拒绝或转换，而不是默默接受。
 
-- [ ] **步骤 2：运行 Python 测试并确认现状不满足合同**
+- [x] **步骤 2：运行 Python 测试并确认现状不满足合同**
 
 运行：
 
@@ -352,7 +366,7 @@ venv/bin/python -m pytest \
 
 预期结果：至少一个新合同断言失败，暴露当前读取/写入布局没有固定合同。
 
-- [ ] **步骤 3：实现 Python 输入与数据库布局校验**
+- [x] **步骤 3：实现 Python 输入与数据库布局校验**
 
 在 `optimized_pipeline.py` 入口读取 scan manifest 的 `schemaVersion`、`matrixLayout`、`units`、方向和内参，拒绝未知 schema。把 Swift column-major 转为处理管线内部矩阵时只能经过一个命名函数，例如：
 
@@ -363,13 +377,13 @@ def arkit_column_major_to_matrix(values: list[float]) -> np.ndarray:
 
 在 `feature_db.py` 写入前由一个 `matrix_to_row_major_blob` 函数生成 `C` order、16 个 `float64` 的 blob；读取由对应逆函数完成。每个函数对长度、有限值和最后一行 `[0,0,0,1]` 做检查。
 
-- [ ] **步骤 4：明确 native 返回矩阵语义**
+- [x] **步骤 4：明确 native 返回矩阵语义**
 
 在 `visual_localizer.h` 的 `VLResult.pose` 注释改为 `T_C_S`，明确它是 row-major、scan/world 到当前 camera 的 PnP 结果。`visual_localizer_impl.cpp` 必须确保结果写出前仅做一次 OpenCV camera → AR camera 坐标规范化，并在单元/原生测试中以 fixture 矩阵验证。不得把上一次 PnP 结果作为 `has_last_pose` 的 AR camera C2W 输入。
 
 `NativeLocalizerBridge.cs` 中将参数名从泛化的 `last_pose_4x4` 改为语义明确的 `unity_world_from_camera_4x4`（或同步调整 native API 名称），并在 P/Invoke 注释写明其空间和 row-major 布局。
 
-- [ ] **步骤 5：添加 native/C# bridge 测试**
+- [x] **步骤 5：添加 native/C# bridge 测试**
 
 在 `NativeLocalizerBridgeTests.cs` 中创建无 native handle 的序列化测试，验证：
 
@@ -382,7 +396,7 @@ Assert.AreEqual(matrix.m23, values[11]);
 
 另加 P/Invoke 参数测试，断言调用点传入的是当前 `LocalizationFrame.UnityWorldFromCamera`，而不是 `LastValidPose`。
 
-- [ ] **步骤 6：运行处理、native 与 Unity EditMode 验证**
+- [x] **步骤 6：运行处理、native 与 Unity EditMode 验证**
 
 运行：
 
@@ -398,7 +412,7 @@ tools/phase0/check_native_symbols.sh \
 
 随后在 Unity Test Runner 执行 `AreaTargetPlugin.Tests` 中的 `NativeLocalizerBridgeTests`。预期结果：全部通过，native 符号合同仍完整。
 
-- [ ] **步骤 7：提交任务 3**
+- [x] **步骤 7：提交任务 3**
 
 ```bash
 git add \
@@ -407,8 +421,22 @@ git add \
   processing_pipeline/feature_db.py \
   tests/test_feature_db.py \
   tests/test_feature_extraction.py \
+  native_visual_localizer/CMakeLists.txt \
+  native_visual_localizer/build_ios.sh \
+  native_visual_localizer/build_macos.sh \
   native_visual_localizer/include/visual_localizer.h \
+  native_visual_localizer/src/pose_contract.h \
+  native_visual_localizer/src/pose_contract.cpp \
+  native_visual_localizer/src/visual_localizer.cpp \
   native_visual_localizer/src/visual_localizer_impl.cpp \
+  native_visual_localizer/src/visual_localizer_impl.h \
+  native_visual_localizer/src/visual_localizer_stub.c \
+  native_visual_localizer/tests/pose_contract_test.cpp \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationFrame.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationFrame.cs.meta \
+  unity_plugin/AreaTargetPlugin/Runtime/CameraFrame.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/CameraDataAdapter.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/VisualLocalizationEngine.cs \
   unity_plugin/AreaTargetPlugin/Runtime/NativeLocalizerBridge.cs \
   unity_plugin/AreaTargetPlugin/Tests/NativeLocalizerBridgeTests.cs \
   docs/superpowers/specs/phase-1-ios-workflow/tasks.md

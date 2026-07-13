@@ -49,6 +49,16 @@ $CXX -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
     -fPIC \
     -c "$SCRIPT_DIR/src/visual_localizer.cpp" -o "$BUILD_DIR/visual_localizer.o"
 
+echo "--- Compiling pose_contract.cpp ---"
+$CXX -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
+    -miphoneos-version-min=14.0 \
+    -I"$SCRIPT_DIR/include" \
+    -I"$SCRIPT_DIR/src" \
+    -F"$OPENCV_DIR" \
+    -fvisibility=hidden -fvisibility-inlines-hidden \
+    -fPIC \
+    -c "$SCRIPT_DIR/src/pose_contract.cpp" -o "$BUILD_DIR/pose_contract.o"
+
 echo "--- Compiling visual_localizer_impl.cpp ---"
 $CXX -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
     -miphoneos-version-min=14.0 \
@@ -63,6 +73,7 @@ $CXX -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
 echo "--- Creating static library ---"
 ar rcs "$BUILD_DIR/libvisual_localizer.a" \
     "$BUILD_DIR/visual_localizer.o" \
+    "$BUILD_DIR/pose_contract.o" \
     "$BUILD_DIR/visual_localizer_impl.o"
 
 # Step 4: Verify
