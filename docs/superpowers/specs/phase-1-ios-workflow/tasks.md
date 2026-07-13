@@ -1009,6 +1009,8 @@ git commit -m "test: add phase 1 iOS release gates"
 
 **可运行产物：** 同一张真实地图可由 iPhone 和 iPad 分别扫描/处理、在 Unity iOS 应用加载并定位，且各自导出隐私安全的诊断证据。
 
+> **进度（2026-07-13）：** 步骤 1 已完成，步骤 2–7 待执行。设备预检未发现在线 iPhone 或 iPad：`xcrun xctrace list devices` 仅返回离线历史设备，因此尚未执行扫描、安装、运行或定位，也未写入任何设备 UDID。需要将至少一台 LiDAR iPhone 和一台 LiDAR iPad 解锁、信任此 Mac 并保持 USB 连接后继续。
+
 **涉及文件：**
 
 - 新建：`docs/phase-1-ios-validation.md`
@@ -1017,7 +1019,7 @@ git commit -m "test: add phase 1 iOS release gates"
 - 修改：`unity_project/Assets/Scripts/ARTestSceneManager.cs`
 - 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMDebugPanel.cs`
 
-- [ ] **步骤 1：创建验收记录模板**
+- [x] **步骤 1：创建验收记录模板**
 
 `docs/phase-1-device-acceptance-template.md` 必须包含固定字段：
 
