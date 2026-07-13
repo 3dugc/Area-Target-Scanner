@@ -897,8 +897,18 @@ final class TextureMappingPropertyTests: XCTestCase {
         let vertices = (0..<5).map { i -> [Float] in
             [Float(i) * 0.1, 0, 0, 0.5, 0.5, 0.5, 0, 1, 0]
         }
-        let poses = [CameraPose(timestamp: 0, transform: Array(repeating: Float(0), count: 16), imageFilename: "test.jpg")]
         let intrinsics = CameraIntrinsics(fx: 525, fy: 525, cx: 320, cy: 240, width: 640, height: 480)
+        let poses = [
+            CameraPose(
+                timestamp: 0,
+                transform: Array(repeating: Float(0), count: 16),
+                imageFilename: "test.jpg",
+                imageOrientation: .landscapeRight,
+                intrinsics: intrinsics,
+                imageWidth: intrinsics.width,
+                imageHeight: intrinsics.height
+            )
+        ]
         let images = [CapturedImage(imageData: Data([0xFF, 0xD8]), filename: "test.jpg")]
 
         // Should not throw — texture mapping is skipped when meshAnchors is empty

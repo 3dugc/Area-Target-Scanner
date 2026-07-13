@@ -44,6 +44,7 @@ final class ScanDataExporterTests: XCTestCase {
     }
 
     private func makeSamplePoses(count: Int) -> [CameraPose] {
+        let intrinsics = makeSampleIntrinsics()
         return (0..<count).map { i in
             // Identity-like transform stored column-major
             let transform: [Float] = [
@@ -55,6 +56,25 @@ final class ScanDataExporterTests: XCTestCase {
             return CameraPose(
                 timestamp: Double(i) * 0.5,
                 transform: transform,
+                imageFilename: String(format: "frame_%04d.jpg", i),
+                imageOrientation: .landscapeRight,
+                intrinsics: intrinsics,
+                imageWidth: intrinsics.width,
+                imageHeight: intrinsics.height
+            )
+        }
+    }
+
+    private func makeSamplePosesWithoutMetadata(count: Int) -> [CameraPose] {
+        return (0..<count).map { i in
+            CameraPose(
+                timestamp: Double(i) * 0.5,
+                transform: [
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    Float(i) * 0.1, 0, 0, 1
+                ],
                 imageFilename: String(format: "frame_%04d.jpg", i)
             )
         }
@@ -252,6 +272,81 @@ final class ScanDataExporterTests: XCTestCase {
     }
 
     // MARK: - Full Export Tests
+
+    /// 验证导出的扫描目录包含版本化、逐帧的坐标与图像合同。
+    func testExportedManifestDeclaresCoordinateAndImageContract() throws {
+        let outputURL = tempDirectory.appendingPathComponent("scan_manifest_output")
+        try exporter.exportAll(
+            vertices: makeSampleVertices(count: 1),
+            poses: makeSamplePoses(count: 1),
+            intrinsics: makeSampleIntrinsics(),
+            images: makeSampleImages(count: 1),
+            outputPath: outputURL.path
+        )
+
+        let manifestURL = outputURL.appendingPathComponent("manifest.json")
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            XCTFail("manifest.json must declare the scan coordinate and image contract")
+            return
+        }
+
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
+            as? [String: Any]
+        XCTAssertEqual(manifest?["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(manifest?["coordinateSystem"] as? String, "arkit-world")
+        XCTAssertEqual(manifest?["matrixLayout"] as? String, "arkit-column-major")
+        XCTAssertEqual(manifest?["units"] as? String, "meters")
+
+        let frames = try XCTUnwrap(manifest?["frames"] as? [[String: Any]])
+        let frame = try XCTUnwrap(frames.first)
+        XCTAssertEqual(frame["imageOrientation"] as? String, "landscapeRight")
+        XCTAssertEqual((frame["image"] as? [String: Any])?["width"] as? Int, 640)
+        XCTAssertEqual((frame["image"] as? [String: Any])?["height"] as? Int, 480)
+        let frameIntrinsics = try XCTUnwrap(frame["intrinsics"] as? [String: Any])
+        XCTAssertEqual(try XCTUnwrap(frameIntrinsics["fx"] as? Double), 525, accuracy: 0.001)
+    }
+
+    /// 不允许旧的、未记录图像方向的 pose 被默默补默认值后导出。
+    func testExportAllRejectsPoseMissingImageOrientation() {
+        XCTAssertThrowsError(
+            try exporter.exportAll(
+                vertices: makeSampleVertices(count: 1),
+                poses: makeSamplePosesWithoutMetadata(count: 1),
+                intrinsics: makeSampleIntrinsics(),
+                images: makeSampleImages(count: 1),
+                outputPath: tempDirectory.appendingPathComponent("missing_orientation").path
+            )
+        )
+    }
+
+    /// 现有 JPEG 路径不会重编码像素，因此不能把原始 landscape 内参伪装成 portrait 导出。
+    func testExportAllRejectsPortraitPoseWithoutReencodedImageMetadata() {
+        let intrinsics = makeSampleIntrinsics()
+        let portraitPose = CameraPose(
+            timestamp: 0,
+            transform: [
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+            ],
+            imageFilename: "portrait.jpg",
+            imageOrientation: .portrait,
+            intrinsics: intrinsics,
+            imageWidth: intrinsics.width,
+            imageHeight: intrinsics.height
+        )
+
+        XCTAssertThrowsError(
+            try exporter.exportAll(
+                vertices: makeSampleVertices(count: 1),
+                poses: [portraitPose],
+                intrinsics: intrinsics,
+                images: [CapturedImage(imageData: Data([0xFF, 0xD8]), filename: "portrait.jpg")],
+                outputPath: tempDirectory.appendingPathComponent("portrait_without_reencode").path
+            )
+        )
+    }
 
     /// Validates: Requirements 3.1, 3.2, 3.3, 3.4
     /// Verifies exportAll creates the complete directory structure.

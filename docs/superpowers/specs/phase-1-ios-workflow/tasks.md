@@ -202,6 +202,14 @@ git commit -m "test: define phase 1 coordinate contract"
 
 ## 任务 2：让扫描 ZIP 声明每帧方向、内参和矩阵布局
 
+> 进度：实施与真机验证已完成（2026-07-13）；本次提交将同时记录步骤 7 完成，尚未开始任务 3。
+>
+> 实施边界：当前 JPEG 导出不旋转像素，因此 ARKit 扫描帧将显式标记为 `landscapeRight`；若输入要求 portrait 变换而现有导出器无法安全重编码 JPEG，则必须失败，不能猜测或静默补默认值。
+>
+> 验证证据：先观察 Swift/Python 新合同用例在实现前失败，再通过最小实现使其通过。提交前最新回归：iPhone 17 Pro simulator（iOS 26.5）完整 Swift suite 为 `93 passed`（`0 failed`）；Python 合同测试为 `11 passed`，完整 Python suite 为 `292 passed, 4 skipped`。完整 Python suite 与 Xcode 回归并行时曾在既有 mesh 原生扩展内发生一次段错误；Xcode 结束后单独运行 mesh 测试 `20 passed`，再串行完整运行后通过，因此未将其归因于本任务代码。
+>
+> 真机验证：已完成一次短扫描。扫描 ZIP 仅保留在受控本地临时目录；只提取并检查 `manifest.json`，退出码为 0，终端摘要为 `{"frameCount":31,"orientationCounts":{"landscapeRight":31},"schemaVersion":1}`。无图像、设备标识或本地导出路径写入 Git；匿名摘要见 `docs/phase-1-ios-validation.md`。
+
 **对应需求：** R1.1、R1.5
 
 **可运行产物：** 由 LiDAR 扫描器生成的 ZIP 可被 Python checker 识别为 schema v1，且拒绝方向/内参不完整的扫描数据。
@@ -212,10 +220,13 @@ git commit -m "test: define phase 1 coordinate contract"
 - 修改：`ios_scanner/AreaTargetScanner/Services/ARKitScannerService.swift`
 - 修改：`ios_scanner/AreaTargetScanner/Services/ScanDataExporter.swift`
 - 修改：`ios_scanner/AreaTargetScannerTests/ScanDataExporterTests.swift`
+- 修改：`ios_scanner/AreaTargetScannerTests/ScanDataExporterEdgeCaseTests.swift`（为既有导出测试提供显式帧元数据）
+- 修改：`ios_scanner/AreaTargetScannerTests/TextureMappingPropertyTests.swift`（为既有导出测试提供显式帧元数据）
 - 修改：`tools/phase1/validate_scan_contract.py`
 - 修改：`tests/phase1/test_scan_contract.py`
+- 新建：`docs/phase-1-ios-validation.md`（不含图像或设备隐私数据）
 
-- [ ] **步骤 1：添加失败的扫描导出测试**
+- [x] **步骤 1：添加失败的扫描导出测试**
 
 在 `ScanDataExporterTests.swift` 中添加：
 
@@ -232,7 +243,7 @@ func testExportedManifestDeclaresCoordinateAndImageContract() throws {
 
 再添加两个失败用例：缺少方向字段和 90 度旋转后未交换宽高/内参。不要以默认值静默填充缺失方向。
 
-- [ ] **步骤 2：运行扫描导出测试并确认失败**
+- [x] **步骤 2：运行扫描导出测试并确认失败**
 
 运行：
 
@@ -246,7 +257,7 @@ xcodebuild test \
 
 预期结果：新测试失败，因为当前导出 manifest 未声明完整合同。
 
-- [ ] **步骤 3：扩展扫描元数据模型与导出器**
+- [x] **步骤 3：扩展扫描元数据模型与导出器**
 
 在 `CameraPose` 中增加 `imageOrientation`、`intrinsics` 或 `intrinsicsRef`、`imageWidth`、`imageHeight`。在 `ARKitScannerService` 捕获时将当前 `ARFrame.camera.intrinsics` 与图像方向绑定到同一 keyframe；在 `ScanDataExporter` 顶层写入：
 
@@ -261,11 +272,11 @@ xcodebuild test \
 
 规则：`landscapeLeft`/`landscapeRight` 不交换宽高；`portrait`/`portraitUpsideDown` 必须把像素与 `fx/fy/cx/cy` 转换为导出 JPEG 的实际方向。不能正确转换时停止导出并报告错误。
 
-- [ ] **步骤 4：为 Python 检查器增加 scan ZIP manifest 模式**
+- [x] **步骤 4：为 Python 检查器增加 scan ZIP manifest 模式**
 
 `validate_scan_contract.py` 新增 `--scan-manifest <path>` 模式，校验：每帧 image filename 唯一、矩阵长度为 16、时间戳递增、图像尺寸为正、内参主点在图像范围内、方向为四种允许值之一。成功打印帧数与 schema 版本。
 
-- [ ] **步骤 5：运行 Swift 与 Python 回归测试**
+- [x] **步骤 5：运行 Swift 与 Python 回归测试**
 
 运行：
 
@@ -279,7 +290,7 @@ venv/bin/python -m pytest tests/phase1/test_scan_contract.py -v
 
 预期结果：所有导出与合同测试通过；损坏 manifest 的 Python 用例仍失败。
 
-- [ ] **步骤 6：在真机上生成一份无图像提交的验证摘要**
+- [x] **步骤 6：在真机上生成一份无图像提交的验证摘要**
 
 连接 LiDAR iPhone 或 iPad，构建扫描器并执行一次短扫描。将 ZIP 保留在受控本地目录，不提交 Git；对 manifest 运行：
 
@@ -290,7 +301,7 @@ venv/bin/python tools/phase1/validate_scan_contract.py \
 
 预期结果：返回 0 并打印 schema、帧数、方向分布。把终端摘要记录到 `docs/phase-1-ios-validation.md`，不复制图像或设备隐私数据。
 
-- [ ] **步骤 7：提交任务 2**
+- [x] **步骤 7：提交任务 2**
 
 ```bash
 git add \
@@ -298,8 +309,11 @@ git add \
   ios_scanner/AreaTargetScanner/Services/ARKitScannerService.swift \
   ios_scanner/AreaTargetScanner/Services/ScanDataExporter.swift \
   ios_scanner/AreaTargetScannerTests/ScanDataExporterTests.swift \
+  ios_scanner/AreaTargetScannerTests/ScanDataExporterEdgeCaseTests.swift \
+  ios_scanner/AreaTargetScannerTests/TextureMappingPropertyTests.swift \
   tools/phase1/validate_scan_contract.py \
   tests/phase1/test_scan_contract.py \
+  docs/phase-1-ios-validation.md \
   docs/superpowers/specs/phase-1-ios-workflow/tasks.md
 git commit -m "feat: export iOS scan coordinate metadata"
 ```

@@ -20,6 +20,8 @@ final class ScanDataExporter {
         case plyWriteFailed(String)
         case jsonEncodeFailed(String)
         case imageWriteFailed(String)
+        case incompleteFrameMetadata(String)
+        case imageOrientationRequiresReencoding(String)
 
         var errorDescription: String? {
             switch self {
@@ -31,6 +33,10 @@ final class ScanDataExporter {
                 return "Failed to encode JSON: \(reason)"
             case .imageWriteFailed(let filename):
                 return "Failed to write image: \(filename)"
+            case .incompleteFrameMetadata(let reason):
+                return "Frame metadata is incomplete: \(reason)"
+            case .imageOrientationRequiresReencoding(let orientation):
+                return "Image orientation \(orientation) requires JPEG re-encoding before export"
             }
         }
     }
@@ -42,6 +48,7 @@ final class ScanDataExporter {
     /// Creates the following structure:
     /// ```
     /// outputPath/
+    /// ├── manifest.json
     /// ├── pointcloud.ply
     /// ├── poses.json
     /// ├── intrinsics.json
@@ -74,10 +81,15 @@ final class ScanDataExporter {
         let fileManager = FileManager.default
         let outputURL = URL(fileURLWithPath: outputPath)
 
+        // Validate the per-frame contract before emitting a partially specified scan.
+        let manifest = try makeScanManifest(poses: poses)
+
         // Create output directory if needed
         try createDirectoryIfNeeded(at: outputURL, fileManager: fileManager)
 
         // Write all components
+        try writeScanManifest(manifest, to: outputURL.appendingPathComponent("manifest.json"))
+
         onProgress?("正在导出点云 (\(vertices.count) 点)...")
         try writePLY(vertices: vertices, to: outputURL.appendingPathComponent("pointcloud.ply"))
 
@@ -181,6 +193,77 @@ final class ScanDataExporter {
     }
 
     // MARK: - Poses JSON Export
+
+    /// Writes the schema-v1 scan manifest used by downstream contract validation.
+    private func writeScanManifest(_ manifest: [String: Any], to url: URL) throws {
+        guard JSONSerialization.isValidJSONObject(manifest) else {
+            throw ExportError.jsonEncodeFailed("Invalid JSON object for scan manifest")
+        }
+
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: manifest,
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            try data.write(to: url, options: .atomic)
+        } catch {
+            throw ExportError.jsonEncodeFailed(error.localizedDescription)
+        }
+    }
+
+    /// Builds an explicit, per-keyframe coordinate and image metadata contract.
+    private func makeScanManifest(poses: [CameraPose]) throws -> [String: Any] {
+        var frames: [[String: Any]] = []
+        frames.reserveCapacity(poses.count)
+
+        for (index, pose) in poses.enumerated() {
+            guard let orientation = pose.imageOrientation else {
+                throw ExportError.incompleteFrameMetadata(
+                    "frame \(index) is missing imageOrientation"
+                )
+            }
+            guard orientation == .landscapeLeft || orientation == .landscapeRight else {
+                throw ExportError.imageOrientationRequiresReencoding(orientation.rawValue)
+            }
+            guard let frameIntrinsics = pose.intrinsics else {
+                throw ExportError.incompleteFrameMetadata(
+                    "frame \(index) is missing intrinsics"
+                )
+            }
+            guard let imageWidth = pose.imageWidth, let imageHeight = pose.imageHeight else {
+                throw ExportError.incompleteFrameMetadata(
+                    "frame \(index) is missing image dimensions"
+                )
+            }
+
+            let frame: [String: Any] = [
+                "index": index,
+                "timestamp": pose.timestamp,
+                "imageFile": "images/\(pose.imageFilename)",
+                "transform": pose.transform,
+                "imageOrientation": orientation.rawValue,
+                "image": [
+                    "width": imageWidth,
+                    "height": imageHeight
+                ],
+                "intrinsics": [
+                    "fx": frameIntrinsics.fx,
+                    "fy": frameIntrinsics.fy,
+                    "cx": frameIntrinsics.cx,
+                    "cy": frameIntrinsics.cy
+                ]
+            ]
+            frames.append(frame)
+        }
+
+        return [
+            "schemaVersion": 1,
+            "coordinateSystem": "arkit-world",
+            "matrixLayout": "arkit-column-major",
+            "units": "meters",
+            "frames": frames
+        ]
+    }
 
     /// Writes camera poses to a JSON file.
     ///
