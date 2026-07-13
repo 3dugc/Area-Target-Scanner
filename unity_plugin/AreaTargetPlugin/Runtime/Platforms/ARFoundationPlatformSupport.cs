@@ -18,6 +18,12 @@ namespace AreaTargetPlugin.PointCloudLocalization
     {
         private bool _configured;
         private bool _disposed;
+        private long _nextFrameId;
+        private long _latestCaptureTimestampNs = -1;
+        private long _lastEmittedCaptureTimestampNs = -1;
+
+        /// <summary>Stable map identifier attached to each acquired AR frame.</summary>
+        public string MapId { get; set; } = "default-map";
 
 #if UNITY_AR_FOUNDATION
         // AR Foundation references (resolved during ConfigurePlatform)
@@ -103,6 +109,18 @@ namespace AreaTargetPlugin.PointCloudLocalization
                 Debug.LogError("[ARFoundationPlatformSupport] XROrigin not found in scene.");
                 return;
             }
+
+            _cameraManager.frameReceived += OnCameraFrameReceived;
+        }
+
+        private void OnCameraFrameReceived(UnityEngine.XR.ARFoundation.ARCameraFrameEventArgs args)
+        {
+            if (!args.timestampNs.HasValue)
+                return;
+
+            _latestCaptureTimestampNs = Math.Max(
+                _latestCaptureTimestampNs,
+                args.timestampNs.Value);
         }
 
         private async Task<IPlatformUpdateResult> AcquireFrameFromARFoundation()
@@ -161,6 +179,7 @@ namespace AreaTargetPlugin.PointCloudLocalization
 
                 // 6. Assess tracking quality from ARSession state
                 int trackingQuality = EvaluateTrackingQuality();
+                long captureTimestampNs = NextCaptureTimestampNs();
 
                 var cameraData = new ARFoundationCameraData(
                     imageBytes,
@@ -170,7 +189,11 @@ namespace AreaTargetPlugin.PointCloudLocalization
                     new Vector4(intrinsics.focalLength.x, intrinsics.focalLength.y,
                                 intrinsics.principalPoint.x, intrinsics.principalPoint.y),
                     position,
-                    rotation
+                    rotation,
+                    _nextFrameId++,
+                    captureTimestampNs,
+                    ImageOrientation.LandscapeRight,
+                    MapId
                 );
 
                 return new PlatformUpdateResult
@@ -206,8 +229,22 @@ namespace AreaTargetPlugin.PointCloudLocalization
 
         private void CleanUpARFoundation()
         {
+            if (_cameraManager != null)
+                _cameraManager.frameReceived -= OnCameraFrameReceived;
             _cameraManager = null;
             _xrOrigin = null;
+        }
+
+        private long NextCaptureTimestampNs()
+        {
+            long candidate = _latestCaptureTimestampNs >= 0
+                ? _latestCaptureTimestampNs
+                : _lastEmittedCaptureTimestampNs + 1;
+            if (candidate <= _lastEmittedCaptureTimestampNs)
+                candidate = _lastEmittedCaptureTimestampNs + 1;
+
+            _lastEmittedCaptureTimestampNs = candidate;
+            return candidate;
         }
 
         /// <summary>
@@ -222,10 +259,16 @@ namespace AreaTargetPlugin.PointCloudLocalization
             public Vector4 Intrinsics { get; }
             public Vector3 CameraPositionOnCapture { get; }
             public Quaternion CameraRotationOnCapture { get; }
+            public long FrameId { get; }
+            public long CaptureTimestampNs { get; }
+            public ImageOrientation Orientation { get; }
+            public string MapId { get; }
 
             public ARFoundationCameraData(
                 byte[] bytes, int width, int height, int channels,
-                Vector4 intrinsics, Vector3 position, Quaternion rotation)
+                Vector4 intrinsics, Vector3 position, Quaternion rotation,
+                long frameId, long captureTimestampNs,
+                ImageOrientation orientation, string mapId)
             {
                 _bytes = bytes;
                 Width = width;
@@ -234,6 +277,10 @@ namespace AreaTargetPlugin.PointCloudLocalization
                 Intrinsics = intrinsics;
                 CameraPositionOnCapture = position;
                 CameraRotationOnCapture = rotation;
+                FrameId = frameId;
+                CaptureTimestampNs = captureTimestampNs;
+                Orientation = orientation;
+                MapId = mapId;
             }
 
             public byte[] GetBytes() => _bytes;

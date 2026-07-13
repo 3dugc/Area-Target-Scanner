@@ -25,6 +25,11 @@ namespace AreaTargetPlugin
         TrackingResult ProcessFrame(CameraFrame cameraFrame);
 
         /// <summary>
+        /// Processes an immutable localization frame that contains the current T_U_C.
+        /// </summary>
+        TrackingResult ProcessFrame(LocalizationFrame localizationFrame);
+
+        /// <summary>
         /// Returns the current tracking state.
         /// </summary>
         TrackingState GetTrackingState();

@@ -13,13 +13,23 @@ namespace AreaTargetPlugin.PointCloudLocalization
         private bool _disposed;
         private int _simulatedWidth = 640;
         private int _simulatedHeight = 480;
+        private long _nextFrameId;
+
+        /// <summary>Map identifier attached to simulated frames.</summary>
+        public string MapId { get; set; } = "editor-simulated-map";
 
         public async Task<IPlatformUpdateResult> UpdatePlatform()
         {
             if (_disposed || !_configured)
                 return new PlatformUpdateResult { Success = false, TrackingQuality = 0, CameraData = null };
 
-            var cameraData = new EditorCameraData(_simulatedWidth, _simulatedHeight);
+            long frameId = _nextFrameId++;
+            var cameraData = new EditorCameraData(
+                _simulatedWidth,
+                _simulatedHeight,
+                frameId,
+                frameId * 1000000L,
+                MapId);
             await Task.CompletedTask;
             return new PlatformUpdateResult
             {
@@ -53,11 +63,23 @@ namespace AreaTargetPlugin.PointCloudLocalization
             public Vector4 Intrinsics => new Vector4(500f, 500f, Width / 2f, Height / 2f);
             public Vector3 CameraPositionOnCapture => Vector3.zero;
             public Quaternion CameraRotationOnCapture => Quaternion.identity;
+            public long FrameId { get; }
+            public long CaptureTimestampNs { get; }
+            public ImageOrientation Orientation => ImageOrientation.LandscapeRight;
+            public string MapId { get; }
 
-            public EditorCameraData(int width, int height)
+            public EditorCameraData(
+                int width,
+                int height,
+                long frameId,
+                long captureTimestampNs,
+                string mapId)
             {
                 Width = width;
                 Height = height;
+                FrameId = frameId;
+                CaptureTimestampNs = captureTimestampNs;
+                MapId = mapId;
                 _bytes = new byte[width * height];
             }
 

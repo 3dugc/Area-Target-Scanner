@@ -43,6 +43,7 @@ public class ARTestSceneManager : MonoBehaviour
     private int _frameCount;
     private float _fpsTimer;
     private int _fpsFrameCount;
+    private long _lastCaptureTimestampNs = -1;
 
     void Start()
     {
@@ -224,16 +225,38 @@ public class ARTestSceneManager : MonoBehaviour
 
         Matrix4x4 intrinsics = BuildIntrinsicsMatrix(width, height);
 
+        Camera arCamera = Camera.main;
+        if (arCamera == null)
+        {
+            Log("本帧缺少 AR 相机位姿，跳过定位");
+            return;
+        }
+
         var frame = new CameraFrame
         {
             ImageData = grayscaleData,
             Width = width,
             Height = height,
-            Intrinsics = intrinsics
+            Intrinsics = intrinsics,
+            FrameId = _frameCount,
+            CaptureTimestampNs = GetMonotonicCaptureTimestampNs(args),
+            Orientation = ImageOrientation.LandscapeRight,
+            UnityWorldFromCamera = arCamera.transform.localToWorldMatrix,
+            MapId = _tracker.MapId
         };
 
         TrackingResult result = _tracker.ProcessFrame(frame);
         HandleTrackingResult(result);
+    }
+
+    private long GetMonotonicCaptureTimestampNs(ARCameraFrameEventArgs args)
+    {
+        long candidate = args.timestampNs ?? ((long)_frameCount * 1_000_000L);
+        if (candidate <= _lastCaptureTimestampNs)
+            candidate = _lastCaptureTimestampNs + 1;
+
+        _lastCaptureTimestampNs = candidate;
+        return candidate;
     }
 
     private void HandleTrackingResult(TrackingResult result)

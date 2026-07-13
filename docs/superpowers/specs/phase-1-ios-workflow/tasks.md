@@ -449,6 +449,10 @@ git commit -m "feat: enforce cross-language pose contract"
 
 **可运行产物：** Unity Runtime 可接收带当前 AR 位姿的 `LocalizationFrame`，只通过 `CoordinateTransform` 计算内容根节点 `T_U_S`。
 
+> **进度（2026-07-13）：** 步骤 1–8 已完成。任务 3 已按用户授权提前引入仅含 `T_U_C` 的 `LocalizationFrame` 前置载荷，本任务将其扩展为完整不可变帧，并新增唯一的 `CoordinateTransform`。本任务未提前实现任务 5 的异步运行器。
+>
+> **验证证据：** `CoordinateTransformTests` 的失败测试先确认旧 SLAM 场景会重复组合坐标（最终位置偏差 `9.5m`），改造后该测试通过。指定 Unity EditMode 回归为：`CoordinateTransformTests` `12/12`、`NativeLocalizerBridgeTests` `19/19`、`LocalizerIntegrationTests` `6/6`、`SLAMTestSceneIntegrationTests` `17/17`；受影响的 `SLAMTestSceneManagerTests` `18/18` 与 `ARTestSceneDebugUITests` `11/11` 也通过。Unity 自动改写的项目设置、包锁定和插件元文件已还原，未纳入本任务。
+
 **涉及文件：**
 
 - 新建：`unity_plugin/AreaTargetPlugin/Runtime/LocalizationFrame.cs`
@@ -463,7 +467,7 @@ git commit -m "feat: enforce cross-language pose contract"
 - 修改：`unity_plugin/AreaTargetPlugin/Runtime/AreaTargetTracker.cs`
 - 修改：`unity_plugin/AreaTargetPlugin/Runtime/AlignmentTransformCalculator.cs`
 
-- [ ] **步骤 1：添加失败的 CoordinateTransform EditMode 测试**
+- [x] **步骤 1：添加失败的 CoordinateTransform EditMode 测试**
 
 在 `CoordinateTransformTests.cs` 中从 fixture 读取矩阵，添加：
 
@@ -481,17 +485,17 @@ public void ComposeUnityWorldFromScan_usesCurrentCameraPose()
 
 添加非法矩阵、非刚体最后一行、NaN、错误乘法顺序和 image orientation 不匹配的失败用例。
 
-- [ ] **步骤 2：运行 EditMode 测试并确认失败**
+- [x] **步骤 2：运行 EditMode 测试并确认失败**
 
 在 Unity Test Runner 运行 `AreaTargetPlugin.Tests/CoordinateTransformTests`。
 
 预期结果：编译或测试失败，因为 `LocalizationFrame` 和 `CoordinateTransform` 尚不存在。
 
-- [ ] **步骤 3：实现不可变帧与结果类型**
+- [x] **步骤 3：实现不可变帧与结果类型**
 
 `LocalizationFrame` 构造函数必须复制图像，验证尺寸、内参、时间戳、map ID 和 `UnityWorldFromCamera`。`LocalizationFrameResult` 必须保存输入 frame ID、map generation、worker 时间、`CameraFromScan`、`UnityWorldFromScan`、状态、quality、failure category 和 native debug 指标。失败结果的位姿必须为空/显式无效，不能使用 identity 冒充有效结果。
 
-- [ ] **步骤 4：实现唯一的坐标转换器**
+- [x] **步骤 4：实现唯一的坐标转换器**
 
 `CoordinateTransform` 至少提供：
 
@@ -507,19 +511,19 @@ public static Matrix4x4 FromNativeRowMajor(float[] values);
 
 `ComposeUnityWorldFromScan` 必须验证两个输入均为有限刚体矩阵，然后返回 `unityWorldFromCamera * cameraFromScan`。所有 alignment 计算使用命名的帧对 `(T_U_C, T_C_S)`，不接受仅有 raw PnP pose 的 `List<Matrix4x4>`。
 
-- [ ] **步骤 5：将当前 AR pose 传到 tracker/native**
+- [x] **步骤 5：将当前 AR pose 传到 tracker/native**
 
 扩展 `ICameraData`、`CameraDataAdapter`、`CameraFrame` 和 `ARFoundationPlatformSupport`，使当前 AR 相机位置、旋转和 frame timestamp 可组成 `T_U_C`。修改 `VisualLocalizationEngine.ProcessFrame` 接受 `LocalizationFrame`，把其 `UnityWorldFromCamera` 以 row-major 传给 native。
 
 移除 `LastValidPose` 被当作 native AR camera pose 参数的路径；若为 nearby search 保留上次地图结果，使用独立、语义明确的缓存字段，不能复用 `T_U_C` 参数。
 
-- [ ] **步骤 6：把内容根位姿和 alignment 收敛到 Runtime**
+- [x] **步骤 6：把内容根位姿和 alignment 收敛到 Runtime**
 
 修改 `AreaTargetTracker`：成功 native PnP 后立即通过 `CoordinateTransform` 生成 `T_U_S`；`SceneUpdater` 仅接收该变换。改造 `AlignmentTransformCalculator` 的方法签名，使输入为成功 frame pair，并在测试中验证至少三个样本的鲁棒计算不会把 `T_C_S` 当成 `T_U_S`。
 
 `ARTestSceneManager` 与 `SLAMTestSceneManager` 删除/停用各自的手写 matrix composition；它们调用 tracker 的公开结果，不访问 native bridge。
 
-- [ ] **步骤 7：运行 Unity 回归测试**
+- [x] **步骤 7：运行 Unity 回归测试**
 
 在 Unity Test Runner 运行：
 
@@ -532,7 +536,7 @@ AreaTargetPlugin.Tests/SLAMTestSceneIntegrationTests
 
 预期结果：所有测试通过；新增测试证明 `T_U_S = T_U_C × T_C_S` 且场景不再自行组合矩阵。
 
-- [ ] **步骤 8：提交任务 4**
+- [x] **步骤 8：提交任务 4**
 
 ```bash
 git add \

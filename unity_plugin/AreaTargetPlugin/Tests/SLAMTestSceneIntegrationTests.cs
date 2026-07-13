@@ -90,7 +90,7 @@ namespace AreaTargetPlugin.Tests
         {
             var method = typeof(SLAMTestSceneManager).GetMethod("HandleTrackingResult",
                 BindingFlags.NonPublic | BindingFlags.Instance);
-            method.Invoke(manager, new object[] { result, Matrix4x4.identity });
+            method.Invoke(manager, new object[] { result });
         }
 
         private void InvokeOnDestroy(SLAMTestSceneManager manager)
@@ -271,6 +271,40 @@ namespace AreaTargetPlugin.Tests
         #endregion
 
         #region Scene Lifecycle Resource Cleanup (Requirements 7.1, 7.2, 8.2)
+
+        [Test]
+        public void TrackingResult_FinalUnityWorldFromScan_IsAppliedWithoutSceneComposition()
+        {
+            var manager = CreateWiredManager();
+            SetPrivateField(manager, "_previousState", TrackingState.INITIALIZING);
+
+            Matrix4x4 unityWorldFromScan = Matrix4x4.TRS(
+                new Vector3(2.5f, -1.25f, 4.75f),
+                Quaternion.Euler(5f, 35f, -15f),
+                Vector3.one);
+
+            InvokeHandleTrackingResult(manager, new TrackingResult
+            {
+                State = TrackingState.TRACKING,
+                Pose = unityWorldFromScan,
+                Confidence = 0.9f,
+                MatchedFeatures = 100
+            });
+
+            var originCube = GetPrivateField<GameObject>(manager, "_originCube");
+            if (originCube != null && !_createdObjects.Contains(originCube))
+                _createdObjects.Add(originCube);
+
+            Assert.IsNotNull(originCube);
+            Assert.Less(
+                Vector3.Distance(originCube.transform.position, new Vector3(2.5f, -1.25f, 4.75f)),
+                0.0001f,
+                "The scene must apply the tracker-provided T_U_S directly.");
+            Assert.Less(
+                Quaternion.Angle(originCube.transform.rotation, unityWorldFromScan.rotation),
+                0.01f,
+                "The scene must preserve the tracker-provided T_U_S rotation.");
+        }
 
         /// <summary>
         /// Lifecycle: Simulates Start → Tracking → OnDestroy.

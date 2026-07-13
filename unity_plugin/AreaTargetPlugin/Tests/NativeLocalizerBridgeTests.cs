@@ -146,7 +146,16 @@ namespace AreaTargetPlugin.Tests
                 Quaternion.identity,
                 Vector3.one
             );
-            var frame = new LocalizationFrame(unityWorldFromCamera);
+            var frame = new LocalizationFrame(
+                frameId: 0,
+                captureTimestampNs: 0,
+                grayscaleImage: new byte[4],
+                width: 2,
+                height: 2,
+                intrinsics: new Vector4(1f, 1f, 0.5f, 0.5f),
+                orientation: ImageOrientation.LandscapeRight,
+                unityWorldFromCamera: unityWorldFromCamera,
+                mapId: "native-bridge-test");
 
             float[] values = VisualLocalizationEngine.PrepareUnityWorldFromCameraForNative(frame);
 

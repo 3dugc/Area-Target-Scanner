@@ -10,7 +10,11 @@ namespace AreaTargetPlugin
         /// <summary>Current tracking state (INITIALIZING, TRACKING, or LOST).</summary>
         public TrackingState State;
 
-        /// <summary>Pose matrix relative to the area target coordinate system.</summary>
+        /// <summary>
+        /// Final content-root pose T_U_S from scan coordinates S into Unity world U.
+        /// Failed results retain identity only for this legacy non-nullable wrapper;
+        /// LocalizationFrameResult uses null poses for failures.
+        /// </summary>
         public Matrix4x4 Pose;
 
         /// <summary>Tracking confidence in range [0.0, 1.0].</summary>

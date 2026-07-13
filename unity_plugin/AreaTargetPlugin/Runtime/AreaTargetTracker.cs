@@ -42,8 +42,8 @@ namespace AreaTargetPlugin
         public int FullResetThreshold { get; set; } = 8;
 
         // --- 内部状态 ---
-        private List<Matrix4x4> _rawPoseBuffer = new List<Matrix4x4>();
-        private List<Matrix4x4> _slidingWindow = new List<Matrix4x4>();
+        private List<LocalizationFramePair> _rawPoseBuffer = new List<LocalizationFramePair>();
+        private List<LocalizationFramePair> _slidingWindow = new List<LocalizationFramePair>();
         private int _consecutiveLostFrames;
         private int _framesSinceLastATRefresh;
         private Matrix4x4? _currentAT;
@@ -51,6 +51,16 @@ namespace AreaTargetPlugin
         public AreaTargetTracker()
         {
             _loader = new AssetBundleLoader();
+        }
+
+        /// <summary>Identifier attached to Runtime frames for the currently loaded map.</summary>
+        public string MapId
+        {
+            get
+            {
+                string mapName = _loader?.Manifest?.name;
+                return string.IsNullOrWhiteSpace(mapName) ? "unnamed-map" : mapName;
+            }
         }
 
         /// <inheritdoc/>
@@ -110,19 +120,31 @@ namespace AreaTargetPlugin
         public TrackingResult ProcessFrame(CameraFrame cameraFrame)
         {
             if (!_initialized || _disposed)
+                return CreateLostTrackingResult();
+
+            if (string.IsNullOrWhiteSpace(cameraFrame.MapId))
+                cameraFrame.MapId = MapId;
+            if (!cameraFrame.TryCreateLocalizationFrame(
+                    out LocalizationFrame localizationFrame,
+                    out _))
             {
-                return new TrackingResult
-                {
-                    State = TrackingState.LOST,
-                    Pose = Matrix4x4.identity,
-                    Confidence = 0f,
-                    MatchedFeatures = 0,
-                    Quality = LocalizationQuality.NONE
-                };
+                return CreateLostTrackingResult();
             }
 
-            // Step 1: 调用 native 定位引擎
-            TrackingResult locResult = _localizationEngine.ProcessFrame(cameraFrame);
+            return ProcessFrame(localizationFrame);
+        }
+
+        /// <summary>
+        /// Processes one immutable Runtime frame. Native PnP output is T_C_S; this
+        /// tracker returns only T_U_S to downstream scene code.
+        /// </summary>
+        public TrackingResult ProcessFrame(LocalizationFrame localizationFrame)
+        {
+            if (!_initialized || _disposed)
+                return CreateLostTrackingResult();
+
+            LocalizationFrameResult frameResult = _localizationEngine.ProcessFrame(localizationFrame);
+            TrackingResult locResult = ToTrackingResult(frameResult);
 
             // Step 2: 获取 debug 信息进行一致性检查 (Req 6.1, 6.2)
             VLDebugInfo debugInfo = _localizationEngine.GetDebugInfo();
@@ -135,25 +157,28 @@ namespace AreaTargetPlugin
                 return new TrackingResult
                 {
                     State = TrackingState.LOST,
-                    Pose = locResult.Pose,
+                    Pose = Matrix4x4.identity,
                     Confidence = 0f,
-                    MatchedFeatures = locResult.MatchedFeatures,
+                    MatchedFeatures = 0,
                     Quality = LocalizationQuality.NONE
                 };
             }
 
             // Step 4: 定位成功
-            if (locResult.State == TrackingState.TRACKING)
+            if (frameResult.IsSuccess)
             {
                 _consecutiveLostFrames = 0;
+                var framePair = new LocalizationFramePair(
+                    localizationFrame.UnityWorldFromCamera,
+                    frameResult.CameraFromScan.Value);
 
                 if (_localizationEngine.CurrentMode == LocalizationMode.Raw)
                 {
-                    return ProcessRawModeSuccess(locResult);
+                    return ProcessRawModeSuccess(locResult, framePair);
                 }
                 else // Aligned mode
                 {
-                    return ProcessAlignedModeSuccess(locResult);
+                    return ProcessAlignedModeSuccess(locResult, framePair);
                 }
             }
 
@@ -170,7 +195,7 @@ namespace AreaTargetPlugin
             return new TrackingResult
             {
                 State = TrackingState.LOST,
-                Pose = locResult.Pose,
+                Pose = Matrix4x4.identity,
                 Confidence = locResult.Confidence,
                 MatchedFeatures = locResult.MatchedFeatures,
                 Quality = LocalizationQuality.NONE
@@ -180,10 +205,12 @@ namespace AreaTargetPlugin
         /// <summary>
         /// Raw 模式定位成功：位姿缓冲 → AT 触发 (Req 5.1, 5.2, 5.3, 5.5)
         /// </summary>
-        private TrackingResult ProcessRawModeSuccess(TrackingResult locResult)
+        private TrackingResult ProcessRawModeSuccess(
+            TrackingResult locResult,
+            LocalizationFramePair framePair)
         {
-            // 添加位姿到 Raw 缓冲区
-            _rawPoseBuffer.Add(locResult.Pose);
+            // 添加完整成功帧对，而不是裸 T_C_S 位姿。
+            _rawPoseBuffer.Add(framePair);
 
             // 检查是否达到 AT 计算阈值
             if (_rawPoseBuffer.Count >= AlignmentFrameThreshold)
@@ -216,10 +243,12 @@ namespace AreaTargetPlugin
         /// <summary>
         /// Aligned 模式定位成功：滑动窗口 + AT 持续优化 (Req 5.6, 5.7, 5.9)
         /// </summary>
-        private TrackingResult ProcessAlignedModeSuccess(TrackingResult locResult)
+        private TrackingResult ProcessAlignedModeSuccess(
+            TrackingResult locResult,
+            LocalizationFramePair framePair)
         {
-            // 添加位姿到滑动窗口
-            _slidingWindow.Add(locResult.Pose);
+            // 添加完整成功帧对，而不是裸 T_C_S 位姿。
+            _slidingWindow.Add(framePair);
             // 超出窗口大小时移除最旧帧
             while (_slidingWindow.Count > SlidingWindowSize)
             {
@@ -328,6 +357,30 @@ namespace AreaTargetPlugin
                     Quality = LocalizationQuality.NONE
                 };
             }
+        }
+
+        private static TrackingResult CreateLostTrackingResult()
+        {
+            return new TrackingResult
+            {
+                State = TrackingState.LOST,
+                Pose = Matrix4x4.identity,
+                Confidence = 0f,
+                MatchedFeatures = 0,
+                Quality = LocalizationQuality.NONE
+            };
+        }
+
+        private static TrackingResult ToTrackingResult(LocalizationFrameResult frameResult)
+        {
+            return new TrackingResult
+            {
+                State = frameResult.State,
+                Pose = frameResult.UnityWorldFromScan ?? Matrix4x4.identity,
+                Confidence = frameResult.Confidence,
+                MatchedFeatures = frameResult.MatchedFeatures,
+                Quality = frameResult.Quality
+            };
         }
 
         /// <summary>

@@ -17,12 +17,6 @@ namespace AreaTargetPlugin
 
         internal LocalizationMode CurrentMode { get; set; } = LocalizationMode.Raw;
 
-        /// <summary>
-        /// Last successful native T_C_S result. It is retained for tracker output only
-        /// and is never used as the current T_U_C native input.
-        /// </summary>
-        public Matrix4x4? LastValidPose { get; private set; }
-
         public bool Initialize(FeatureDatabaseReader featureDb)
         {
             if (featureDb == null || featureDb.KeyframeCount == 0)
@@ -77,60 +71,94 @@ namespace AreaTargetPlugin
                 }
             }
 
-            LastValidPose = null;
             return NativeLocalizerBridge.vl_build_index(_nativeHandle) == 1;
         }
 
+        /// <summary>
+        /// Compatibility adapter for legacy CameraFrame callers. New Runtime code must
+        /// submit LocalizationFrame so the current T_U_C is explicit and immutable.
+        /// </summary>
         public TrackingResult ProcessFrame(CameraFrame frame)
         {
-            LocalizationFrame? localizationFrame = frame.UnityWorldFromCamera.HasValue
-                ? new LocalizationFrame(frame.UnityWorldFromCamera.Value)
-                : null;
-            float[] unityWorldFromCamera = localizationFrame.HasValue
-                ? PrepareUnityWorldFromCameraForNative(localizationFrame.Value)
-                : null;
+            if (!frame.TryCreateLocalizationFrame(out LocalizationFrame localizationFrame, out _))
+                return CreateLostTrackingResult();
+
+            return ToTrackingResult(ProcessFrame(localizationFrame));
+        }
+
+        /// <summary>
+        /// Runs native PnP for one immutable frame. Native output is always named
+        /// T_C_S; T_U_S is created only through CoordinateTransform.
+        /// </summary>
+        public LocalizationFrameResult ProcessFrame(
+            LocalizationFrame frame,
+            int mapGeneration = 0)
+        {
+            long workerStartedTimestampNs = GetMonotonicTimestampNs();
+            float[] unityWorldFromCamera = PrepareUnityWorldFromCameraForNative(frame);
 
             // Use ProcessFrameSafe to avoid struct-return ABI issues on iOS ARM64
             VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
-                _nativeHandle, frame.ImageData, frame.Width, frame.Height,
-                frame.Intrinsics.m00, frame.Intrinsics.m11,
-                frame.Intrinsics.m02, frame.Intrinsics.m12,
-                localizationFrame.HasValue ? 1 : 0, unityWorldFromCamera);
+                _nativeHandle, frame.GrayscaleImage, frame.Width, frame.Height,
+                frame.Intrinsics.x, frame.Intrinsics.y,
+                frame.Intrinsics.z, frame.Intrinsics.w,
+                1, unityWorldFromCamera);
+            long workerCompletedTimestampNs = GetMonotonicTimestampNs();
+            VLDebugInfo nativeDebugInfo = GetDebugInfo();
 
-            var tracking = new TrackingResult
+            if ((TrackingState)result.state != TrackingState.TRACKING)
             {
-                State = (TrackingState)result.state,
-                Pose = ArrayToMatrix4x4(result.pose),
-                Confidence = result.confidence,
-                MatchedFeatures = result.matched_features
-            };
+                return LocalizationFrameResult.Failed(
+                    frame,
+                    mapGeneration,
+                    workerStartedTimestampNs,
+                    workerCompletedTimestampNs,
+                    LocalizationFailureCategory.NativeLocalizationFailed,
+                    nativeDebugInfo);
+            }
 
-            // 根据 CurrentMode 和定位成功状态设置 Quality
-            if (tracking.State == TrackingState.TRACKING)
+            try
             {
-                tracking.Quality = CurrentMode == LocalizationMode.Aligned
+                Matrix4x4 cameraFromScan = CoordinateTransform.FromNativeRowMajor(result.pose);
+                LocalizationQuality quality = CurrentMode == LocalizationMode.Aligned
                     ? LocalizationQuality.LOCALIZED
                     : LocalizationQuality.RECOGNIZED;
-                LastValidPose = tracking.Pose;
+                return LocalizationFrameResult.Succeeded(
+                    frame,
+                    mapGeneration,
+                    workerStartedTimestampNs,
+                    workerCompletedTimestampNs,
+                    cameraFromScan,
+                    quality,
+                    result.confidence,
+                    result.matched_features,
+                    nativeDebugInfo);
             }
-            // 失败时 Quality 保持默认 NONE
-
-            return tracking;
+            catch (ArgumentException)
+            {
+                return LocalizationFrameResult.Failed(
+                    frame,
+                    mapGeneration,
+                    workerStartedTimestampNs,
+                    workerCompletedTimestampNs,
+                    LocalizationFailureCategory.InvalidNativePose,
+                    nativeDebugInfo);
+            }
         }
 
-        public void SetAlignmentTransform(Matrix4x4 at)
+        /// <summary>
+        /// Marks Runtime alignment as established. Native PnP continues to return its
+        /// canonical T_C_S pose; Runtime owns all T_U_S application.
+        /// </summary>
+        public void SetAlignmentTransform(Matrix4x4 unityWorldFromScanAlignment)
         {
-            float[] atArray = Matrix4x4ToArray(at);
-            // The native ABI still accepts this legacy setting, but must keep
-            // VLResult.pose canonical T_C_S. Task 4 moves T_U_S application
-            // to the Runtime coordinate-transform boundary.
-            NativeLocalizerBridge.vl_set_alignment_transform(_nativeHandle, atArray);
+            CoordinateTransform.ValidateFiniteRigidTransform(
+                unityWorldFromScanAlignment, nameof(unityWorldFromScanAlignment));
             CurrentMode = LocalizationMode.Aligned;
         }
 
         public void ResetState()
         {
-            LastValidPose = null;
             CurrentMode = LocalizationMode.Raw;
             if (_nativeHandle != IntPtr.Zero)
                 NativeLocalizerBridge.vl_reset(_nativeHandle);
@@ -258,23 +286,16 @@ namespace AreaTargetPlugin
         /// </summary>
         internal static float[] Matrix4x4ToArray(Matrix4x4 m)
         {
-            return new float[]
-            {
-                m.m00, m.m01, m.m02, m.m03,
-                m.m10, m.m11, m.m12, m.m13,
-                m.m20, m.m21, m.m22, m.m23,
-                m.m30, m.m31, m.m32, m.m33
-            };
+            return CoordinateTransform.ToNativeRowMajor(m);
         }
 
         /// <summary>
-        /// Serializes the current T_U_C pose for the native bridge as row-major float[16].
-        /// This intentionally does not use LastValidPose, which is a native T_C_S result.
+        /// Serializes current T_U_C for the native bridge as row-major float[16].
         /// </summary>
         internal static float[] PrepareUnityWorldFromCameraForNative(
             LocalizationFrame frame)
         {
-            return Matrix4x4ToArray(frame.UnityWorldFromCamera);
+            return CoordinateTransform.ToNativeRowMajor(frame.UnityWorldFromCamera);
         }
 
         /// <summary>
@@ -282,15 +303,50 @@ namespace AreaTargetPlugin
         /// </summary>
         internal static Matrix4x4 ArrayToMatrix4x4(float[] arr)
         {
-            var m = new Matrix4x4();
             if (arr == null || arr.Length < 16)
                 return Matrix4x4.identity;
 
-            m.m00 = arr[0];  m.m01 = arr[1];  m.m02 = arr[2];  m.m03 = arr[3];
-            m.m10 = arr[4];  m.m11 = arr[5];  m.m12 = arr[6];  m.m13 = arr[7];
-            m.m20 = arr[8];  m.m21 = arr[9];  m.m22 = arr[10]; m.m23 = arr[11];
-            m.m30 = arr[12]; m.m31 = arr[13]; m.m32 = arr[14]; m.m33 = arr[15];
-            return m;
+            try
+            {
+                return CoordinateTransform.FromNativeRowMajor(arr);
+            }
+            catch (ArgumentException)
+            {
+                return Matrix4x4.identity;
+            }
+        }
+
+        private static TrackingResult CreateLostTrackingResult()
+        {
+            return new TrackingResult
+            {
+                State = TrackingState.LOST,
+                Pose = Matrix4x4.identity,
+                Confidence = 0f,
+                MatchedFeatures = 0,
+                Quality = LocalizationQuality.NONE
+            };
+        }
+
+        private static TrackingResult ToTrackingResult(LocalizationFrameResult result)
+        {
+            return new TrackingResult
+            {
+                State = result.State,
+                Pose = result.UnityWorldFromScan ?? Matrix4x4.identity,
+                Confidence = result.Confidence,
+                MatchedFeatures = result.MatchedFeatures,
+                Quality = result.Quality
+            };
+        }
+
+        private static long GetMonotonicTimestampNs()
+        {
+            long ticks = System.Diagnostics.Stopwatch.GetTimestamp();
+            long frequency = System.Diagnostics.Stopwatch.Frequency;
+            long seconds = ticks / frequency;
+            long remainder = ticks % frequency;
+            return seconds * 1000000000L + remainder * 1000000000L / frequency;
         }
 
         #endregion
