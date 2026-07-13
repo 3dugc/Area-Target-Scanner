@@ -11,6 +11,26 @@ import pytest
 from processing_pipeline.optimized_pipeline import OptimizedPipeline
 
 
+def _affine_pose(translation=(0.0, 0.0, 0.0)):
+    """Return a non-trivial rigid pose with the required homogeneous row."""
+    pose = np.array(
+        [
+            [0.0, -1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    pose[:3, 3] = translation
+    return pose
+
+
+def _arkit_column_major(pose):
+    """Serialize a homogeneous pose in the ARKit column-major layout."""
+    return pose.reshape(-1, order="F").tolist()
+
+
 def _make_scan_dir(
     tmp_path,
     *,
@@ -38,7 +58,7 @@ def _make_scan_dir(
             frames = [
                 {
                     "imageFile": "images/frame_0000.jpg",
-                    "transform": list(range(16)),
+                    "transform": _arkit_column_major(_affine_pose()),
                 }
             ]
         poses = {"frames": frames}
@@ -66,7 +86,8 @@ class TestValidateInputSuccess:
         assert result.mtl_path == os.path.join(scan_dir, "model.mtl")
 
     def test_parses_transform_column_major(self, tmp_path):
-        data = list(range(16))
+        expected = _affine_pose((2.5, -3.0, 4.25))
+        data = _arkit_column_major(expected)
         scan_dir = _make_scan_dir(
             tmp_path,
             frames=[{"imageFile": "images/f.jpg", "transform": data}],
@@ -74,7 +95,6 @@ class TestValidateInputSuccess:
         pipeline = OptimizedPipeline()
         result = pipeline.validate_input(scan_dir)
 
-        expected = np.array(data, dtype=np.float64).reshape(4, 4, order="F")
         np.testing.assert_array_equal(result.images[0]["pose"], expected)
 
     def test_intrinsics_none_when_absent(self, tmp_path):
@@ -94,7 +114,12 @@ class TestValidateInputSuccess:
 
     def test_multiple_frames(self, tmp_path):
         frames = [
-            {"imageFile": f"images/frame_{i:04d}.jpg", "transform": list(range(16))}
+            {
+                "imageFile": f"images/frame_{i:04d}.jpg",
+                "transform": _arkit_column_major(
+                    _affine_pose((float(i), float(i + 1), float(-i)))
+                ),
+            }
             for i in range(3)
         ]
         scan_dir = _make_scan_dir(tmp_path, frames=frames)
