@@ -22,6 +22,10 @@ tools/phase1/validate_ios_upm_build.sh
 
 `device` fails rather than passing if either device class is absent. Signed deployment and localization smoke are connected in task 9 through `PHASE1_DEVICE_SMOKE_COMMAND`; do not treat a generic-device build as a real-device acceptance result.
 
+## First iOS ARKit export from the UPM package
+
+After installing `com.areatarget.tracking`, run **Area Target → Configure iOS ARKit** once and let that Unity invocation exit. Start a fresh Unity invocation for the iOS export. The bootstrap assigns the official `ARKitLoader` through XR Plug-in Management and enables the corresponding compile define; it is intentionally a two-process operation so the native `UnityARKit` provider is included. Do not work around a missing provider by manually copying Unity's internal static library.
+
 ## Prerequisites
 
 - macOS + Xcode installed

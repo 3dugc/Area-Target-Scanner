@@ -66,6 +66,19 @@
 }
 ```
 
+### iOS ARKit 配置（首次导出前必做一次）
+
+该包会直接解析官方 `com.unity.xr.arkit` 依赖。安装包后，在 Unity 菜单运行 **Area Target → Configure iOS ARKit**，等待 Unity 保存设置并完全退出该进程；随后重新打开 Unity，再执行 `BuildiOS.Build` 或 `BuildiOS.BuildDevelopment`。这两个构建入口会在 Loader 或编译符号缺失时明确失败，避免导出缺少 `UnityARKit` 原生 provider 的应用。
+
+命令行构建等价于先单独运行：
+
+```bash
+Unity -batchmode -projectPath /absolute/path/to/project \
+  -executeMethod AreaTargetPlugin.Editor.AreaTargetIosXrBootstrap.Configure -quit
+```
+
+再使用新的 Unity 进程执行 iOS 构建。不得手工复制 Unity 的 `libUnityARKit.a`；Provider 由官方 XR Plug-in Management loader 配置纳入导出。
+
 ## 快速开始
 
 ### 1. 准备资产包

@@ -71,6 +71,30 @@ namespace AreaTargetPlugin.Tests
         }
 
         [Test]
+        public void BuildiOS_ProductionAndDevelopmentBuilds_RequireARKit()
+        {
+            int configuredBuildCount = System.Text.RegularExpressions.Regex.Matches(
+                _buildiOSSource,
+                @"RequireARKitSupport\(\);").Count;
+
+            Assert.That(configuredBuildCount, Is.GreaterThanOrEqualTo(2),
+                "Both iOS build entry points must require ARKit so a clean UPM project includes the native ARKit provider.");
+            Assert.That(_buildiOSSource, Does.Contain("\"requiresARKitSupport\""),
+                "Unity 6.4 must set the ARKit requirement through its runtime PlayerSettings property.");
+            Assert.That(_buildiOSSource, Does.Contain("BindingFlags.NonPublic"),
+                "Unity 6.4 exposes the ARKit requirement as a non-public PlayerSettings member.");
+        }
+
+        [Test]
+        public void BuildiOS_RequiresOfficialArKitLoaderConfigurationBeforeExport()
+        {
+            Assert.That(
+                _buildiOSSource,
+                Does.Contain("AreaTargetIosXrBootstrap.EnsureConfiguredForBuild();"),
+                "iOS export must fail before producing an app when the official ARKit loader configuration has not been prepared in a prior Unity domain.");
+        }
+
+        [Test]
         public void BuildiOS_DevelopmentBuild_UsesOnlyExistingMinimalScenes()
         {
             Assert.That(_buildiOSSource, Does.Contain("GetDevelopmentScenes"));

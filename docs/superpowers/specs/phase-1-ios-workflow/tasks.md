@@ -791,6 +791,8 @@ git commit -m "feat: add bounded iOS localization diagnostics"
 **可运行产物：** 空 Unity 工程只安装 `com.areatarget.tracking-1.3.0.tgz` 就能导出并通过 generic iOS device Xcode 编译，不依赖 `unity_project/Assets/Editor` 或临时 manifest 注入。
 
 > **进度（2026-07-13）：** 步骤 1–7 已完成。新增 Python UPM 内容与依赖断言后，生成 `1.2.1` 包的测试如预期失败：缺 `package/Editor/iOSPostProcess.cs`，且 `validate_unity_package.sh` 仍向临时 manifest 注入 SQLite Git URL。随后将后处理迁入 UPM，生成包内置 iOS 静态库和 OpenCV framework，根工程的重复后处理已删除。SQLite 改为包自身固定的 `1.3.2` SemVer 依赖；验证工程只添加 OpenUPM 的 `com.gilzoide` scoped registry，不注入 SQLite dependency。最新 UPM 内容/repro 测试为 `3 passed`；Phase 0 验证的 Unity EditMode 为 `989/989` 且干净 UPM 安装成功；新的最小工程导出后 generic iOS Xcode Debug 构建报告 `BUILD SUCCEEDED`。验证工程只复制 `BuildiOS`、最小场景和场景管理脚本，未复制根工程的 `iOSPostProcess.cs`。
+>
+> **ARKit provider 修复完成（2026-07-13）：** 真机验收曾发现 generic-device 成功不足以证明 AR Foundation provider 可运行：干净工程未在脚本编译前注册 iOS `ARKitLoader`，导致 Unity 导出遗漏 `UnityARKit`。最小修复已将 `com.unity.xr.arkit` 声明为 UPM 依赖，使用 XR Plug-in Management 的官方 loader 注册入口，并把验证改为“配置并退出 Unity → 新进程导出”的两阶段；没有采用手工复制 Unity 内部静态库。新干净 UPM 工程的 export log 复制了官方 `libUnityARKit.a`，Xcode generic-device 编译通过。随后 iPhone 运行时日志确认 `UnityARKit` 已成功注册 input/meshing provider，并成功使用 ARWorldTracking 配置启动 AR session。
 
 **涉及文件：**
 
@@ -1009,7 +1011,7 @@ git commit -m "test: add phase 1 iOS release gates"
 
 **可运行产物：** 同一张真实地图可由 iPhone 和 iPad 分别扫描/处理、在 Unity iOS 应用加载并定位，且各自导出隐私安全的诊断证据。
 
-> **进度（2026-07-13）：** 步骤 1–2 已完成。已通过在线 LiDAR iPhone 导出一份匿名场地扫描；scan manifest 合同检查通过（31 帧，均为 `landscapeRight`）。受控本地 Docker/Python 处理已生成 `optimized.glb`、`features.db` 和 map manifest；地图水平 AABB 面积约为 77.8 m²，manifest SHA-256 为 `68a5d9174a84abcaa1043911beffe08f72b19d9fe579cc9094138f91af730057`。处理期间发现并修复 ARKit `simd_float4x4` 的 float32 仿射尾值容差问题，相关 55 项 Python 回归已通过。空 UPM 工程的 Development iOS 导出和 generic-device Xcode 链接均已通过；独立真机验收工程已导出并使用同一 map manifest。为满足步骤 3 的诊断证据要求，实际部署的 `SLAMTestSceneManager` 已新增在应用进入后台或销毁时调用现有隐私安全 JSONL 导出器的最小入口，并通过 Unity 编辑器测试；不显示或记录导出绝对路径。当前步骤 3 等待在 Xcode 登录开发团队，以完成签名、安装与运行时验证；iPad 尚未连接，因此步骤 4–6 未执行。未将扫描 ZIP、图像、地图制品、绝对路径或设备 UDID 写入 Git。
+> **进度（2026-07-13）：** 步骤 1–2 已完成。已通过在线 LiDAR iPhone 导出一份匿名场地扫描；scan manifest 合同检查通过（31 帧，均为 `landscapeRight`）。受控本地 Docker/Python 处理已生成 `optimized.glb`、`features.db` 和 map manifest；地图水平 AABB 面积约为 77.8 m²，manifest SHA-256 为 `68a5d9174a84abcaa1043911beffe08f72b19d9fe579cc9094138f91af730057`。处理期间发现并修复 ARKit `simd_float4x4` 的 float32 仿射尾值容差问题，相关 55 项 Python 回归已通过。空 UPM 工程的 Development iOS 导出和 generic-device Xcode 链接均已通过；独立真机验收工程已导出、签名、安装并使用同一 map manifest。为满足步骤 3 的诊断证据要求，实际部署的 `SLAMTestSceneManager` 已新增在应用进入后台或销毁时调用现有隐私安全 JSONL 导出器的最小入口，并通过 Unity 编辑器测试；不显示或记录导出绝对路径。iPhone 运行时已确认 `UnityARKit` provider 注册、ARWorldTracking 会话启动和地图资产加载。SQLite/native 初始化成功、至少一次定位成功和诊断导出仍未得到完整现场证据，因此步骤 3 保持未完成。iPad 尚未连接，因此步骤 4–6 未执行。未将扫描 ZIP、图像、地图制品、绝对路径或设备 UDID 写入 Git。
 
 **涉及文件：**
 

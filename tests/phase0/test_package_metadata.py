@@ -39,3 +39,15 @@ def test_required_dependencies_are_enforced(tmp_path):
     result = run_checker(path)
     assert result.returncode != 0
     assert "com.gilzoide.sqlite-net" in result.stderr
+
+
+def test_arkit_dependency_is_required_for_ios_runtime_provider(tmp_path):
+    data = json.loads(PACKAGE_JSON.read_text())
+    data["dependencies"].pop("com.unity.xr.arkit", None)
+    path = tmp_path / "package.json"
+    path.write_text(json.dumps(data))
+
+    result = run_checker(path)
+
+    assert result.returncode != 0
+    assert "com.unity.xr.arkit" in result.stderr

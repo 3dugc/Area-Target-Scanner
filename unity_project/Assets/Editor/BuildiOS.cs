@@ -1,9 +1,12 @@
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using AreaTargetPlugin.Editor;
 
 /// <summary>
 /// iOS 构建脚本：支持命令行和菜单栏触发构建。
@@ -32,6 +35,8 @@ public class BuildiOS
         // 确保 iOS 平台设置
         PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPhoneAndiPad;
         PlayerSettings.iOS.targetOSVersionString = "16.0";
+        AreaTargetIosXrBootstrap.EnsureConfiguredForBuild();
+        RequireARKitSupport();
         PlayerSettings.iOS.cameraUsageDescription = "Required for AR area target tracking";
         PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.iOS, "com.areatarget.test");
 
@@ -79,6 +84,8 @@ public class BuildiOS
 
         PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPhoneAndiPad;
         PlayerSettings.iOS.targetOSVersionString = "16.0";
+        AreaTargetIosXrBootstrap.EnsureConfiguredForBuild();
+        RequireARKitSupport();
         PlayerSettings.iOS.cameraUsageDescription = "Required for AR area target tracking";
 
         BuildReport report = BuildPipeline.BuildPlayer(options);
@@ -97,6 +104,20 @@ public class BuildiOS
         }
         .Where(File.Exists)
         .ToArray();
+    }
+
+    private static void RequireARKitSupport()
+    {
+        PropertyInfo property = typeof(PlayerSettings.iOS).GetProperty(
+            "requiresARKitSupport",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+        if (property == null || property.PropertyType != typeof(bool) || !property.CanWrite)
+        {
+            throw new BuildFailedException(
+                "This Unity editor does not expose the iOS ARKit support build setting.");
+        }
+
+        property.SetValue(null, true);
     }
 
     /// <summary>

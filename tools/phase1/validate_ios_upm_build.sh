@@ -58,12 +58,28 @@ if rg -n "error CS|Scripts have compiler errors|Failed to resolve packages" "$RE
   exit 4
 fi
 
+"$UNITY_PATH" -batchmode -nographics -projectPath "$PROJECT" \
+  -executeMethod AreaTargetPlugin.Editor.AreaTargetIosXrBootstrap.Configure -quit \
+  -logFile "$RESULTS/upm-ios-configure-arkit.log"
+
+if rg -n "error CS|Scripts have compiler errors|BuildFailedException|could not assign" \
+  "$RESULTS/upm-ios-configure-arkit.log"; then
+  echo "Unity ARKit configuration failed; see $RESULTS/upm-ios-configure-arkit.log" >&2
+  exit 5
+fi
+
 "$UNITY_PATH" -batchmode -nographics -projectPath "$PROJECT" -buildTarget iOS \
   -executeMethod BuildiOS.BuildDevelopment -quit \
   -logFile "$RESULTS/upm-ios-export.log"
 
 XCODE_PROJECT="$PROJECT/Builds/iOS_Dev/Unity-iPhone.xcodeproj"
-[[ -d "$XCODE_PROJECT" ]] || { echo "Unity iOS export missing: $XCODE_PROJECT" >&2; exit 5; }
+[[ -d "$XCODE_PROJECT" ]] || { echo "Unity iOS export missing: $XCODE_PROJECT" >&2; exit 6; }
+
+ARKIT_LIBRARY="libUnityARKit.a"
+if ! rg -F -q "$ARKIT_LIBRARY" "$XCODE_PROJECT/project.pbxproj"; then
+  echo "Unity iOS export omitted the ARKit runtime provider; see $XCODE_PROJECT/project.pbxproj" >&2
+  exit 7
+fi
 
 XCODE_LOG="$RESULTS/upm-ios-xcodebuild.log"
 if ! xcodebuild \
@@ -74,12 +90,12 @@ if ! xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build >"$XCODE_LOG" 2>&1; then
   echo "generic iOS Xcode build failed; see $XCODE_LOG" >&2
-  exit 6
+  exit 8
 fi
 
 if ! rg -q "BUILD SUCCEEDED" "$XCODE_LOG"; then
   echo "generic iOS Xcode build did not report BUILD SUCCEEDED; see $XCODE_LOG" >&2
-  exit 7
+  exit 9
 fi
 
 echo "PASS clean UPM install, Unity iOS export, and generic iOS Xcode build"

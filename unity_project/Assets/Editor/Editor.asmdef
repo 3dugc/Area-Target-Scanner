@@ -3,6 +3,7 @@
   "rootNamespace": "",
   "references": [
     "AreaTargetPlugin.Runtime",
+    "AreaTargetPlugin.Editor",
     "VideoPlaybackTestScene"
   ],
   "includePlatforms": [
