@@ -32,6 +32,19 @@ namespace AreaTargetPlugin.Tests
             Assert.That(source, Does.Not.Contain("BindingFlags."));
         }
 
+        [Test]
+        public void DeviceAcceptance_DiagnosticsAreExportedOnBackgroundOrTeardownWithoutPathDisclosure()
+        {
+            string source = File.ReadAllText(Path.Combine(
+                Application.dataPath, "Scripts", "SLAMTestScene", "SLAMTestSceneManager.cs"));
+
+            Assert.That(source, Does.Contain("void OnApplicationPause(bool pauseStatus)"));
+            Assert.That(source, Does.Contain("if (pauseStatus) ExportDiagnostics();"));
+            Assert.That(source, Does.Contain("private void ExportDiagnostics()"));
+            Assert.That(source, Does.Contain("_tracker.TryExportDiagnostics("));
+            Assert.That(source, Does.Not.Contain("诊断已导出: {outputPath}"));
+        }
+
         private GameObject _managerGo;
         private SLAMTestSceneManager _manager;
         private Button _resetButton;

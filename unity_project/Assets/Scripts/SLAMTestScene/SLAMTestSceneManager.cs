@@ -38,6 +38,7 @@ public class SLAMTestSceneManager : MonoBehaviour
     private bool _glbLoaded;
     private Material _wireMaterial;    // 线框材质引用，用于 TRACKING/LOST 颜色切换
     private bool _initialized;
+    private bool _diagnosticsExported;
 
     private float _fpsTimer;
     private int _fpsFrameCount;
@@ -621,6 +622,7 @@ public class SLAMTestSceneManager : MonoBehaviour
     {
         if (_tracker != null)
             _ = _tracker.ResetAsync();
+        _diagnosticsExported = false;
         _lastTrackingDetail = "";
         if (_originCube != null) _originCube.SetActive(false);
         if (_glbModelObj != null) _glbModelObj.SetActive(false);
@@ -636,8 +638,33 @@ public class SLAMTestSceneManager : MonoBehaviour
         Debug.Log("[RESET] Tracker and stats reset");
     }
 
+    void OnApplicationPause(bool pauseStatus)
+    {
+        if (pauseStatus) ExportDiagnostics();
+    }
+
+    private void ExportDiagnostics()
+    {
+        if (_diagnosticsExported || _tracker == null)
+            return;
+
+        if (_tracker.TryExportDiagnostics(
+                out _,
+                out LocalizationFailureCategory failureCategory,
+                out _))
+        {
+            _diagnosticsExported = true;
+            debugPanel?.SetStatus("诊断已导出", Color.cyan);
+            Debug.Log("[SLAM] Diagnostic export completed.");
+            return;
+        }
+
+        Debug.LogWarning($"[SLAM] Diagnostic export not written ({failureCategory}).");
+    }
+
     void OnDestroy()
     {
+        ExportDiagnostics();
         if (arCameraManager != null) arCameraManager.frameReceived -= OnCameraFrameReceived;
         if (_tracker != null)
             _ = _tracker.DisposeAsync();

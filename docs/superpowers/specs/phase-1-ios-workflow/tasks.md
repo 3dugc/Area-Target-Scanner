@@ -1009,7 +1009,7 @@ git commit -m "test: add phase 1 iOS release gates"
 
 **可运行产物：** 同一张真实地图可由 iPhone 和 iPad 分别扫描/处理、在 Unity iOS 应用加载并定位，且各自导出隐私安全的诊断证据。
 
-> **进度（2026-07-13）：** 步骤 1 已完成，步骤 2–7 待执行。设备预检未发现在线 iPhone 或 iPad：`xcrun xctrace list devices` 仅返回离线历史设备，因此尚未执行扫描、安装、运行或定位，也未写入任何设备 UDID。需要将至少一台 LiDAR iPhone 和一台 LiDAR iPad 解锁、信任此 Mac 并保持 USB 连接后继续。
+> **进度（2026-07-13）：** 步骤 1–2 已完成。已通过在线 LiDAR iPhone 导出一份匿名场地扫描；scan manifest 合同检查通过（31 帧，均为 `landscapeRight`）。受控本地 Docker/Python 处理已生成 `optimized.glb`、`features.db` 和 map manifest；地图水平 AABB 面积约为 77.8 m²，manifest SHA-256 为 `68a5d9174a84abcaa1043911beffe08f72b19d9fe579cc9094138f91af730057`。处理期间发现并修复 ARKit `simd_float4x4` 的 float32 仿射尾值容差问题，相关 55 项 Python 回归已通过。空 UPM 工程的 Development iOS 导出和 generic-device Xcode 链接均已通过；独立真机验收工程已导出并使用同一 map manifest。为满足步骤 3 的诊断证据要求，实际部署的 `SLAMTestSceneManager` 已新增在应用进入后台或销毁时调用现有隐私安全 JSONL 导出器的最小入口，并通过 Unity 编辑器测试；不显示或记录导出绝对路径。当前步骤 3 等待在 Xcode 登录开发团队，以完成签名、安装与运行时验证；iPad 尚未连接，因此步骤 4–6 未执行。未将扫描 ZIP、图像、地图制品、绝对路径或设备 UDID 写入 Git。
 
 **涉及文件：**
 
@@ -1017,7 +1017,9 @@ git commit -m "test: add phase 1 iOS release gates"
 - 新建：`docs/phase-1-device-acceptance-template.md`
 - 修改：`docs/ios-device-test-guide.md`
 - 修改：`unity_project/Assets/Scripts/ARTestSceneManager.cs`
+- 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMTestSceneManager.cs`
 - 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMDebugPanel.cs`
+- 修改：`unity_plugin/AreaTargetPlugin/Tests/SLAMTestSceneManagerTests.cs`
 
 - [x] **步骤 1：创建验收记录模板**
 
@@ -1033,7 +1035,7 @@ map ID/version/hash；首次定位 UTC 时间；首次定位耗时；
 
 模板不得要求或存放场地地址、图像、扫描 ZIP 或设备 UDID。
 
-- [ ] **步骤 2：执行 iPhone 扫描与处理**
+- [x] **步骤 2：执行 iPhone 扫描与处理**
 
 连接 LiDAR iPhone，使用扫描器采集一个 20–100 m² 场地。对导出 manifest 运行合同验证；使用文档化 Docker/Python 命令处理 ZIP，生成 map manifest、`features.db` 和资产。把原始 scan 和地图制品保留在受控本地存储，不提交 Git。
 
