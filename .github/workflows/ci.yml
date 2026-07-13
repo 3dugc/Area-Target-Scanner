@@ -35,16 +35,21 @@ jobs:
           pip install -r web_service/requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run Phase 0 tests
-        run: python -m pytest tests/ -v --tb=short
+      - name: Prepare fixed iOS OpenCV framework for UPM content tests
+        run: |
+          mkdir -p native_visual_localizer/opencv_ios
+          curl --fail --location --retry 3 --retry-delay 2 \
+            https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip \
+            --output native_visual_localizer/opencv_ios/opencv_ios.zip
+          unzip -q native_visual_localizer/opencv_ios/opencv_ios.zip \
+            -d native_visual_localizer/opencv_ios
+          test -d native_visual_localizer/opencv_ios/opencv2.framework
+
+      - name: Run Phase 1 Python tests
+        run: python -m pytest --import-mode=importlib tests/phase1 tests/ -v --tb=short
 
       - name: Validate package metadata
         run: python tools/phase0/check_package_metadata.py unity_plugin/AreaTargetPlugin/package.json
-
-      - name: Build and inspect UPM package
-        run: |
-          python tools/phase0/build_upm_package.py
-          python -m pytest tests/phase0/test_upm_package.py -v
 
   web-service-image:
     runs-on: ubuntu-latest
@@ -62,17 +67,30 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r web_service/requirements.txt
+          pip install -r requirements-dev.txt
+
       - name: Install native dependencies
         run: brew install cmake opencv
 
-      - name: Build and verify native library
-        run: native_visual_localizer/build_macos.sh
+      - name: Build iOS native artifact and cache OpenCV framework
+        run: native_visual_localizer/build_ios.sh
 
-      - name: Verify iOS archive contract
-        run: tools/phase0/check_native_symbols.sh unity_project/Assets/Plugins/iOS/libvisual_localizer.a
+      - name: Run Phase 1 non-device release gates
+        run: tools/phase1/verify.sh ci
 
-  # Unity EditMode and clean-package installation remain required local release
-  # gates until a valid Unity license is configured in repository secrets.
+  # Unity EditMode, clean UPM installation, Unity iOS export, generic Xcode
+  # linking and device smoke remain local release gates. verify.sh ci emits
+  # explicit SKIP reasons instead of treating unavailable Unity/iOS signing as PASS.
 
   lint:
     runs-on: ubuntu-latest

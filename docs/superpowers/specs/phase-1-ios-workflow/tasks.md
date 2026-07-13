@@ -918,6 +918,10 @@ git commit -m "feat: make UPM iOS build self-contained"
 
 **可运行产物：** `tools/phase1/verify.sh` 在 `ci`、`local`、`device` 模式以明确 PASS/FAIL/SKIP 汇总阶段 1 门禁；CI 自动运行非设备验证。
 
+> **进度（2026-07-13）：** 步骤 1–7 已完成。新增 driver 测试初次运行因 `tools/phase1/verify.sh` 不存在而按预期 `5 failed`；实现后使用替换 PATH 的假命令回归为 `6 passed`。`ci` 对所有 Unity 依赖项（包括干净 UPM 安装）明确 `SKIP`，原因是 GitHub-hosted CI 未配置 Unity 许可证或 iOS 签名；`local` 和 `device` 均将这些项视为必过门禁，避免假绿。`device` 会拒绝缺少 USB 可见 iPhone/iPad 的情形；若任一本地构建门禁失败，`device` 也会跳过 smoke，避免部署旧包；实际签名、部署和定位 smoke 将由任务 9 提供命令后通过 `PHASE1_DEVICE_SMOKE_COMMAND` 接入。
+>
+> **验证记录（2026-07-13）：** 完整 Python 回归为 `323 passed, 3 skipped, 4 warnings`，driver 回归为 `6 passed`，真实 `tools/phase1/verify.sh ci` 为 `PASS=5 FAIL=0 SKIP=6`，UPM 内容回归为 `3 passed`，脚本语法、YAML 解析和 `git diff --check` 均通过。本机 `local` 门禁已通过合同、Python、macOS/iOS native 和 UPM 内容阶段；随后 Unity Licensing Client 在进入 EditMode 前返回 `505 Unsupported protocol version '1.18.1'` 并持续重试。该进程已停止，故本机 Unity/Xcode 门禁**未通过、未被记录为绿灯**；需修复 Unity Hub/许可证客户端协议不匹配后重跑 `tools/phase1/verify.sh local`。
+
 **涉及文件：**
 
 - 新建：`tools/phase1/verify.sh`
@@ -928,7 +932,7 @@ git commit -m "feat: make UPM iOS build self-contained"
 - 修改：`unity_plugin/AreaTargetPlugin/README.md`
 - 修改：`docs/ios-device-test-guide.md`
 
-- [ ] **步骤 1：添加失败的 verify driver 测试**
+- [x] **步骤 1：添加失败的 verify driver 测试**
 
 创建 `tests/phase1/test_verify_driver.py`，用替换后的 PATH 假命令验证：
 
@@ -937,7 +941,7 @@ git commit -m "feat: make UPM iOS build self-contained"
 - `device` 缺少可见设备时返回非零并输出设备发现命令。
 - 子检查失败时整个 driver 返回非零并保留失败步骤名称。
 
-- [ ] **步骤 2：运行测试并确认失败**
+- [x] **步骤 2：运行测试并确认失败**
 
 运行：
 
@@ -947,7 +951,7 @@ venv/bin/python -m pytest tests/phase1/test_verify_driver.py -v
 
 预期结果：失败，因为 `tools/phase1/verify.sh` 尚不存在。
 
-- [ ] **步骤 3：实现三个显式模式**
+- [x] **步骤 3：实现三个显式模式**
 
 `verify.sh` 使用以下检查序列：
 
@@ -958,7 +962,7 @@ contract → Python pipeline → Unity EditMode → native macOS/iOS → UPM con
 
 `ci` 运行前两项、native、UPM 内容和干净 UPM install；对 Unity iOS export、generic Xcode build 和 device smoke 打印 `SKIP` 及“GitHub-hosted CI 未配置 Unity/iOS signing”的原因。`local` 不允许跳过 Unity 和 generic Xcode build。`device` 在 `local` 基础上要求 `xcrun xctrace list devices` 发现一个 iPhone 和一个 iPad，分别执行 smoke 步骤。
 
-- [ ] **步骤 4：将非设备阶段 1 检查加入 CI**
+- [x] **步骤 4：将非设备阶段 1 检查加入 CI**
 
 在 `.github/workflows/ci.yml`：
 
@@ -968,23 +972,23 @@ contract → Python pipeline → Unity EditMode → native macOS/iOS → UPM con
 
 工作流继续使用 `actions/checkout@v6` 和 `actions/setup-python@v6`，不得回退到 Node.js 20 runtime。
 
-- [ ] **步骤 5：更新操作文档**
+- [x] **步骤 5：更新操作文档**
 
 在 `TEST_PLAN.md`、根 README、UPM README 与 `docs/ios-device-test-guide.md` 写入：三个 verify 模式、从 UPM 验证工程导出 iOS 的命令、诊断导出位置、iPhone/iPad 双设备要求、三场地/30 分钟验收定义和阶段 1 支持边界。
 
-- [ ] **步骤 6：运行本地验证**
+- [x] **步骤 6：运行本地验证**
 
 运行：
 
 ```bash
-venv/bin/python -m pytest tests/phase1 tests/ -v --tb=short
+venv/bin/python -m pytest --import-mode=importlib tests/phase1 tests/ -v --tb=short
 tools/phase1/verify.sh ci
 tools/phase1/verify.sh local
 ```
 
 预期结果：前两个命令通过；第三个命令在具备 Unity/Xcode 时通过，缺失环境时必须明确失败而不是绿灯。记录真实结果。
 
-- [ ] **步骤 7：提交任务 8**
+- [x] **步骤 7：提交任务 8**
 
 ```bash
 git add \

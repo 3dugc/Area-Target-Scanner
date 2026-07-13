@@ -38,20 +38,21 @@ You know how Vuforia lets you scan a physical space and then do AR stuff relativ
 
 No cloud uploads. No API keys. No "please contact sales." Just code.
 
-## Phase 0 verified support
+## Phase 1 iOS support boundary
 
-The repository contains work for more platforms than the Phase 0 commercial baseline actually verifies. Version `1.2.1` has the following support boundary:
+Version `1.3.0` adds a self-contained iOS UPM export/link gate, but it is not yet a completed device-acceptance release:
 
-| Target | Phase 0 status |
+| Target | Current status |
 |---|---|
-| macOS development build | Verified baseline |
-| iOS Scanner generic-device build | Verified baseline |
-| iOS localizer archive | Static architecture and symbol verification only |
-| Rokid AR Studio | Planned for Phase 2; not supported in Phase 0 |
-| Android ARM64 | Planned for Phase 2; not supported in Phase 0 |
-| Windows/Linux runtime | Not supported; empty placeholders were removed |
+| macOS development build | Verified native baseline |
+| iOS UPM generic-device export/link | Verified locally from a clean Unity project with `xcodebuild` and signing disabled |
+| iOS scanner scan-ZIP contract | Verified on a short LiDAR iPhone scan; iPad scan acceptance is still pending |
+| iPhone/iPad runtime localization | Requires task 9/10 device acceptance: the same map, both devices, three sites and 30-minute runs |
+| Rokid AR Studio | Planned for Phase 2; not supported in Phase 1 |
+| Android ARM64 | Planned for Phase 2; not supported in Phase 1 |
+| Windows/Linux runtime | Not supported in Phase 1 |
 
-The local baseline was verified with Python 3.11.12, OpenCV 4.13.0, Unity 6000.4.6f1, Xcode 26.2, CMake and Docker Desktop. The rollback baseline is commit `81d815f`.
+The local gates use Python 3.11.12, Unity 6000.4.6f1 and Xcode. Device diagnostics are image-free JSON Lines under `Application.persistentDataPath/AreaTargetDiagnostics/`; scan ZIPs, captured images and device identifiers do not belong in Git.
 
 ## Quickstart
 
@@ -175,7 +176,7 @@ asset_bundle/
 
 ## Unity Plugin
 
-A UPM package (`com.areatarget.tracking` v1.2.1) that provides:
+A UPM package (`com.areatarget.tracking` v1.3.0) that provides:
 
 - `AreaTargetTracker` — main tracking interface
 - `VisualLocalizationEngine` — ORB + AKAZE + BoW + PnP pipeline
@@ -184,13 +185,13 @@ A UPM package (`com.areatarget.tracking` v1.2.1) that provides:
 - `FeatureDatabaseReader` — reads the SQLite feature DB
 - `AlignmentTransformCalculator` — coordinate system alignment between scan and AR session
 - `ExtendedDebugInfo` — real-time pipeline diagnostics (feature counts, match stats, AKAZE fallback status)
-- AR Foundation integration; Phase 0 validates the iOS baseline only
+- AR Foundation integration; Phase 1 validates clean UPM iOS export/linking, while signed device acceptance remains pending
 
 **Requirements:** Unity 6000.0+, AR Foundation 6.0+
 
 ### Native Visual Localizer
 
-For production performance, the plugin includes an optional C++ native library (`libvisual_localizer`) that replaces the managed C# localization path. Phase 0 verifies the macOS arm64 build and statically checks the existing iOS arm64 archive. Android ARM64, Rokid, Windows, and Linux runtime support are not part of this baseline.
+For production performance, the plugin includes an optional C++ native library (`libvisual_localizer`) that replaces the managed C# localization path. Phase 1 packages the iOS archive, OpenCV framework and UPM-owned Xcode postprocess together, then verifies a clean Unity project's generic-device link. Android ARM64, Rokid, Windows and Linux runtime support are not part of this phase.
 
 Key capabilities:
 - ORB + BoW visual localization with PnP RANSAC
@@ -225,8 +226,14 @@ The web service runs Flask + the processing pipeline in Docker, with a separate 
 This project is thoroughly tested because we believe in sleeping well at night.
 
 ```bash
-# Complete release gate (Python, Docker, native, Xcode, Unity and UPM)
-tools/phase0/verify.sh local
+# Phase 1 gate for GitHub-hosted CI-compatible checks
+tools/phase1/verify.sh ci
+
+# Full local Phase 1 gate (requires Unity 6000.4.6f1 and Xcode)
+tools/phase1/verify.sh local
+
+# Device preflight: requires a USB-visible iPhone and iPad
+tools/phase1/verify.sh device
 
 # Python pipeline tests
 pip install -r requirements-dev.txt
@@ -235,8 +242,8 @@ python -m pytest tests/ -v --tb=short
 # Reproducible UPM package
 python3 tools/phase0/build_upm_package.py
 
-# Unity EditMode plus clean UPM installation
-tools/phase0/validate_unity_package.sh
+# Clean UPM iOS Development export plus generic-device Xcode linking
+tools/phase1/validate_ios_upm_build.sh
 
 # Unity plugin tests (in Unity Editor)
 # Window → General → Test Runner → EditMode → Run All
@@ -244,6 +251,10 @@ tools/phase0/validate_unity_package.sh
 # iOS scanner tests (in Xcode)
 # Product → Test (⌘U)
 ```
+
+`ci` prints explicit `SKIP` reasons for Unity, signing and device checks; it never reports unavailable hardware as success. `local` requires all of those build gates. `device` additionally requires both USB-visible device classes and becomes a signed deployment/localization smoke once task 9 supplies `PHASE1_DEVICE_SMOKE_COMMAND`.
+
+For final Phase 1 acceptance, use one processed map per 20–100 m² site on both a LiDAR iPhone and LiDAR iPad, record a successful localization plus loss/recovery, then keep each run alive for 30 minutes. Three sites × two devices produce six independent, image-free diagnostic records. This acceptance is still pending; Rokid AR Studio and Android ARM64 are not declared supported.
 
 The test suite includes unit tests, integration tests, property-based tests (Hypothesis), cross-session localization tests, and performance benchmarks.
 

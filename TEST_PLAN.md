@@ -1,19 +1,27 @@
 # 全栈测试方案
 
-## 阶段 0 本地发布门禁
+## 阶段 1 iOS 发布门禁（v1.3.0）
 
-发布前必须在开发 Mac 上执行以下两个命令：
+阶段 1 使用一个明确模式的入口；每个检查都输出 `PASS`、`FAIL` 或带原因的 `SKIP`：
 
 ```bash
-tools/phase0/verify_ios_scanner.sh
-UNITY_PATH="/Applications/Unity/Hub/Editor/6000.4.6f1/Unity.app/Contents/MacOS/Unity" \
-  PYTHON_BIN=venv/bin/python \
-  tools/phase0/validate_unity_package.sh
+# GitHub Actions 可运行的非 Unity / 非设备检查。
+tools/phase1/verify.sh ci
+
+# 开发 Mac：必须具备 Unity 6000.4.6f1 和 Xcode，不能把缺失环境当作通过。
+tools/phase1/verify.sh local
+
+# 在 local 门禁基础上要求 USB 可见的 iPhone 和 iPad。
+tools/phase1/verify.sh device
 ```
 
-- iOS 命令面向 `generic/platform=iOS` 编译扫描器，结果写入 `phase0-results/xcode/build.log`。模拟器运行不能认证 LiDAR 扫描能力。
-- Unity 命令必须生成至少包含一个测试且失败数为零的 EditMode XML，然后在临时项目中安装当前生成的 UPM `.tgz` 并完成无编译错误的包解析。
-- 阶段 0 不得在 Unity 或 Xcode 未实际执行时把门禁记录为通过。
+- `ci` 只跳过依赖 Unity 许可证、iOS 签名或真机的步骤，并明确报告原因；不得把跳过当作通过。
+- `local` 必须完成坐标合同、Python、native、UPM 内容、Unity EditMode/干净安装、Unity iOS Development 导出及 generic-device Xcode 链接。
+- `device` 缺少任一 USB 可见的 iPhone 或 iPad 时必须失败，并打印 `xcrun xctrace list devices`；签名、部署和实际定位 smoke 在任务 9 接入 `PHASE1_DEVICE_SMOKE_COMMAND` 后执行。
+- UPM iOS 独立导出可单独复现：`tools/phase1/validate_ios_upm_build.sh`。它的日志写入被忽略的 `phase1-results/`。
+- 定位诊断默认导出至 `Application.persistentDataPath/AreaTargetDiagnostics/`，采用不含图像、扫描 ZIP 或绝对路径的 JSON Lines。
+
+阶段 1 的最终验收仍未完成：每个 20–100 m² 场地必须由同一张处理地图在 LiDAR iPhone 与 LiDAR iPad 上分别成功定位、记录失锁/恢复，并在定位后连续运行 30 分钟；共三个场地、六次设备-场地记录。Rokid AR Studio、Android ARM64、Windows 和 Linux 运行时不属于本阶段支持范围。
 
 ## 一、测试现状总览
 

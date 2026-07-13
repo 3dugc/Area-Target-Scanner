@@ -2,11 +2,31 @@
 
 Because the simulator can only pretend so hard.
 
+## Phase 1 scope and release gates
+
+The `1.3.0` UPM package has passed a clean Unity project's unsigned generic-device export/link gate. That proves package ownership and Xcode linkage; it does **not** yet certify signed iPhone or iPad runtime localization.
+
+```bash
+# CI-compatible non-Unity checks; Unity/signing/device stages report explicit SKIP reasons.
+tools/phase1/verify.sh ci
+
+# Required local release gate: Unity EditMode, clean UPM install, iOS export and generic-device link.
+tools/phase1/verify.sh local
+
+# Preflight requires one USB-visible iPhone and one USB-visible iPad.
+tools/phase1/verify.sh device
+
+# Reproduce the UPM-only iOS export/link validation directly.
+tools/phase1/validate_ios_upm_build.sh
+```
+
+`device` fails rather than passing if either device class is absent. Signed deployment and localization smoke are connected in task 9 through `PHASE1_DEVICE_SMOKE_COMMAND`; do not treat a generic-device build as a real-device acceptance result.
+
 ## Prerequisites
 
 - macOS + Xcode installed
-- Unity 6000.3.11f1 (installed at `/Applications/Unity/Hub/Editor/6000.3.11f1/`)
-- iPhone/iPad connected via USB, iOS 16.0+
+- Unity 6000.4.6f1 (installed at `/Applications/Unity/Hub/Editor/6000.4.6f1/`)
+- LiDAR iPhone **and** LiDAR iPad connected via USB, iOS 16.0+
 - Apple Developer account signed in to Xcode
 
 ## Pre-flight Checklist
@@ -19,11 +39,11 @@ Because the simulator can only pretend so hard.
 | ARTestSceneManager debug UI (Quality/Mode/AKAZE/Consistency) | ✅ Added |
 | InternalsVisibleTo("Assembly-CSharp") | ✅ Added |
 | BuildiOS.cs scene list includes ARTestScene | ✅ Confirmed |
-| iOSPostProcess.cs (OpenCV/Bitcode/system frameworks) | ✅ Confirmed |
-| build_ios.sh 11-symbol verification | ✅ Complete |
-| **iOS static library libvisual_localizer.a** | ⚠️ **Needs rebuild** |
+| UPM iOSPostProcess.cs（OpenCV/framework/system libraries） | ✅ 包内置并已 generic-device 链接 |
+| build_ios.sh 与 native 符号合同 | ✅ Complete |
+| iOS static library + opencv2.framework | ✅ UPM 打包门禁已验证 |
 
-> The current `libvisual_localizer.a` is from March 24 and is missing `vl_add_keyframe_akaze` and `vl_set_alignment_transform`. It's living in the past.
+阶段 1 仍缺少真机验收：三个 20–100 m² 场地、同图在 iPhone/iPad 分别成功定位、失锁/恢复记录以及每次定位后 30 分钟连续运行。Rokid AR Studio、Android ARM64、Windows 和 Linux 不在本阶段支持范围。
 
 ---
 
@@ -37,7 +57,7 @@ bash build_ios.sh
 Expected behavior:
 - Auto-downloads OpenCV iOS framework (~200MB first time, cached after that — go grab a coffee)
 - Compiles arm64 static library
-- Verifies all 11 exported symbols (no WARNINGs)
+- Verifies the versioned native symbol contract (no WARNINGs)
 - Backs up old library as `.bak`, copies new one to `unity_project/Assets/Plugins/iOS/`
 
 Verify:
@@ -63,7 +83,7 @@ Note your device UDID (the hex string in parentheses). Replace `<DEVICE_UDID>` i
 Make sure no other Unity Editor instance has `unity_project` open (Unity doesn't share well with others):
 
 ```bash
-/Applications/Unity/Hub/Editor/6000.3.11f1/Unity.app/Contents/MacOS/Unity \
+/Applications/Unity/Hub/Editor/6000.4.6f1/Unity.app/Contents/MacOS/Unity \
   -batchmode -quit -nographics \
   -projectPath ./unity_project \
   -executeMethod BuildiOS.Build \
@@ -78,6 +98,8 @@ tail -f /tmp/unity_ios_build.log
 Success indicator: `Exiting batchmode successfully now!` at the end of the log. If you see anything else, it didn't exit successfully, and neither will your good mood.
 
 > For Development builds (with debugging support), replace `BuildiOS.Build` with `BuildiOS.BuildDevelopment`.
+
+For the release package path, first run `tools/phase1/validate_ios_upm_build.sh`. It creates a fresh Unity project that installs only the generated `.tgz`, exports `BuildiOS.BuildDevelopment`, and performs the unsigned generic-device `xcodebuild` link. Its temporary project path and full logs are printed to `phase1-results/`; it is a package/link gate, not a signed device deployment.
 
 ---
 
@@ -169,6 +191,23 @@ After launch, the app enters ARTestScene. Here's what you'll see on screen:
 # Real-time app logs (filtered to ARTestScene)
 xcrun devicectl device info log --device <DEVICE_UDID> 2>&1 | grep "ARTestScene"
 ```
+
+## Diagnostics and acceptance evidence
+
+The tracker exports image-free JSON Lines diagnostics to:
+
+```text
+Application.persistentDataPath/AreaTargetDiagnostics/
+```
+
+For every real-device run, retain the exported file locally and record its SHA-256, but do not commit the file, a scan ZIP, a captured image, an absolute path or a device UDID. Before release, verify the diagnostic contains no forbidden capture/path data:
+
+```bash
+shasum -a 256 /path/to/diagnostic.jsonl
+rg -n "ImageData|JPEG|ScanData|/Users/|file://" /path/to/diagnostic.jsonl
+```
+
+Phase 1 acceptance is three independent 20–100 m² sites. At each site, use the same processed map on the LiDAR iPhone and LiDAR iPad, record at least one successful localization plus any loss/recovery attempt, then run each device for 30 minutes after localization. Six independent device-site records are required; a successful generic Xcode build is not a substitute.
 
 ---
 
