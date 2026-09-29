@@ -63,7 +63,7 @@ jobs:
         run: docker build -t area-target-scanner-web-service-ci .
 
   native-macos:
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
 
@@ -80,7 +80,9 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Install native dependencies
-        run: brew install cmake opencv
+        run: |
+          brew install cmake opencv@4
+          echo "OpenCV_DIR=$(brew --prefix opencv@4)/lib/cmake/opencv4" >> "$GITHUB_ENV"
 
       - name: Build iOS native artifact and cache OpenCV framework
         run: native_visual_localizer/build_ios.sh
