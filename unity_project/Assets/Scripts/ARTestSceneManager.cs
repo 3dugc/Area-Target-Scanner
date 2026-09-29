@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
@@ -44,6 +45,8 @@ public class ARTestSceneManager : MonoBehaviour
     private float _fpsTimer;
     private int _fpsFrameCount;
     private long _lastCaptureTimestampNs = -1;
+
+    private const long MaxLocalizationResultAgeNs = 1_000_000_000L;
 
     void Start()
     {
@@ -138,6 +141,28 @@ public class ARTestSceneManager : MonoBehaviour
     }
 
     /// <summary>
+    /// Formats only the latest structured-diagnostic scalars for the scene UI.
+    /// It intentionally excludes camera data and complete transform matrices.
+    /// </summary>
+    public static string FormatDiagnosticSummary(ExtendedDebugInfo debugInfo)
+    {
+        string failure = debugInfo.LastFailureCategory == LocalizationFailureCategory.None
+            ? string.Empty
+            : $"\n诊断: {debugInfo.LastFailureCategory}";
+        return $"诊断帧: {debugInfo.LastDiagnosticFrameId}\n" +
+            $"结果年龄: {FormatDiagnosticMilliseconds(debugInfo.LastResultAgeNs)} ms\n" +
+            $"状态: {debugInfo.LastDiagnosticState} | 质量: {debugInfo.LastDiagnosticQuality}\n" +
+            $"内点: {debugInfo.NativeDebugInfo.best_inliers} | worker: {FormatDiagnosticMilliseconds(debugInfo.LastWorkerProcessingTimeNs)} ms" +
+            failure;
+    }
+
+    private static string FormatDiagnosticMilliseconds(long nanoseconds)
+    {
+        double milliseconds = Math.Max(0d, nanoseconds / 1_000_000d);
+        return milliseconds.ToString("F1", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// 格式化质量文本。
     /// </summary>
     public static string FormatQualityText(LocalizationQuality quality)
@@ -179,6 +204,15 @@ public class ARTestSceneManager : MonoBehaviour
 
     void Update()
     {
+        if (_initialized && _tracker != null
+            && _tracker.TryGetLatestTrackingResult(
+                _lastCaptureTimestampNs,
+                MaxLocalizationResultAgeNs,
+                out TrackingResult trackingResult))
+        {
+            HandleTrackingResult(trackingResult);
+        }
+
         _fpsFrameCount++;
         _fpsTimer += Time.unscaledDeltaTime;
         if (_fpsTimer >= 1f)
@@ -245,8 +279,7 @@ public class ARTestSceneManager : MonoBehaviour
             MapId = _tracker.MapId
         };
 
-        TrackingResult result = _tracker.ProcessFrame(frame);
-        HandleTrackingResult(result);
+        _tracker.SubmitFrame(frame);
     }
 
     private long GetMonotonicCaptureTimestampNs(ARCameraFrameEventArgs args)
@@ -293,7 +326,8 @@ public class ARTestSceneManager : MonoBehaviour
                         result.Confidence, result.MatchedFeatures, _frameCount,
                         extDebug.CurrentMode, result.Quality,
                         extDebug.NativeDebugInfo.akaze_triggered,
-                        extDebug.NativeDebugInfo.consistency_rejected);
+                        extDebug.NativeDebugInfo.consistency_rejected) + "\n" +
+                        FormatDiagnosticSummary(extDebug);
                 }
                 break;
 
@@ -301,6 +335,8 @@ public class ARTestSceneManager : MonoBehaviour
                 if (lostIndicatorUI != null) lostIndicatorUI.SetActive(true);
                 if (trackingIndicatorUI != null) trackingIndicatorUI.SetActive(false);
                 SetStatus("跟踪丢失，请对准扫描区域", Color.red);
+                if (trackingInfoText != null && _tracker != null)
+                    trackingInfoText.text = FormatDiagnosticSummary(_tracker.GetExtendedDebugInfo());
                 break;
 
             case AreaTargetPlugin.TrackingState.INITIALIZING:
@@ -437,7 +473,8 @@ public class ARTestSceneManager : MonoBehaviour
 
     private void OnResetClicked()
     {
-        _tracker?.Reset();
+        if (_tracker != null)
+            _ = _tracker.ResetAsync();
         _frameCount = 0;
         SetStatus("已重置，正在重新定位...", Color.yellow);
         if (areaTargetOrigin != null)
@@ -466,6 +503,8 @@ public class ARTestSceneManager : MonoBehaviour
     {
         if (arCameraManager != null)
             arCameraManager.frameReceived -= OnCameraFrameReceived;
-        _tracker?.Dispose();
+        if (_tracker != null)
+            _ = _tracker.DisposeAsync();
+        _tracker = null;
     }
 }

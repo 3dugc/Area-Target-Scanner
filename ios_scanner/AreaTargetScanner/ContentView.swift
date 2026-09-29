@@ -22,6 +22,8 @@ struct IdentifiableURL: Identifiable {
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showingExportFormats = false
     @StateObject private var viewModel = ScanViewModel()
     @State private var sharePayload: SharePayload? = nil
     @State private var previewItem: IdentifiableURL? = nil
@@ -66,6 +68,16 @@ struct ContentView: View {
             }
         }
         .onAppear { viewModel.checkCameraPermission() }
+        .onChange(of: scenePhase) { phase in viewModel.setAppActive(phase == .active) }
+        .onChange(of: viewModel.exportShareURL) { url in
+            if let url {
+                sharePayload = SharePayload(activityItems: [url])
+                viewModel.exportShareURL = nil
+            }
+        }
+        .alert("导出失败", isPresented: Binding(get: { viewModel.exportError != nil }, set: { if !$0 { viewModel.exportError = nil } })) {
+            Button("好", role: .cancel) { viewModel.exportError = nil }
+        } message: { Text(viewModel.exportError ?? "") }
         .sheet(item: $sharePayload) { payload in
             ActivityView(activityItems: payload.activityItems)
         }
@@ -128,6 +140,8 @@ struct ContentView: View {
             ARScanningView(session: viewModel.arSession).ignoresSafeArea()
             VStack {
                 ScanProgressView(progress: viewModel.progress).padding(.top, 60)
+                Text(viewModel.gpsStatus).font(.caption).foregroundStyle(.white)
+                    .padding(8).background(.black.opacity(0.6), in: Capsule())
                 Spacer()
                 Button(action: { viewModel.stopAndProcess() }) {
                     Label("停止扫描", systemImage: "stop.circle.fill")
@@ -152,6 +166,7 @@ struct ContentView: View {
     private func previewView(exportPath: String) -> some View {
         let files = viewModel.exportedFiles(for: exportPath)
         let foundModel = viewModel.modelURL(for: exportPath)
+        let immersalReason = viewModel.immersalUnavailableReason
 
         return ScrollView {
             VStack(spacing: 16) {
@@ -190,19 +205,29 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                     }
                     .buttonStyle(.borderedProminent).tint(.green)
-                    .disabled(foundModel == nil)
+                    .disabled(foundModel == nil || viewModel.isExporting)
 
-                    Button(action: {
-                        let urls = viewModel.shareURLs(for: exportPath)
-                        if !urls.isEmpty {
-                            sharePayload = SharePayload(activityItems: urls)
-                        }
-                    }) {
-                        Label("分享", systemImage: "square.and.arrow.up")
+                    Button(action: { showingExportFormats = true }) {
+                        Label("导出", systemImage: "square.and.arrow.up")
                             .font(.title3.weight(.semibold))
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                     }
                     .buttonStyle(.borderedProminent).tint(.blue)
+                    .disabled(viewModel.isExporting)
+                    .confirmationDialog("选择导出格式", isPresented: $showingExportFormats, titleVisibility: .visible) {
+                        Button("Area Target 原格式") { viewModel.beginExport(format: .areaTarget, from: exportPath) }
+                        Button("Immersal 格式") { viewModel.beginExport(format: .immersal, from: exportPath) }
+                            .disabled(immersalReason != nil)
+                        Button("取消", role: .cancel) {}
+                    } message: {
+                        Text(immersalReason.map { "Immersal 暂不可用：\($0)" } ?? "同一次扫描可分别导出两种格式。")
+                    }
+                    if let status = viewModel.exportStatus {
+                        ProgressView().tint(.white)
+                        Text(status).font(.callout).foregroundStyle(.white)
+                        Button("取消导出", role: .cancel) { viewModel.cancelExport() }
+                            .buttonStyle(.bordered).tint(.white)
+                    }
 
                     Button(action: { viewModel.resetToReady() }) {
                         Label("重新扫描", systemImage: "arrow.counterclockwise")
@@ -210,11 +235,13 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                     }
                     .buttonStyle(.bordered).tint(.white)
+                    .disabled(viewModel.isExporting)
                 }
                 .padding(.horizontal, 40)
                 .padding(.bottom, 40)
             }
         }
+        .task(id: exportPath) { await viewModel.prepareExportAvailability(for: exportPath) }
     }
 
     private func errorView(message: String) -> some View {

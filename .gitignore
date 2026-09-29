@@ -67,6 +67,7 @@ unity_project/unity_project/
 # Phase 0 build products
 dist/
 phase0-results/
+phase1-results/
 
 # Local Git worktrees
 .worktrees/

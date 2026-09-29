@@ -6,10 +6,20 @@ namespace AreaTargetPlugin
     /// <summary>Stable categories for a localization result that cannot be applied.</summary>
     public enum LocalizationFailureCategory
     {
-        None,
-        InvalidFrame,
-        NativeLocalizationFailed,
-        InvalidNativePose
+        None = 0,
+        UnsupportedDevice = 1,
+        InvalidFrame = 2,
+        MapLoadFailed = 3,
+        NativeInitializationFailed = 4,
+        SqliteFailed = 5,
+        LocalizationFailed = 6,
+        StaleResult = 7,
+        LifecycleFailure = 8,
+
+        [Obsolete("Use LocalizationFailed for diagnostics.")]
+        NativeLocalizationFailed = LocalizationFailed,
+        [Obsolete("Use InvalidFrame for diagnostics.")]
+        InvalidNativePose = InvalidFrame
     }
 
     /// <summary>
@@ -21,10 +31,13 @@ namespace AreaTargetPlugin
         public long FrameId { get; }
         public long CaptureTimestampNs { get; }
         public string MapId { get; }
-        public int MapGeneration { get; }
+        public long MapGeneration { get; }
         public long WorkerStartedTimestampNs { get; }
         public long WorkerCompletedTimestampNs { get; }
         public long WorkerProcessingTimeNs => WorkerCompletedTimestampNs - WorkerStartedTimestampNs;
+
+        /// <summary>T_U_C captured with the input frame, retained for alignment only.</summary>
+        public Matrix4x4 UnityWorldFromCamera { get; }
         public Matrix4x4? CameraFromScan { get; }
         public Matrix4x4? UnityWorldFromScan { get; }
         public TrackingState State { get; }
@@ -41,7 +54,7 @@ namespace AreaTargetPlugin
 
         private LocalizationFrameResult(
             LocalizationFrame frame,
-            int mapGeneration,
+            long mapGeneration,
             long workerStartedTimestampNs,
             long workerCompletedTimestampNs,
             Matrix4x4? cameraFromScan,
@@ -60,6 +73,7 @@ namespace AreaTargetPlugin
             MapGeneration = mapGeneration;
             WorkerStartedTimestampNs = workerStartedTimestampNs;
             WorkerCompletedTimestampNs = workerCompletedTimestampNs;
+            UnityWorldFromCamera = frame.UnityWorldFromCamera;
             CameraFromScan = cameraFromScan;
             UnityWorldFromScan = unityWorldFromScan;
             State = state;
@@ -72,7 +86,7 @@ namespace AreaTargetPlugin
 
         public static LocalizationFrameResult Succeeded(
             LocalizationFrame frame,
-            int mapGeneration,
+            long mapGeneration,
             long workerStartedTimestampNs,
             long workerCompletedTimestampNs,
             Matrix4x4 cameraFromScan,
@@ -108,7 +122,7 @@ namespace AreaTargetPlugin
 
         public static LocalizationFrameResult Failed(
             LocalizationFrame frame,
-            int mapGeneration,
+            long mapGeneration,
             long workerStartedTimestampNs,
             long workerCompletedTimestampNs,
             LocalizationFailureCategory failureCategory,
@@ -133,7 +147,7 @@ namespace AreaTargetPlugin
         }
 
         private static void ValidateTimingAndGeneration(
-            int mapGeneration,
+            long mapGeneration,
             long workerStartedTimestampNs,
             long workerCompletedTimestampNs)
         {

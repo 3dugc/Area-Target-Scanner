@@ -21,7 +21,7 @@
 		A10012 /* ScanDataExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10012 /* ScanDataExporterTests.swift */; };
 		A10013 /* ScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10014 /* ScanViewModel.swift */; };
 		A10014 /* ARScanningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10015 /* ARScanningView.swift */; };
-A10017 /* GLBExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10017 /* GLBExporter.swift */; };
+		A10017 /* GLBExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10017 /* GLBExporter.swift */; };
 		A10018 /* TextureMappingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10018 /* TextureMappingModels.swift */; };
 		A10019 /* TextureMappingPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10019 /* TextureMappingPipeline.swift */; };
 		A10020 /* UVUnwrapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10020 /* UVUnwrapper.swift */; };
@@ -39,7 +39,16 @@ A10017 /* GLBExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1001
 		A10041 /* ScanHistoryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10041 /* ScanHistoryItem.swift */; };
 		A10042 /* ScanHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10042 /* ScanHistoryView.swift */; };
 		A10043 /* CoordinateContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10043 /* CoordinateContractTests.swift */; };
-		A10044 /* coordinate-contract-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = B10044 /* coordinate-contract-v1.json */; };
+		A10044 /* ../../tests/fixtures/phase1/coordinate-contract-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = B10044 /* ../../tests/fixtures/phase1/coordinate-contract-v1.json */; };
+		A20001 /* ScanLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20001; };
+		A20F01 /* ZIPFoundation */ = {isa = PBXBuildFile; productRef = P20002; };
+		A20F02 /* ZIPFoundation */ = {isa = PBXBuildFile; productRef = P20002; };
+		A20002 /* ScanLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20002; };
+		A20003 /* ScanLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20003; };
+		A20004 /* ImmersalScanExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20004; };
+		A20005 /* ImmersalScanExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20005; };
+		A20006 /* DualExportViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20006; };
+		A20007 /* ScanExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20007 /* ScanExportService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,7 +77,7 @@ A10017 /* GLBExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1001
 		B10013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10014 /* ScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
 		B10015 /* ARScanningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARScanningView.swift; sourceTree = "<group>"; };
-B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GLBExporter.swift; sourceTree = "<group>"; };
+		B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GLBExporter.swift; sourceTree = "<group>"; };
 		B10018 /* TextureMappingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextureMappingModels.swift; sourceTree = "<group>"; };
 		B10019 /* TextureMappingPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextureMappingPipeline.swift; sourceTree = "<group>"; };
 		B10020 /* UVUnwrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UVUnwrapper.swift; sourceTree = "<group>"; };
@@ -89,9 +98,16 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 		B10041 /* ScanHistoryItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanHistoryItem.swift; sourceTree = "<group>"; };
 		B10042 /* ScanHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanHistoryView.swift; sourceTree = "<group>"; };
 		B10043 /* CoordinateContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinateContractTests.swift; sourceTree = "<group>"; };
-		B10044 /* coordinate-contract-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ../../tests/fixtures/phase1/coordinate-contract-v1.json; sourceTree = "<group>"; };
+		B10044 /* ../../tests/fixtures/phase1/coordinate-contract-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "../../tests/fixtures/phase1/coordinate-contract-v1.json"; sourceTree = "<group>"; };
 		F10001 /* AreaTargetScanner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AreaTargetScanner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F10002 /* AreaTargetScannerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AreaTargetScannerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20001 /* ScanLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanLocationTests.swift; sourceTree = "<group>"; };
+		B20002 /* ScanLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanLocation.swift; sourceTree = "<group>"; };
+		B20003 /* ScanLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanLocationService.swift; sourceTree = "<group>"; };
+		B20004 /* ImmersalScanExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalScanExporter.swift; sourceTree = "<group>"; };
+		B20005 /* ImmersalScanExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalScanExporterTests.swift; sourceTree = "<group>"; };
+		B20006 /* DualExportViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DualExportViewModelTests.swift; sourceTree = "<group>"; };
+		B20007 /* ScanExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanExportService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +115,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20F01 /* ZIPFoundation */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -106,6 +123,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20F02 /* ZIPFoundation */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -140,6 +158,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 		H10003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				B20002 /* ScanLocation.swift */,
 				B10003 /* CameraIntrinsics.swift */,
 				B10004 /* CameraPose.swift */,
 				B10005 /* ScanProgress.swift */,
@@ -153,6 +172,9 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 		H10004 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B20007 /* ScanExportService.swift */,
+				B20004 /* ImmersalScanExporter.swift */,
+				B20003 /* ScanLocationService.swift */,
 				B10007 /* ARKitScannerService.swift */,
 				B10008 /* ScanDataExporter.swift */,
 				B10009 /* ScannerService.swift */,
@@ -181,8 +203,11 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 		H10006 /* AreaTargetScannerTests */ = {
 			isa = PBXGroup;
 			children = (
+				B20006 /* DualExportViewModelTests.swift */,
+				B20005 /* ImmersalScanExporterTests.swift */,
+				B20001 /* ScanLocationTests.swift */,
 				B10043 /* CoordinateContractTests.swift */,
-				B10044 /* coordinate-contract-v1.json */,
+				B10044 /* ../../tests/fixtures/phase1/coordinate-contract-v1.json */,
 				B10012 /* ScanDataExporterTests.swift */,
 				B10024 /* TextureMappingPropertyTests.swift */,
 				B10026 /* MeshExporterTests.swift */,
@@ -237,6 +262,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			dependencies = (
 			);
 			name = AreaTargetScanner;
+			packageProductDependencies = (P20002 /* ZIPFoundation */);
 			productName = AreaTargetScanner;
 			productReference = F10001 /* AreaTargetScanner.app */;
 			productType = "com.apple.product-type.application";
@@ -255,6 +281,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 				L10001 /* PBXTargetDependency */,
 			);
 			name = AreaTargetScannerTests;
+			packageProductDependencies = (P20002 /* ZIPFoundation */);
 			productName = AreaTargetScannerTests;
 			productReference = F10002 /* AreaTargetScannerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -288,6 +315,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			);
 			mainGroup = H10001;
 			productRefGroup = H10007 /* Products */;
+			packageReferences = (P20001 /* ZIPFoundation */);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -309,7 +337,7 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10044 /* coordinate-contract-v1.json in Resources */,
+				A10044 /* ../../tests/fixtures/phase1/coordinate-contract-v1.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -320,6 +348,10 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20007 /* ScanExportService.swift in Sources */,
+				A20004 /* ImmersalScanExporter.swift in Sources */,
+				A20003 /* ScanLocationService.swift in Sources */,
+				A20002 /* ScanLocation.swift in Sources */,
 				A10001 /* AreaTargetScannerApp.swift in Sources */,
 				A10002 /* ContentView.swift in Sources */,
 				A10003 /* CameraIntrinsics.swift in Sources */,
@@ -352,6 +384,9 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20006 /* DualExportViewModelTests.swift in Sources */,
+				A20005 /* ImmersalScanExporterTests.swift in Sources */,
+				A20001 /* ScanLocationTests.swift in Sources */,
 				A10043 /* CoordinateContractTests.swift in Sources */,
 				A10012 /* ScanDataExporterTests.swift in Sources */,
 				A10024 /* TextureMappingPropertyTests.swift in Sources */,
@@ -371,6 +406,13 @@ B10017 /* GLBExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = so
 			targetProxy = C10001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+        P20001 /* ZIPFoundation */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/weichsel/ZIPFoundation.git"; requirement = {kind = exactVersion; version = 0.9.20; }; };
+/* End XCRemoteSwiftPackageReference section */
+/* Begin XCSwiftPackageProductDependency section */
+        P20002 /* ZIPFoundation */ = {isa = XCSwiftPackageProductDependency; package = P20001; productName = ZIPFoundation; };
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		J10002 /* Debug */ = {

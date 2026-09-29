@@ -429,6 +429,16 @@ class TestPhase1ScanInputContract:
 
         np.testing.assert_array_equal(actual_pose, expected_pose)
 
+    def test_arkit_column_major_to_matrix_accepts_float32_affine_tail(self):
+        """ARKit Float matrices may serialize 1.0 with float32 precision."""
+        manifest, expected_pose = self._valid_manifest()
+        transform = manifest["frames"][0]["transform"]
+        transform[-1] = 0.9999999403953552
+
+        actual_pose = optimized_pipeline.arkit_column_major_to_matrix(transform)
+
+        np.testing.assert_allclose(actual_pose, expected_pose, rtol=0.0, atol=1e-6)
+
     def test_validate_input_uses_manifest_frame_metadata(self, tmp_path):
         manifest, expected_pose = self._valid_manifest()
 

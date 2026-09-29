@@ -20,6 +20,14 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Area Target Scanner needs camera access to capture RGB images and LiDAR point clouds for 3D scene scanning.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于为扫描关键帧记录地理位置，随 Immersal 扫描包导出；不允许定位也可继续扫描。</string>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arkit</string>
@@ -27,17 +35,11 @@
 	</array>
 	<key>UIRequiresFullScreen</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>Area Target Scanner needs camera access to capture RGB images and LiDAR point clouds for 3D scene scanning.</string>
-	<key>UILaunchScreen</key>
-	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
 </dict>
 </plist>

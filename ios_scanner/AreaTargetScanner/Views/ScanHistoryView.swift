@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 扫描历史列表视图，支持查看、分享和删除
+/// 扫描历史列表视图，支持查看、导出和删除
 struct ScanHistoryView: View {
     @ObservedObject var viewModel: ScanViewModel
     @State private var itemToDelete: ScanHistoryItem? = nil
@@ -109,6 +109,9 @@ private struct ScanHistoryRow: View {
                 HStack(spacing: 12) {
                     Label("\(item.keyframeCount) 帧", systemImage: "camera")
                     Label(String(format: "%.1f MB", item.totalSizeMB), systemImage: "doc")
+                    if item.hasImmersalZip {
+                        Text("Immersal").foregroundStyle(.cyan)
+                    }
                     if item.hasZip {
                         Image(systemName: "doc.zipper")
                             .foregroundStyle(.orange)

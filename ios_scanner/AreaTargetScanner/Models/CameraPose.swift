@@ -26,6 +26,8 @@ struct CameraPose: Codable, Equatable {
     let imageWidth: Int?
     /// Height of the exported keyframe JPEG in pixels. Nil is a legacy/incomplete pose.
     let imageHeight: Int?
+    let run: Int?
+    let location: ScanLocation?
 
     /// Convenience initializer from a simd_float4x4 matrix.
     init(
@@ -35,7 +37,9 @@ struct CameraPose: Codable, Equatable {
         imageOrientation: ScanImageOrientation? = nil,
         intrinsics: CameraIntrinsics? = nil,
         imageWidth: Int? = nil,
-        imageHeight: Int? = nil
+        imageHeight: Int? = nil,
+        run: Int? = nil,
+        location: ScanLocation? = nil
     ) {
         self.timestamp = timestamp
         // Store as column-major array (matches ARKit convention)
@@ -50,6 +54,8 @@ struct CameraPose: Codable, Equatable {
         self.intrinsics = intrinsics
         self.imageWidth = imageWidth
         self.imageHeight = imageHeight
+        self.run = run
+        self.location = location
     }
 
     /// Memberwise initializer with raw float array.
@@ -60,7 +66,9 @@ struct CameraPose: Codable, Equatable {
         imageOrientation: ScanImageOrientation? = nil,
         intrinsics: CameraIntrinsics? = nil,
         imageWidth: Int? = nil,
-        imageHeight: Int? = nil
+        imageHeight: Int? = nil,
+        run: Int? = nil,
+        location: ScanLocation? = nil
     ) {
         precondition(transform.count == 16, "Transform must contain exactly 16 floats (4x4 matrix)")
         self.timestamp = timestamp
@@ -70,5 +78,7 @@ struct CameraPose: Codable, Equatable {
         self.intrinsics = intrinsics
         self.imageWidth = imageWidth
         self.imageHeight = imageHeight
+        self.run = run
+        self.location = location
     }
 }

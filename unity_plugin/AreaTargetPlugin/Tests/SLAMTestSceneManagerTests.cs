@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -17,6 +18,33 @@ namespace AreaTargetPlugin.Tests
     [TestFixture]
     public class SLAMTestSceneManagerTests
     {
+        [Test]
+        public void LocalizationFlow_UsesRunnerWithoutSceneOwnedWorkerOrReflection()
+        {
+            string source = File.ReadAllText(Path.Combine(
+                Application.dataPath, "Scripts", "SLAMTestScene", "SLAMTestSceneManager.cs"));
+
+            Assert.That(source, Does.Contain("_tracker.SubmitFrame(frame)"));
+            Assert.That(source, Does.Contain("_tracker.TryGetLatestTrackingResult("));
+            Assert.That(source, Does.Contain("debugPanel?.SetDiagnosticSummary("));
+            Assert.That(source, Does.Not.Contain("LocalizationThreadWorker"));
+            Assert.That(source, Does.Not.Contain("Thread.Sleep(2)"));
+            Assert.That(source, Does.Not.Contain("BindingFlags."));
+        }
+
+        [Test]
+        public void DeviceAcceptance_DiagnosticsAreExportedOnBackgroundOrTeardownWithoutPathDisclosure()
+        {
+            string source = File.ReadAllText(Path.Combine(
+                Application.dataPath, "Scripts", "SLAMTestScene", "SLAMTestSceneManager.cs"));
+
+            Assert.That(source, Does.Contain("void OnApplicationPause(bool pauseStatus)"));
+            Assert.That(source, Does.Contain("if (pauseStatus) ExportDiagnostics();"));
+            Assert.That(source, Does.Contain("private void ExportDiagnostics()"));
+            Assert.That(source, Does.Contain("_tracker.TryExportDiagnostics("));
+            Assert.That(source, Does.Not.Contain("诊断已导出: {outputPath}"));
+        }
+
         private GameObject _managerGo;
         private SLAMTestSceneManager _manager;
         private Button _resetButton;
