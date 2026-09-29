@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libegl1 libusb-1.0-0 libgl1 libglib2.0-0 libgomp1 libsm6 libxext6 libxrender1 \
+    libegl1 libusb-1.0-0 libidn2-0 libgl1 libglib2.0-0 libgomp1 libsm6 libxext6 libxrender1 \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
