@@ -17,6 +17,8 @@ import simd
 ///
 /// - Requirements: 1.1, 1.2, 1.3, 15.1
 final class ARKitScannerService: NSObject, ScannerService {
+    let locationStore = ScanLocationStore()
+    private let trackingRun = ScanTrackingRunState()
 
     // MARK: - Constants
 
@@ -74,6 +76,7 @@ final class ARKitScannerService: NSObject, ScannerService {
         lastKeyframeTransform = nil
         keyframeIndex = 0
         meshAnchors = []
+        trackingRun.start()
 
         // Configure ARKit session for LiDAR point cloud + RGB capture
         let configuration = ARWorldTrackingConfiguration()
@@ -348,7 +351,7 @@ extension ARKitScannerService: ARSessionDelegate {
         // Skip keyframe capture if ARKit tracking is not fully established.
         // Early frames often have identity transforms (no real pose data),
         // which corrupt downstream texture mapping.
-        guard frame.camera.trackingState == .normal else {
+        guard let run = trackingRun.runForFrame(isTrackingNormal: frame.camera.trackingState == .normal) else {
             return
         }
 
@@ -371,7 +374,10 @@ extension ARKitScannerService: ARSessionDelegate {
             imageOrientation: Self.exportedImageOrientation,
             intrinsics: frameIntrinsics,
             imageWidth: frameIntrinsics.width,
-            imageHeight: frameIntrinsics.height
+            imageHeight: frameIntrinsics.height,
+            run: run,
+            location: locationStore.snapshot(at: Date().timeIntervalSince1970
+                + frame.timestamp - ProcessInfo.processInfo.systemUptime)
         )
 
         let capturedImage = CapturedImage(imageData: imageData, filename: filename)
@@ -385,4 +391,8 @@ extension ARKitScannerService: ARSessionDelegate {
         lastKeyframeTransform = cameraTransform
         keyframeIndex += 1
     }
+
+    func sessionWasInterrupted(_ session: ARSession) { trackingRun.interrupt() }
+
+    func session(_ session: ARSession, didFailWithError error: Error) { trackingRun.interrupt() }
 }

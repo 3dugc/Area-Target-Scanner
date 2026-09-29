@@ -203,3 +203,13 @@ def test_wrong_composed_pose_is_rejected(tmp_path):
     result = run_checker(path)
     assert result.returncode != 0
     assert "T_U_S must equal T_U_C × T_C_S" in result.stderr
+
+
+def test_scan_manifest_accepts_optional_capture_run_and_location(tmp_path):
+    manifest = valid_scan_manifest()
+    manifest["frames"][0].update(run=12345, location={
+        "latitude": 31.2, "longitude": 121.4, "altitude": 12,
+        "timestamp": 1800000000, "horizontalAccuracy": 5, "verticalAccuracy": 8,
+    })
+    result = run_checker("--scan-manifest", write_scan_manifest(tmp_path, manifest))
+    assert result.returncode == 0, result.stderr
