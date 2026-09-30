@@ -80,6 +80,27 @@ final class DualExportViewModelTests: XCTestCase {
         XCTAssertTrue(vm.scanHistory.isEmpty)
     }
 
+    func testUploadingScanAndItsArchivesCannotBeDeleted() throws {
+        let docs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let scan = docs.appendingPathComponent("scan_20260929_220000")
+        try FileManager.default.createDirectory(at: scan, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: docs) }
+        let archive = ScanExportFormat.immersal.archiveURL(for: scan)
+        try Data([1]).write(to: archive)
+        let vm = ScanViewModel(documentsDirectory: docs)
+        vm.deletionBlocked = { $0 == scan.path }
+        vm.loadScanHistory()
+        let item = try XCTUnwrap(vm.scanHistory.first)
+        vm.deleteScan(item)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archive.path))
+        XCTAssertEqual(vm.scanHistory.count, 1)
+        XCTAssertNotNil(vm.deletionError)
+        vm.deletionBlocked = { _ in false }
+        vm.deleteScan(item)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scan.path))
+    }
+
     private func waitForCompletion(_ vm: ScanViewModel) async {
         for _ in 0..<300 {
             if !vm.isExporting { return }

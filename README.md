@@ -28,7 +28,7 @@
 
 ## What Is This?
 
-You know how Vuforia lets you scan a physical space and then do AR stuff relative to it? Yeah, that — but you own every byte of data, nothing leaves your machine, and you don't need a license key that costs more than your rent.
+You know how Vuforia lets you scan a physical space and then do AR stuff relative to it? Yeah, that — with an Area Target pipeline that keeps your data local and doesn't require a license key that costs more than your rent.
 
 **Area Target Scanner** is a fully offline pipeline for creating and tracking Area Targets:
 
@@ -36,7 +36,7 @@ You know how Vuforia lets you scan a physical space and then do AR stuff relativ
 2. **Process** the scan into a compact asset bundle (point cloud → mesh → texture → visual features)
 3. **Track** the area in real-time inside Unity with 6DoF pose estimation
 
-No cloud uploads. No API keys. No "please contact sales." Just code.
+The Area Target pipeline requires no cloud uploads or API keys. The iOS scanner also offers optional [Immersal upload and mapping](docs/ios-immersal-direct-upload.md), which sends the selected scan to Immersal when you choose that workflow.
 
 ## Phase 1 iOS support boundary
 
@@ -264,6 +264,7 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 - [Cross-Session Comparison Report](docs/cross-session-comparison-report.md) — localization accuracy across different scan sessions
 - [iOS Dual Export](docs/ios-dual-export.md) — Area Target / Immersal export formats, GPS and validation
 - [iOS Device Test Guide](docs/ios-device-test-guide.md) — step-by-step guide for on-device testing
+- [Immersal Direct Upload](docs/ios-immersal-direct-upload.md) — email/password login, direct frame upload, and cloud mapping from the iOS scanner
 
 ## Project Structure
 

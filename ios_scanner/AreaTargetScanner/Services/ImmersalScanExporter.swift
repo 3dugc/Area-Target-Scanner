@@ -6,9 +6,25 @@ import CryptoKit
 import ZIPFoundation
 import Darwin
 
+struct ImmersalUploadFrame {
+    let png: Data
+    let metadata: Data
+}
+
+/// An immutable manifest snapshot. Images are read on demand, with content checks.
+struct ImmersalUploadScan {
+    let frameCount: Int
+    let fingerprint: String
+    let readFrame: (Int, () -> Bool) throws -> ImmersalUploadFrame
+}
+
+protocol ImmersalFramePreparing {
+    func prepareUpload(scanDirectory: URL, isCancelled: () -> Bool) throws -> ImmersalUploadScan
+}
+
 /// Converts a persisted schema-v1 scan into a flat Immersal image/pose ZIP.
 /// Call from a background queue: image conversion intentionally retains only one frame at a time.
-final class ImmersalScanExporter {
+final class ImmersalScanExporter: ImmersalFramePreparing {
     enum ExportError: Error, LocalizedError {
         case invalidScan(String)
         case cancelled
@@ -59,6 +75,47 @@ final class ImmersalScanExporter {
         try checkCancellation(isCancelled)
         try publish(temporary, output)
         return output
+    }
+
+    /// Validates the whole scan before any remote mutation. No ZIP or PNG files are created.
+    func prepareUpload(scanDirectory: URL, isCancelled: () -> Bool) throws -> ImmersalUploadScan {
+        let scan = try loadScan(scanDirectory, isCancelled: isCancelled)
+        var digest = SHA256()
+        var imageDigests: [Data] = []
+        for frame in scan.frames {
+            try autoreleasepool {
+                try checkCancellation(isCancelled)
+                let imageURL = try frameFile(frame, in: scan.directory)
+                let data = try Data(contentsOf: imageURL)
+                let imageDigest = Data(SHA256.hash(data: data))
+                // Exercise the same decoder/encoder as upload and export before accepting the scan.
+                _ = try makePNG(imageURL, frame: frame)
+                let metadata = try makeJSON(frame, imagePath: frame.imageFile, fallbackRun: scan.fallbackRun)
+                digest.update(data: metadata)
+                digest.update(data: imageDigest)
+                imageDigests.append(imageDigest)
+            }
+        }
+        let fingerprint = digest.finalize().map { String(format: "%02x", $0) }.joined()
+        return ImmersalUploadScan(frameCount: scan.frames.count, fingerprint: fingerprint) { index, cancelled in
+            try self.checkCancellation(cancelled)
+            guard scan.frames.indices.contains(index) else { throw ExportError.invalidScan("上传帧编号越界") }
+            let frame = scan.frames[index]
+            let url = try self.frameFile(frame, in: scan.directory)
+            guard Data(SHA256.hash(data: try Data(contentsOf: url))) == imageDigests[index] else {
+                throw self.invalid(frame, "源图片已改变，请重新创建上传任务")
+            }
+            let png = try self.makePNG(url, frame: frame)
+            let json = try self.makeJSON(frame, imagePath: frame.imageFile, fallbackRun: scan.fallbackRun)
+            var object = try JSONSerialization.jsonObject(with: json) as! [String: Any]
+            object.removeValue(forKey: "imagePath")
+            try self.checkCancellation(cancelled)
+            return ImmersalUploadFrame(png: png, metadata: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]))
+        }
+    }
+
+    func uploadFrame(at index: Int, from scan: ImmersalUploadScan, isCancelled: () -> Bool) throws -> ImmersalUploadFrame {
+        try scan.readFrame(index, isCancelled)
     }
 
     // MARK: Persisted metadata

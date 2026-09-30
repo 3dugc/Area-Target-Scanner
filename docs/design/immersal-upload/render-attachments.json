@@ -1,0 +1,26 @@
+[
+  {
+    "testIdentifier": "ImmersalMappingTests/testGuidedUploadScreenRendersWorkspaceAndProgressFixtures()",
+    "viewportPixels": [
+      393,
+      852
+    ],
+    "screenshots": [
+      "guided-construction.png",
+      "guided-upload-paused.png",
+      "guided-workspace-accessibility.png",
+      "guided-workspace-dark.png",
+      "guided-workspace-light.png"
+    ]
+  },
+  {
+    "testIdentifier": "ImmersalMappingTests/testOccupiedWorkspaceAutomaticallyDisplaysNativeConfirmation()",
+    "viewportPixels": [
+      393,
+      852
+    ],
+    "screenshots": [
+      "guided-native-clear-confirmation.png"
+    ]
+  }
+]

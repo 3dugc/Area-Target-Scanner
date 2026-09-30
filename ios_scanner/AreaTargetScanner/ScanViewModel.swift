@@ -21,6 +21,8 @@ final class ScanViewModel: ObservableObject {
         pointCount: 0, coverageArea: 0, keyframeCount: 0, isScanning: false
     )
     @Published var scanHistory: [ScanHistoryItem] = []
+    @Published var deletionError: String?
+    var deletionBlocked: (String) -> Bool = { _ in false }
 
     @Published var gpsStatus = "GPS 未开启"
     @Published private(set) var exportStatus: String?
@@ -343,6 +345,11 @@ final class ScanViewModel: ObservableObject {
     /// 删除一条扫描记录（目录 + ZIP）
     func deleteScan(_ item: ScanHistoryItem) {
         guard !isExporting else { return }
+        guard !deletionBlocked(item.directoryPath) else {
+            deletionError = "Immersal 上传任务仍需要这条扫描。请先完成上传，或在 Immersal 任务页停止本机任务。"
+            return
+        }
+        deletionError = nil
         let fm = FileManager.default
         try? fm.removeItem(atPath: item.directoryPath)
         for format in ScanExportFormat.allCases {

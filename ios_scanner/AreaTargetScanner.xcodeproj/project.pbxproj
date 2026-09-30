@@ -49,6 +49,14 @@
 		A20005 /* ImmersalScanExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20005; };
 		A20006 /* DualExportViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20006; };
 		A20007 /* ScanExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20007 /* ScanExportService.swift */; };
+		A30001 /* ImmersalAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30001 /* ImmersalAPIClientTests.swift */; };
+		A30002 /* ImmersalAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30002 /* ImmersalAPIClient.swift */; };
+		A30003 /* ImmersalKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30003 /* ImmersalKeychainStore.swift */; };
+		A30004 /* ImmersalMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30004 /* ImmersalMappingTests.swift */; };
+		A30005 /* ImmersalMappingJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30005 /* ImmersalMappingJob.swift */; };
+		A30006 /* ImmersalJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30006 /* ImmersalJobStore.swift */; };
+		A30007 /* ImmersalMappingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30007 /* ImmersalMappingModel.swift */; };
+		A30008 /* ImmersalMappingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30008 /* ImmersalMappingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +116,14 @@
 		B20005 /* ImmersalScanExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalScanExporterTests.swift; sourceTree = "<group>"; };
 		B20006 /* DualExportViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DualExportViewModelTests.swift; sourceTree = "<group>"; };
 		B20007 /* ScanExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanExportService.swift; sourceTree = "<group>"; };
+		B30001 /* ImmersalAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalAPIClientTests.swift; sourceTree = "<group>"; };
+		B30002 /* ImmersalAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalAPIClient.swift; sourceTree = "<group>"; };
+		B30003 /* ImmersalKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalKeychainStore.swift; sourceTree = "<group>"; };
+		B30004 /* ImmersalMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingTests.swift; sourceTree = "<group>"; };
+		B30005 /* ImmersalMappingJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingJob.swift; sourceTree = "<group>"; };
+		B30006 /* ImmersalJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalJobStore.swift; sourceTree = "<group>"; };
+		B30007 /* ImmersalMappingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingModel.swift; sourceTree = "<group>"; };
+		B30008 /* ImmersalMappingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +174,7 @@
 		H10003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				B30005 /* ImmersalMappingJob.swift */,
 				B20002 /* ScanLocation.swift */,
 				B10003 /* CameraIntrinsics.swift */,
 				B10004 /* CameraPose.swift */,
@@ -172,6 +189,10 @@
 		H10004 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B30007 /* ImmersalMappingModel.swift */,
+				B30006 /* ImmersalJobStore.swift */,
+				B30003 /* ImmersalKeychainStore.swift */,
+				B30002 /* ImmersalAPIClient.swift */,
 				B20007 /* ScanExportService.swift */,
 				B20004 /* ImmersalScanExporter.swift */,
 				B20003 /* ScanLocationService.swift */,
@@ -191,6 +212,7 @@
 		H10005 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				B30008 /* ImmersalMappingView.swift */,
 				B10010 /* PointCloudPreviewView.swift */,
 				B10011 /* ScanProgressView.swift */,
 				B10015 /* ARScanningView.swift */,
@@ -203,6 +225,8 @@
 		H10006 /* AreaTargetScannerTests */ = {
 			isa = PBXGroup;
 			children = (
+				B30004 /* ImmersalMappingTests.swift */,
+				B30001 /* ImmersalAPIClientTests.swift */,
 				B20006 /* DualExportViewModelTests.swift */,
 				B20005 /* ImmersalScanExporterTests.swift */,
 				B20001 /* ScanLocationTests.swift */,
@@ -348,6 +372,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A30008 /* ImmersalMappingView.swift in Sources */,
+				A30007 /* ImmersalMappingModel.swift in Sources */,
+				A30006 /* ImmersalJobStore.swift in Sources */,
+				A30005 /* ImmersalMappingJob.swift in Sources */,
+				A30003 /* ImmersalKeychainStore.swift in Sources */,
+				A30002 /* ImmersalAPIClient.swift in Sources */,
 				A20007 /* ScanExportService.swift in Sources */,
 				A20004 /* ImmersalScanExporter.swift in Sources */,
 				A20003 /* ScanLocationService.swift in Sources */,
@@ -384,6 +414,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A30004 /* ImmersalMappingTests.swift in Sources */,
+				A30001 /* ImmersalAPIClientTests.swift in Sources */,
 				A20006 /* DualExportViewModelTests.swift in Sources */,
 				A20005 /* ImmersalScanExporterTests.swift in Sources */,
 				A20001 /* ScanLocationTests.swift in Sources */,

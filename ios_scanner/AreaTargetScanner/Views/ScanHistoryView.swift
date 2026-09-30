@@ -83,6 +83,9 @@ struct ScanHistoryView: View {
         } message: {
             Text("将删除扫描数据和对应的 ZIP 文件，此操作不可撤销。")
         }
+        .alert("无法删除扫描", isPresented: Binding(get: { viewModel.deletionError != nil }, set: { if !$0 { viewModel.deletionError = nil } })) {
+            Button("好", role: .cancel) { viewModel.deletionError = nil }
+        } message: { Text(viewModel.deletionError ?? "") }
     }
 }
 

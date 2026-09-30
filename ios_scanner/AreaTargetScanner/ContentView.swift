@@ -25,6 +25,9 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingExportFormats = false
     @StateObject private var viewModel = ScanViewModel()
+    @StateObject private var mappingModel = ImmersalMappingModel()
+    @State private var showingImmersal = false
+    @State private var uploadDirectory: URL?
     @State private var sharePayload: SharePayload? = nil
     @State private var previewItem: IdentifiableURL? = nil
 
@@ -67,8 +70,17 @@ struct ContentView: View {
                 ScanHistoryView(viewModel: viewModel)
             }
         }
-        .onAppear { viewModel.checkCameraPermission() }
-        .onChange(of: scenePhase) { phase in viewModel.setAppActive(phase == .active) }
+        .onAppear {
+            viewModel.checkCameraPermission()
+            viewModel.deletionBlocked = { [model = mappingModel] path in model.blocksDeletion(of: path) }
+        }
+        .task { await mappingModel.monitorJobs() }
+        .onChange(of: scenePhase) { phase in
+            viewModel.setAppActive(phase == .active)
+            // Temporary inactive states (e.g. password autofill) must not cancel login.
+            if phase == .background { mappingModel.setAppActive(false) }
+            else if phase == .active { mappingModel.setAppActive(true) }
+        }
         .onChange(of: viewModel.exportShareURL) { url in
             if let url {
                 sharePayload = SharePayload(activityItems: [url])
@@ -80,6 +92,9 @@ struct ContentView: View {
         } message: { Text(viewModel.exportError ?? "") }
         .sheet(item: $sharePayload) { payload in
             ActivityView(activityItems: payload.activityItems)
+        }
+        .sheet(isPresented: $showingImmersal) {
+            ImmersalMappingView(model: mappingModel, scanDirectory: uploadDirectory)
         }
         .fullScreenCover(item: $previewItem) { item in
             ModelPreviewView(fileURL: item.url)
@@ -95,6 +110,7 @@ struct ContentView: View {
                 .multilineTextAlignment(.center).padding(.horizontal, 40)
             Button("授权摄像头") { viewModel.requestCameraPermission() }
                 .buttonStyle(.borderedProminent).tint(.red)
+            cloudTasksButton
         }
     }
 
@@ -108,6 +124,7 @@ struct ContentView: View {
                     UIApplication.shared.open(url)
                 }
             }.buttonStyle(.borderedProminent).tint(.orange)
+            cloudTasksButton
         }
     }
 
@@ -130,6 +147,7 @@ struct ContentView: View {
                         .font(.title3.weight(.semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }.buttonStyle(.bordered).tint(.white)
+                cloudTasksButton
             }
             .padding(.horizontal, 40).padding(.bottom, 40)
         }
@@ -229,6 +247,21 @@ struct ContentView: View {
                             .buttonStyle(.bordered).tint(.white)
                     }
 
+                    Button {
+                        uploadDirectory = URL(fileURLWithPath: exportPath)
+                        showingImmersal = true
+                    } label: {
+                        Label("上传到 Immersal 并建图", systemImage: "icloud.and.arrow.up")
+                            .font(.title3.weight(.semibold))
+                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.indigo)
+                    .disabled(viewModel.isExporting || immersalReason != nil)
+                    if let immersalReason {
+                        Text("Immersal 暂不可用：\(immersalReason)")
+                            .font(.caption).foregroundStyle(.white.opacity(0.7))
+                    }
+
                     Button(action: { viewModel.resetToReady() }) {
                         Label("重新扫描", systemImage: "arrow.counterclockwise")
                             .font(.title3.weight(.semibold))
@@ -253,5 +286,15 @@ struct ContentView: View {
             Button("返回") { viewModel.resetToReady() }
                 .buttonStyle(.borderedProminent).tint(.red)
         }
+    }
+
+    private var cloudTasksButton: some View {
+        Button {
+            uploadDirectory = nil
+            showingImmersal = true
+        } label: {
+            Label("Immersal 账号与任务", systemImage: "icloud")
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
+        }.buttonStyle(.bordered).tint(.white)
     }
 }
