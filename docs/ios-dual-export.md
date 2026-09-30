@@ -72,4 +72,4 @@ python3 -m pytest --confcutdir=tests/phase1 tests/phase1/test_scan_contract.py -
 4. 退出重开 App，从历史记录再次导出，确认 run/GPS 与第一次一致；检查容量，删除测试记录后确认目录与两类 ZIP 一起移除。
 5. 离线结合实际相机运动与场景点检查方向、投影和米制尺度；允许/拒绝定位均走一次，不以模拟器结果替代实拍结论。
 
-实际两种 ZIP 的检查结果见 [真机文件验证记录](ios-dual-export-validation.md)。实施与验证状态见 [实施记录](superpowers/plans/2026-09-29-ios-dual-export-tasks.md)。本功能不登录、上传或调用建图接口；不声明完成 Immersal 云端建图验证。已有包的格式核查见 [All.zip 核查](immersal-scan-upload-format.md)。
+实际两种 ZIP 的检查结果见 [真机文件验证记录](ios-dual-export-validation.md)。实施与验证状态见 [实施记录](superpowers/plans/2026-09-29-ios-dual-export-tasks.md)。本页描述的本地导出不调用云端接口；另有 [直接上传与建图](ios-immersal-direct-upload.md) 入口，无需先生成 ZIP。尚不声明完成 Immersal 云端建图验证。已有包的格式核查见 [All.zip 核查](immersal-scan-upload-format.md)。

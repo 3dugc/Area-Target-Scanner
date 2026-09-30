@@ -22,6 +22,37 @@ final class ImmersalScanExporterTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
+    func testDirectUploadMatchesArchiveWithoutCreatingZIP() throws {
+        try writeScan(frames: [frame(index: 7, run: 123), frame(index: 42, run: 123)])
+        let exporter = ImmersalScanExporter()
+        let prepared = try exporter.prepareUpload(scanDirectory: scan, isCancelled: { false })
+        XCTAssertEqual(prepared.frameCount, 2)
+        let direct = try exporter.uploadFrame(at: 0, from: prepared, isCancelled: { false })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scan.path + "_immersal.zip"))
+        let entries = try unzip(export())
+        XCTAssertEqual(direct.png, entries["frame_0007.png"])
+        var archived = try json(entries, index: 7)
+        archived.removeValue(forKey: "imagePath")
+        let metadata = try XCTUnwrap(JSONSerialization.jsonObject(with: direct.metadata) as? NSDictionary)
+        XCTAssertEqual(metadata, archived as NSDictionary)
+        XCTAssertNil(metadata["token"])
+        XCTAssertEqual(prepared.fingerprint, try exporter.prepareUpload(scanDirectory: scan, isCancelled: { false }).fingerprint)
+    }
+
+    func testUploadPreflightRejectsBadLaterFrameBeforeSendingAnything() throws {
+        try writeScan(frames: [frame(index: 1), frame(index: 2)])
+        try Data("broken".utf8).write(to: scan.appendingPathComponent("images/source_2.jpg"))
+        XCTAssertThrowsError(try ImmersalScanExporter().prepareUpload(scanDirectory: scan, isCancelled: { false }))
+    }
+
+    func testUploadRejectsSourceMutationAfterPreparation() throws {
+        try writeScan(frames: [frame(index: 1)])
+        let exporter = ImmersalScanExporter()
+        let prepared = try exporter.prepareUpload(scanDirectory: scan, isCancelled: { false })
+        try Data("changed".utf8).write(to: scan.appendingPathComponent("images/source_1.jpg"))
+        XCTAssertThrowsError(try exporter.uploadFrame(at: 0, from: prepared, isCancelled: { false }))
+    }
+
     func testArchiveHasOnlyRootImageJSONPairsAndVerifiedCRC() throws {
         try writeScan(frames: [frame(index: 7, run: 123), frame(index: 42, run: 123)])
         let exporter = ImmersalScanExporter()
