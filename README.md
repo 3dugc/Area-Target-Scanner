@@ -260,6 +260,7 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 
 ## Documentation
 
+- [Deployment](docs/deployment.md) — Tencent image publishing and the Portainer stack for `area-target.p.01xr.com`
 - [Async Localization Design](docs/async-localization-design.md) — architecture for non-blocking localization
 - [Cross-Session Comparison Report](docs/cross-session-comparison-report.md) — localization accuracy across different scan sessions
 - [iOS Dual Export](docs/ios-dual-export.md) — Area Target / Immersal export formats, GPS and validation
