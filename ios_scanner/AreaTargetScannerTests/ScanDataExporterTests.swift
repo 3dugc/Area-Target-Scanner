@@ -306,6 +306,29 @@ final class ScanDataExporterTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(frameIntrinsics["fx"] as? Double), 525, accuracy: 0.001)
     }
 
+    func testOptionalRunAndGPSPersistWithoutChangingSchemaAndLegacyPosesDecode() throws {
+        let old = makeSamplePoses(count: 1)[0]
+        let location = ScanLocation(latitude: 31.2, longitude: 121.4, altitude: 12,
+                                    timestamp: 1_800_000_000, horizontalAccuracy: 5, verticalAccuracy: 8)
+        let pose = CameraPose(timestamp: old.timestamp, transform: old.transform,
+                              imageFilename: old.imageFilename, imageOrientation: old.imageOrientation,
+                              intrinsics: old.intrinsics, imageWidth: old.imageWidth, imageHeight: old.imageHeight,
+                              run: 12345, location: location)
+        let output = tempDirectory.appendingPathComponent("optional_metadata")
+        try exporter.exportAll(vertices: makeSampleVertices(count: 1), poses: [pose],
+                               intrinsics: makeSampleIntrinsics(), images: makeSampleImages(count: 1), outputPath: output.path)
+        let manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: output.appendingPathComponent("manifest.json"))) as? [String: Any])
+        XCTAssertEqual(manifest["schemaVersion"] as? Int, 1)
+        let frame = try XCTUnwrap((manifest["frames"] as? [[String: Any]])?.first)
+        XCTAssertEqual(frame["run"] as? Int, 12345)
+        let stored = try XCTUnwrap(frame["location"] as? [String: Any])
+        XCTAssertEqual(try JSONDecoder().decode(ScanLocation.self, from: JSONSerialization.data(withJSONObject: stored)), location)
+        XCTAssertEqual(try JSONDecoder().decode(CameraPose.self, from: JSONEncoder().encode(pose)), pose)
+        let legacy = try JSONDecoder().decode(CameraPose.self, from: JSONEncoder().encode(old))
+        XCTAssertNil(legacy.run)
+        XCTAssertNil(legacy.location)
+    }
+
     /// 不允许旧的、未记录图像方向的 pose 被默默补默认值后导出。
     func testExportAllRejectsPoseMissingImageOrientation() {
         XCTAssertThrowsError(

@@ -236,7 +236,7 @@ final class ScanDataExporter {
                 )
             }
 
-            let frame: [String: Any] = [
+            var frame: [String: Any] = [
                 "index": index,
                 "timestamp": pose.timestamp,
                 "imageFile": "images/\(pose.imageFilename)",
@@ -253,6 +253,10 @@ final class ScanDataExporter {
                     "cy": frameIntrinsics.cy
                 ]
             ]
+            if let run = pose.run { frame["run"] = run }
+            if let location = pose.location {
+                frame["location"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(location))
+            }
             frames.append(frame)
         }
 

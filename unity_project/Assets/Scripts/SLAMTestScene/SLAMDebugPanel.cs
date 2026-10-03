@@ -1,3 +1,5 @@
+using System.Globalization;
+using AreaTargetPlugin;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -11,6 +13,9 @@ public class SLAMDebugPanel : MonoBehaviour
     [SerializeField] private Text trackingInfoText;
     [SerializeField] private Text fpsText;
     [SerializeField] private Text assetInfoText;
+
+    private string _trackingDetail;
+    private string _diagnosticSummary;
 
     void Awake()
     {
@@ -47,8 +52,8 @@ public class SLAMDebugPanel : MonoBehaviour
 
     public void SetTrackingInfo(int matchedFeatures, float confidence)
     {
-        if (trackingInfoText != null)
-            trackingInfoText.text = $"匹配特征: {matchedFeatures} | 置信度: {Mathf.RoundToInt(confidence * 100f)}%";
+        _trackingDetail = $"匹配特征: {matchedFeatures} | 置信度: {Mathf.RoundToInt(confidence * 100f)}%";
+        RefreshTrackingText();
     }
 
     public void SetAssetInfo(string name, string version, int keyframeCount)
@@ -65,15 +70,57 @@ public class SLAMDebugPanel : MonoBehaviour
 
     public void SetDetailedTracking(string detail)
     {
-        if (trackingInfoText != null)
-            trackingInfoText.text = detail;
+        _trackingDetail = detail ?? string.Empty;
+        RefreshTrackingText();
+    }
+
+    /// <summary>
+    /// Shows only the latest operational diagnostic summary. Full pose matrices,
+    /// images, and capture payloads are deliberately never rendered here.
+    /// </summary>
+    public void SetDiagnosticSummary(
+        long frameId,
+        long resultAgeNs,
+        TrackingState state,
+        LocalizationQuality quality,
+        int inliers,
+        long workerProcessingTimeNs)
+    {
+        _diagnosticSummary =
+            $"诊断帧: {frameId} | 结果年龄: {FormatMilliseconds(resultAgeNs)} ms\n" +
+            $"状态: {state} | 质量: {quality} | 内点: {inliers} | worker: {FormatMilliseconds(workerProcessingTimeNs)} ms";
+        RefreshTrackingText();
     }
 
     public void Clear()
     {
+        _trackingDetail = string.Empty;
+        _diagnosticSummary = string.Empty;
         if (statusText != null) statusText.text = string.Empty;
         if (trackingInfoText != null) trackingInfoText.text = string.Empty;
         if (fpsText != null) fpsText.text = string.Empty;
         if (assetInfoText != null) assetInfoText.text = string.Empty;
+    }
+
+    private void RefreshTrackingText()
+    {
+        if (trackingInfoText == null)
+            return;
+
+        if (string.IsNullOrEmpty(_trackingDetail))
+        {
+            trackingInfoText.text = _diagnosticSummary ?? string.Empty;
+            return;
+        }
+
+        trackingInfoText.text = string.IsNullOrEmpty(_diagnosticSummary)
+            ? _trackingDetail
+            : _trackingDetail + "\n" + _diagnosticSummary;
+    }
+
+    private static string FormatMilliseconds(long nanoseconds)
+    {
+        double milliseconds = Mathf.Max(0f, nanoseconds / 1_000_000f);
+        return milliseconds.ToString("F1", CultureInfo.InvariantCulture);
     }
 }

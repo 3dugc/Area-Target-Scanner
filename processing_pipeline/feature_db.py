@@ -119,7 +119,9 @@ def _validate_row_major_affine_matrix(matrix: np.ndarray, *, context: str) -> np
         raise ValueError(f"{context} must contain exactly 16 float64 values")
     if not np.all(np.isfinite(values)):
         raise ValueError(f"{context} must contain only finite values")
-    if not np.allclose(values[3], [0.0, 0.0, 0.0, 1.0], rtol=0.0, atol=1e-9):
+    # ARKit pose data begins as simd_float4x4, so JSON-decoded values may
+    # retain float32 rounding (for example 0.99999994 for an affine 1.0).
+    if not np.allclose(values[3], [0.0, 0.0, 0.0, 1.0], rtol=0.0, atol=1e-6):
         raise ValueError(
             f"{context} violates the row-major affine pose contract: "
             "last row must be [0, 0, 0, 1]"

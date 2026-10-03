@@ -7,30 +7,30 @@
 - 6DoF 视觉定位（ORB 特征 + BoW 检索 + PnP RANSAC）
 - Kalman 滤波姿态平滑
 - 原生 C++ 引擎，无 OpenCV C# 依赖
-- 阶段 0 验证 macOS 开发构建和 iOS 基线；其他平台见下方支持范围
+- 阶段 1 验证干净 UPM iOS Development 导出与 generic-device Xcode 链接；真机验收见下方支持范围
 - AR Foundation 集成
 - SQLite 特征数据库
 - 完整的测试套件（100+ 单元测试 + 属性测试）
 
 ## 系统要求
 
-- Unity 6000.4.6f1（阶段 0 验证版本）
+- Unity 6000.4.6f1（阶段 1 验证版本）
 - AR Foundation 6.0.0+
 - iOS 16.0+
 
-## 阶段 0 支持范围
+## 阶段 1 支持范围
 
-| 目标平台 | 阶段 0 状态 |
+| 目标平台 | 当前状态 |
 |---|---|
-| macOS 开发构建 | 已验证基线 |
-| iOS 扫描器通用设备构建 | 已验证基线 |
-| iOS 定位器归档 | 仅完成 arm64 架构和静态符号验证 |
-| Rokid AR Studio | 计划在阶段 2 实施；阶段 0 不支持 |
-| Android ARM64 | 计划在阶段 2 实施；阶段 0 不支持 |
-| Windows/Linux 运行时 | 不支持；已移除空占位文件 |
+| macOS 开发构建 | 已验证 native 基线 |
+| iOS UPM generic-device 导出/链接 | 已在干净 Unity 项目中验证，禁用签名的 `xcodebuild` 成功 |
+| iPhone/iPad 运行时定位 | 任务 9/10 待完成：同图、双设备、三场地、每次 30 分钟验收 |
+| Rokid AR Studio | 计划在阶段 2 实施；阶段 1 不支持 |
+| Android ARM64 | 计划在阶段 2 实施；阶段 1 不支持 |
+| Windows/Linux 运行时 | 阶段 1 不支持 |
 
-阶段 0 使用 Python 3.11.12、OpenCV 4.13.0、Unity 6000.4.6f1 和 Xcode 26.2 完成本地验证。回滚基线为 `81d815f`。
-- 支持 ARKit 或 ARCore 的设备
+阶段 1 使用 Python 3.11.12、Unity 6000.4.6f1 和 Xcode 进行本地门禁。默认诊断写入 `Application.persistentDataPath/AreaTargetDiagnostics/`，仅含 JSON Lines 数值摘要，不含图像、扫描 ZIP 或绝对路径。
+- 阶段 1 仅面向 ARKit/iOS；ARCore/Android 尚未支持。
 
 ## 安装
 
@@ -45,9 +45,39 @@
 }
 ```
 
-### 方式二：阶段 0 UPM 包
+### 方式二：阶段 1 UPM 包
 
-在仓库根目录运行 `python3 tools/phase0/build_upm_package.py`，然后通过 Unity Package Manager 安装 `dist/com.areatarget.tracking-1.2.1.tgz`。
+在仓库根目录运行 `python3 tools/phase0/build_upm_package.py`，然后通过 Unity Package Manager 安装 `dist/com.areatarget.tracking-1.3.0.tgz`。
+
+包正式依赖固定的 `com.gilzoide.sqlite-net` `1.3.2`。若项目尚未配置 OpenUPM，请在项目的 `Packages/manifest.json` 添加 scoped registry（这是解析配置，不是对 SQLite 的临时注入）：
+
+```json
+{
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": ["com.gilzoide"]
+    }
+  ],
+  "dependencies": {
+    "com.areatarget.tracking": "file:../dist/com.areatarget.tracking-1.3.0.tgz"
+  }
+}
+```
+
+### iOS ARKit 配置（首次导出前必做一次）
+
+该包会直接解析官方 `com.unity.xr.arkit` 依赖。安装包后，在 Unity 菜单运行 **Area Target → Configure iOS ARKit**，等待 Unity 保存设置并完全退出该进程；随后重新打开 Unity，再执行 `BuildiOS.Build` 或 `BuildiOS.BuildDevelopment`。这两个构建入口会在 Loader 或编译符号缺失时明确失败，避免导出缺少 `UnityARKit` 原生 provider 的应用。
+
+命令行构建等价于先单独运行：
+
+```bash
+Unity -batchmode -projectPath /absolute/path/to/project \
+  -executeMethod AreaTargetPlugin.Editor.AreaTargetIosXrBootstrap.Configure -quit
+```
+
+再使用新的 Unity 进程执行 iOS 构建。不得手工复制 Unity 的 `libUnityARKit.a`；Provider 由官方 XR Plug-in Management loader 配置纳入导出。
 
 ## 快速开始
 
@@ -216,9 +246,9 @@ public class ARAreaTarget : MonoBehaviour
 | 平台 | 文件 | 位置 |
 |------|------|------|
 | macOS | libvisual_localizer.dylib | Plugins/macOS/ |
-| iOS | libvisual_localizer.a（静态检查基线） | Plugins/iOS/ |
+| iOS | libvisual_localizer.a + opencv2.framework（UPM 内置） | Plugins/iOS/ |
 
-阶段 0 不提供 Android ARM64、Rokid、Windows 或 Linux 运行时原生库。
+阶段 1 不提供 Android ARM64、Rokid、Windows 或 Linux 运行时原生库。
 
 ### 从源码编译原生库
 
@@ -230,13 +260,25 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/path/to/opencv
 make -j$(sysctl -n hw.ncpu)
 ```
 
-### 阶段 0 验证
+### 阶段 1 验证
 
 ```bash
-tools/phase0/verify.sh local
+# GitHub-hosted CI 可运行的非 Unity/非设备检查
+tools/phase1/verify.sh ci
+
+# 开发 Mac 的完整 Unity/Xcode 门禁
+tools/phase1/verify.sh local
+
+# 干净 UPM 项目的 iOS Development 导出与 generic-device Xcode 链接
+tools/phase1/validate_ios_upm_build.sh
+
+# USB 同时可见 iPhone 与 iPad 的预检；任务 9 接入签名 smoke 命令后执行部署/定位
+tools/phase1/verify.sh device
+
 python3 tools/phase0/build_upm_package.py
-tools/phase0/validate_unity_package.sh
 ```
+
+`ci` 对 Unity、签名和真机步骤报告带理由的 `SKIP`，不将它们视为通过；`local` 缺 Unity 或 Xcode 必须失败。阶段 1 的最终设备验收要求三个 20–100 m² 场地，每个场地由同一处理地图在 LiDAR iPhone 和 LiDAR iPad 各完成一次成功定位、失锁/恢复记录和 30 分钟连续运行。该验收尚未完成，因此本包不声明 iPhone/iPad 真机定位已经全面支持。
 
 ## 目录结构
 

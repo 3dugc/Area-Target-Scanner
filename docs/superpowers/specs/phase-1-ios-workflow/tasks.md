@@ -563,6 +563,10 @@ git commit -m "feat: unify iOS localization coordinates"
 
 **可运行产物：** Runtime 的单 worker 在不阻塞 Unity 主线程的情况下定位，覆盖 pending 旧帧、拒绝过期结果，并安全 reset/dispose。
 
+> **进度（2026-07-13）：** 步骤 1–7 已完成。`AsyncLocalizationRunner` 以单 worker 独占 `Process`、alignment、`Reset` 和 `Dispose`；输入只保留最新 pending frame，输出按 map、generation、时间和 frame ID 过滤，任何有输入上下文的 worker 异常（包含 alignment）都会产出 `LifecycleFailure` 后停机。`AreaTargetTracker` 与 `ARTestSceneManager`、`SLAMTestSceneManager` 已改为“提交帧→消费结果”，SLAM 场景的自建线程、2ms 轮询与反射读取已删除。审计额外发现 `PointCloudLocalizer` 直接绕过 engine，已做最小迁移至同一 runner 边界。
+>
+> **验证证据：** 先后观察到 runner 接口、Tracker 异步入口、两份场景迁移、PointCloud runner 委派、alignment worker 所有权及 alignment 异常传播的失败测试；实现后专用测试均通过。项目没有独立的 PlayMode 生命周期程序集，因此 `AsyncLocalizationRunnerTests` 的真实线程、latest-frame、reset/dispose 和异常路径覆盖作为需求 R1.6 所允许的等价生命周期验证。最终 Unity EditMode 回归为 `975/975` 通过、`0` 失败、`0` 跳过，且无 C# 编译错误；结果文件：`/private/tmp/phase1-task5-editmode-final4.xml`。
+
 **涉及文件：**
 
 - 新建：`unity_plugin/AreaTargetPlugin/Runtime/AsyncLocalizationRunner.cs`
@@ -574,7 +578,7 @@ git commit -m "feat: unify iOS localization coordinates"
 - 修改：`unity_project/Assets/Scripts/ARTestSceneManager.cs`
 - 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMTestSceneManager.cs`
 
-- [ ] **步骤 1：添加失败的 runner 生命周期测试**
+- [x] **步骤 1：添加失败的 runner 生命周期测试**
 
 使用一个实现 `ILocalizationProcessor` 的 fake（不调用 native）测试以下行为：
 
@@ -606,13 +610,13 @@ public async Task Reset_waits_for_worker_before_resetting_processor()
 
 还必须覆盖：深拷贝图像、map generation 变化、过期结果、乱序结果、重复 `Start`、`DisposeAsync` 后提交和 worker 异常。
 
-- [ ] **步骤 2：运行测试并确认失败**
+- [x] **步骤 2：运行测试并确认失败**
 
 在 Unity Test Runner 运行 `AreaTargetPlugin.Tests/AsyncLocalizationRunnerTests`。
 
 预期结果：失败，因为 runner/processor 抽象尚不存在。
 
-- [ ] **步骤 3：定义可替换的处理器边界**
+- [x] **步骤 3：定义可替换的处理器边界**
 
 在 Runtime 内定义内部接口：
 
@@ -626,7 +630,7 @@ internal interface ILocalizationProcessor : IDisposable
 
 由 `VisualLocalizationEngine` 实现该接口，确保它的 native handle 仅在 worker 使用。接口不得暴露 Unity `Transform` 或 UI 对象。
 
-- [ ] **步骤 4：实现单 worker 和 bounded latest-frame 槽**
+- [x] **步骤 4：实现单 worker 和 bounded latest-frame 槽**
 
 `AsyncLocalizationRunner` 使用一个 worker、一个 input lock、一个 output lock 和一个 cancellation 信号。`Submit` 在锁内替换 pending frame，递增覆盖计数并唤醒 worker；worker 在锁外调用 `processor.Process`。任何时候仅有 worker 可进入 processor。
 
@@ -643,19 +647,19 @@ public bool TryDequeueLatest(
 
 不匹配 map/generation、frame ID 倒退或超过 `maxAgeNs` 时返回 `false` 并写入诊断，而非应用结果。
 
-- [ ] **步骤 5：实现安全 reset/dispose**
+- [x] **步骤 5：实现安全 reset/dispose**
 
 `ResetAsync` 必须：停止接收、递增 generation、清空 pending/output、等待 processor 离开 `Process`、调用 `Reset`、恢复接收。`DisposeAsync` 必须：停止接收、唤醒 worker、等待其退出、调用 `Dispose`。所有返回前都不得存在可能访问 native handle 的活动 worker。
 
 若 worker 抛出异常，将它转换为 `LifecycleFailure` 结果，停止 runner 并保留异常摘要供诊断导出；不得吞掉异常或继续使用未知状态 handle。
 
-- [ ] **步骤 6：将 tracker 和两个场景迁移到 runner**
+- [x] **步骤 6：将 tracker 和两个场景迁移到 runner**
 
 `AreaTargetTracker` 公开提交/消费异步结果的入口，主线程仅调用 `SubmitFrame` 与 `TryGetLatestTrackingResult`。`ARTestSceneManager` 删除同步 `ProcessFrame` 调用；`SLAMTestSceneManager` 删除自有 worker、2ms polling、reflection 读取 debug 和直接 native reset 路径。
 
 每帧场景逻辑只能：采集 ARFoundation 数据、提交 frame、消费已验证结果、更新 `SceneUpdater`/UI 摘要。
 
-- [ ] **步骤 7：运行 EditMode 与 PlayMode 生命周期测试**
+- [x] **步骤 7：运行 EditMode 与 PlayMode 生命周期测试**
 
 在 Unity Test Runner 执行：
 
@@ -669,7 +673,7 @@ AreaTargetPlugin.Tests/ARTestSceneDebugUITests
 
 预期结果：全部通过；`AsyncLocalizationRunnerTests` 覆盖 latest-frame、过期/乱序、reset/dispose 和异常路径。
 
-- [ ] **步骤 8：提交任务 5**
+- [x] **步骤 8：提交任务 5**
 
 ```bash
 git add \
@@ -691,6 +695,10 @@ git commit -m "feat: run localization off Unity main thread"
 
 **可运行产物：** Runtime 可以导出有界 JSON Lines 诊断；测试证明其中没有图像、ZIP 或绝对用户路径。
 
+> **进度（2026-07-13）：** 步骤 1–6 已完成。`LocalizationDiagnosticRecord` 固定 schema `1` 并仅序列化身份、帧、定位和 native 数值摘要；`BoundedDiagnosticBuffer` 是线程安全 FIFO，满时丢弃最旧记录并累计计数。`LocalizationDiagnosticExporter` 在创建目录前拒绝路径分隔符与图像/扫描标记，按 UTC 和 map hash 写 JSON Lines。tracker 对帧提交、pending 覆盖、地图/SQLite/native 初始化失败、reset、dispose、过期结果和最终应用结果写入记录；runner 通过内部 `ResultProduced` 事件在 worker 产出 native 结果时直接写入同一 buffer，不改变公开 API。两个场景只显示最新标量摘要。
+>
+> **验证证据：** schema 测试先产生预期 C# 编译失败，随后模型 `3/3`、补齐 capture timestamp 后 `5/5` 通过；worker 结果事件 `1/1` 通过（`/private/tmp/phase1-task6-worker-event-green.xml`）；真实 `SLAMTestAssets` 初始化、native worker 结果和 JSONL 导出 `1/1` 通过（`/private/tmp/phase1-task6-sample-worker-export.xml`）。还原临时导出路径后，完整 Unity EditMode 回归 `987/987` 通过、`0` 失败（`/private/tmp/phase1-task6-editmode-restored.xml`）；真实样例 JSONL（`/private/tmp/phase1-task6-manual-sample-20260713t1018/20260713T101852924Z_3d5ea46587a0.jsonl`）执行规定的 `rg` 检查无输出。
+
 **涉及文件：**
 
 - 新建：`unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticRecord.cs`
@@ -702,7 +710,9 @@ git commit -m "feat: run localization off Unity main thread"
 - 修改：`unity_project/Assets/Scripts/ARTestSceneManager.cs`
 - 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMDebugPanel.cs`
 
-- [ ] **步骤 1：添加失败的诊断 schema 与隐私测试**
+> 最小必要接入：为满足“worker 也可写入诊断”的设计约束，另修改 `AsyncLocalizationRunner.cs` 与其测试；为让 SLAM 场景实际调用面板摘要，另修改 `SLAMTestSceneManager.cs` 与其测试。这些改动不新增公开 Runtime API。
+
+- [x] **步骤 1：添加失败的诊断 schema 与隐私测试**
 
 在 `LocalizationDiagnosticTests.cs` 中构造一条完整记录，序列化后断言包含 schema、包版本、map hash、设备、frame ID、queue、latency、quality 和 native debug 字段；同时断言序列化文本不包含：
 
@@ -716,27 +726,27 @@ file://
 
 添加 buffer 上限为 2 时插入 3 条记录，断言保留最后两条且 `DroppedRecordCount == 1`。
 
-- [ ] **步骤 2：运行诊断测试并确认失败**
+- [x] **步骤 2：运行诊断测试并确认失败**
 
 在 Unity Test Runner 运行 `AreaTargetPlugin.Tests/LocalizationDiagnosticTests`。
 
 预期结果：失败，因为诊断模型和 exporter 尚不存在。
 
-- [ ] **步骤 3：实现版本化诊断记录与固定错误类别**
+- [x] **步骤 3：实现版本化诊断记录与固定错误类别**
 
 `LocalizationDiagnosticRecord` 的 schema 版本固定为 `1`；定义 `LocalizationFailureCategory`：`None`、`UnsupportedDevice`、`InvalidFrame`、`MapLoadFailed`、`NativeInitializationFailed`、`SqliteFailed`、`LocalizationFailed`、`StaleResult`、`LifecycleFailure`。
 
 记录允许存 `MapId`、`MapVersion`、`MapHash`，但不存 scan ZIP 名称、扫描目录、图像内容或真实场地名称。帧记录仅保存数值摘要，`T_U_S` 只记录是否应用和可选的量化平移/旋转摘要，不保存完整原始矩阵到默认导出。
 
-- [ ] **步骤 4：实现有界 buffer 与 exporter**
+- [x] **步骤 4：实现有界 buffer 与 exporter**
 
 `BoundedDiagnosticBuffer` 构造时要求正容量，按 FIFO 丢弃最旧记录。`LocalizationDiagnosticExporter` 以一行一个 JSON 对象写入应用 diagnostics 目录，文件名由 UTC 时间与 map hash 前缀组成。导出前校验每个记录的字符串字段不含路径分隔符和禁止字段名；违反时返回失败类别而不写文件。
 
-- [ ] **步骤 5：将 runner/tracker 事件写入诊断**
+- [x] **步骤 5：将 runner/tracker 事件写入诊断**
 
 在帧提交、pending 覆盖、native 成功/失败、过期结果、reset、dispose、地图加载和 SQLite/native 初始化失败处写一条诊断记录。实时 UI 只显示最近一条摘要：frame ID、结果年龄、state、quality、inlier 与 worker 耗时；不要在每帧 `Debug.Log` 整个 pose。
 
-- [ ] **步骤 6：运行 Unity 回归测试并手动导出样本**
+- [x] **步骤 6：运行 Unity 回归测试并手动导出样本**
 
 在 Unity Test Runner 执行 `LocalizationDiagnosticTests`、`ARTestSceneDebugUITests`、`SLAMDebugPanelTests`。随后在 Editor sample 中加载已有测试地图并导出一份诊断文件，检查：
 
@@ -746,19 +756,31 @@ rg -n "ImageData|JPEG|ScanData|/Users/|file://" /path/to/diagnostic.jsonl
 
 预期结果：测试通过；`rg` 无输出，诊断文件包含 schema 和 frame 摘要。
 
-- [ ] **步骤 7：提交任务 6**
+- [x] **步骤 7：提交任务 6**
 
 ```bash
 git add \
+  docs/superpowers/specs/phase-1-ios-workflow/tasks.md \
   unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticRecord.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticRecord.cs.meta \
   unity_plugin/AreaTargetPlugin/Runtime/BoundedDiagnosticBuffer.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/BoundedDiagnosticBuffer.cs.meta \
   unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticExporter.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationDiagnosticExporter.cs.meta \
   unity_plugin/AreaTargetPlugin/Tests/LocalizationDiagnosticTests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/LocalizationDiagnosticTests.cs.meta \
+  unity_plugin/AreaTargetPlugin/Runtime/AsyncLocalizationRunner.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/LocalizationFrameResult.cs \
+  unity_plugin/AreaTargetPlugin/Runtime/VisualLocalizationEngine.cs \
   unity_plugin/AreaTargetPlugin/Runtime/ExtendedDebugInfo.cs \
   unity_plugin/AreaTargetPlugin/Runtime/AreaTargetTracker.cs \
+  unity_plugin/AreaTargetPlugin/Tests/AsyncLocalizationRunnerTests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/ARTestSceneDebugUITests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/SLAMDebugPanelTests.cs \
+  unity_plugin/AreaTargetPlugin/Tests/SLAMTestSceneManagerTests.cs \
   unity_project/Assets/Scripts/ARTestSceneManager.cs \
   unity_project/Assets/Scripts/SLAMTestScene/SLAMDebugPanel.cs \
-  docs/superpowers/specs/phase-1-ios-workflow/tasks.md
+  unity_project/Assets/Scripts/SLAMTestScene/SLAMTestSceneManager.cs
 git commit -m "feat: add bounded iOS localization diagnostics"
 ```
 
@@ -768,21 +790,30 @@ git commit -m "feat: add bounded iOS localization diagnostics"
 
 **可运行产物：** 空 Unity 工程只安装 `com.areatarget.tracking-1.3.0.tgz` 就能导出并通过 generic iOS device Xcode 编译，不依赖 `unity_project/Assets/Editor` 或临时 manifest 注入。
 
+> **进度（2026-07-13）：** 步骤 1–7 已完成。新增 Python UPM 内容与依赖断言后，生成 `1.2.1` 包的测试如预期失败：缺 `package/Editor/iOSPostProcess.cs`，且 `validate_unity_package.sh` 仍向临时 manifest 注入 SQLite Git URL。随后将后处理迁入 UPM，生成包内置 iOS 静态库和 OpenCV framework，根工程的重复后处理已删除。SQLite 改为包自身固定的 `1.3.2` SemVer 依赖；验证工程只添加 OpenUPM 的 `com.gilzoide` scoped registry，不注入 SQLite dependency。最新 UPM 内容/repro 测试为 `3 passed`；Phase 0 验证的 Unity EditMode 为 `989/989` 且干净 UPM 安装成功；新的最小工程导出后 generic iOS Xcode Debug 构建报告 `BUILD SUCCEEDED`。验证工程只复制 `BuildiOS`、最小场景和场景管理脚本，未复制根工程的 `iOSPostProcess.cs`。
+>
+> **ARKit provider 修复完成（2026-07-13）：** 真机验收曾发现 generic-device 成功不足以证明 AR Foundation provider 可运行：干净工程未在脚本编译前注册 iOS `ARKitLoader`，导致 Unity 导出遗漏 `UnityARKit`。最小修复已将 `com.unity.xr.arkit` 声明为 UPM 依赖，使用 XR Plug-in Management 的官方 loader 注册入口，并把验证改为“配置并退出 Unity → 新进程导出”的两阶段；没有采用手工复制 Unity 内部静态库。新干净 UPM 工程的 export log 复制了官方 `libUnityARKit.a`，Xcode generic-device 编译通过。随后 iPhone 运行时日志确认 `UnityARKit` 已成功注册 input/meshing provider，并成功使用 ARWorldTracking 配置启动 AR session。
+
 **涉及文件：**
 
 - 新建：`unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs`
-- 新建：`unity_plugin/AreaTargetPlugin/Tests/UPMiOSBuildIntegrationTests.cs`
 - 新建：`tools/phase1/validate_ios_upm_build.sh`
+- 修改：`tests/phase0/test_upm_package.py`
+- 修改：`tests/phase0/test_package_metadata.py`
+- 修改：`tools/phase0/check_package_metadata.py`
 - 修改：`unity_plugin/AreaTargetPlugin/Editor/AreaTargetPlugin.Editor.asmdef`
+- 修改：`unity_plugin/AreaTargetPlugin/Tests/iOSBuildConfigTests.cs`
 - 修改：`unity_plugin/AreaTargetPlugin/package.json`
 - 修改：`unity_plugin/AreaTargetPlugin/CHANGELOG.md`
+- 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
 - 修改：`tools/phase0/build_upm_package.py`
 - 修改：`tools/phase0/validate_unity_package.sh`
-- 修改：`unity_project/Assets/Editor/iOSPostProcess.cs`
+- 删除：`unity_project/Assets/Editor/iOSPostProcess.cs`
 - 修改：`unity_project/Assets/Editor/BuildiOS.cs`
-- 修改：`unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md`
+- 修改：`unity_project/Assets/Plugins/iOS/libvisual_localizer.a`
+- 修改：`.gitignore`
 
-- [ ] **步骤 1：添加失败的 UPM 内容和依赖测试**
+- [x] **步骤 1：添加失败的 UPM 内容和依赖测试**
 
 在 `UPMiOSBuildIntegrationTests.cs` 或 Python UPM 内容测试中断言生成 tar 包包含：
 
@@ -795,7 +826,7 @@ package/package.json
 
 并断言 `package.json` 自身的 dependencies 含固定 SQLite 依赖；测试不得通过读取临时项目 manifest 的额外注入 URL 才通过。
 
-- [ ] **步骤 2：运行内容测试并确认失败**
+- [x] **步骤 2：运行内容测试并确认失败**
 
 运行：
 
@@ -806,7 +837,7 @@ venv/bin/python -m pytest tests/phase0/test_upm_package.py -v
 
 预期结果：新断言失败，因为 iOS 后处理仍只位于 `unity_project/Assets/Editor/`，framework 未作为 UPM 自包含依赖验证。
 
-- [ ] **步骤 3：迁移 iOS postprocess 到 UPM Editor**
+- [x] **步骤 3：迁移 iOS postprocess 到 UPM Editor**
 
 将可复用的 `iOSPostProcess` 迁入 `unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs`。它必须：
 
@@ -818,11 +849,11 @@ venv/bin/python -m pytest tests/phase0/test_upm_package.py -v
 
 `unity_project/Assets/Editor/iOSPostProcess.cs` 改为仅转发到包内实现，或删除重复实现以避免两个后处理同时修改 Xcode 工程。
 
-- [ ] **步骤 4：固定 SQLite 包解析与版本**
+- [x] **步骤 4：固定 SQLite 包解析与版本**
 
 将 `package.json` 升级至 `1.3.0`，SQLite 依赖使用阶段 0 已验证的固定来源/版本。修改 `validate_unity_package.sh`，移除向验证工程 `manifest.json` 注入 SQLite URL 的逻辑；验证工程只声明当前 `.tgz`，让 UPM 解析该包的正式 dependencies。
 
-- [ ] **步骤 5：实现 generic-device iOS UPM build 验证脚本**
+- [x] **步骤 5：实现 generic-device iOS UPM build 验证脚本**
 
 创建 `tools/phase1/validate_ios_upm_build.sh`。脚本必须：
 
@@ -845,7 +876,7 @@ xcodebuild \
 
 脚本使用 `set -euo pipefail`，失败时保留日志路径。
 
-- [ ] **步骤 6：运行 UPM 安装、Unity 导出与 Xcode 链接验证**
+- [x] **步骤 6：运行 UPM 安装、Unity 导出与 Xcode 链接验证**
 
 运行：
 
@@ -857,21 +888,28 @@ tools/phase1/validate_ios_upm_build.sh
 
 预期结果：三个命令均返回 0；验证工程没有依赖仓库测试项目的 Editor 后处理文件。
 
-- [ ] **步骤 7：提交任务 7**
+- [x] **步骤 7：提交任务 7**
 
 ```bash
 git add \
+  .gitignore \
   unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs \
-  unity_plugin/AreaTargetPlugin/Tests/UPMiOSBuildIntegrationTests.cs \
+  unity_plugin/AreaTargetPlugin/Editor/iOSPostProcess.cs.meta \
   tools/phase1/validate_ios_upm_build.sh \
   unity_plugin/AreaTargetPlugin/Editor/AreaTargetPlugin.Editor.asmdef \
+  unity_plugin/AreaTargetPlugin/Tests/iOSBuildConfigTests.cs \
   unity_plugin/AreaTargetPlugin/package.json \
   unity_plugin/AreaTargetPlugin/CHANGELOG.md \
+  unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md \
+  tests/phase0/test_upm_package.py \
+  tests/phase0/test_package_metadata.py \
   tools/phase0/build_upm_package.py \
+  tools/phase0/check_package_metadata.py \
   tools/phase0/validate_unity_package.sh \
   unity_project/Assets/Editor/iOSPostProcess.cs \
+  unity_project/Assets/Editor/iOSPostProcess.cs.meta \
   unity_project/Assets/Editor/BuildiOS.cs \
-  unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md \
+  unity_project/Assets/Plugins/iOS/libvisual_localizer.a \
   docs/superpowers/specs/phase-1-ios-workflow/tasks.md
 git commit -m "feat: make UPM iOS build self-contained"
 ```
@@ -881,6 +919,10 @@ git commit -m "feat: make UPM iOS build self-contained"
 **对应需求：** R1.6、R1.7
 
 **可运行产物：** `tools/phase1/verify.sh` 在 `ci`、`local`、`device` 模式以明确 PASS/FAIL/SKIP 汇总阶段 1 门禁；CI 自动运行非设备验证。
+
+> **进度（2026-07-13）：** 步骤 1–7 已完成。新增 driver 测试初次运行因 `tools/phase1/verify.sh` 不存在而按预期 `5 failed`；实现后使用替换 PATH 的假命令回归为 `6 passed`。`ci` 对所有 Unity 依赖项（包括干净 UPM 安装）明确 `SKIP`，原因是 GitHub-hosted CI 未配置 Unity 许可证或 iOS 签名；`local` 和 `device` 均将这些项视为必过门禁，避免假绿。`device` 会拒绝缺少 USB 可见 iPhone/iPad 的情形；若任一本地构建门禁失败，`device` 也会跳过 smoke，避免部署旧包；实际签名、部署和定位 smoke 将由任务 9 提供命令后通过 `PHASE1_DEVICE_SMOKE_COMMAND` 接入。
+>
+> **验证记录（2026-07-13）：** 完整 Python 回归为 `323 passed, 3 skipped, 4 warnings`，driver 回归为 `6 passed`，真实 `tools/phase1/verify.sh ci` 为 `PASS=5 FAIL=0 SKIP=6`，UPM 内容回归为 `3 passed`，脚本语法、YAML 解析和 `git diff --check` 均通过。本机 `local` 门禁已通过合同、Python、macOS/iOS native 和 UPM 内容阶段；随后 Unity Licensing Client 在进入 EditMode 前返回 `505 Unsupported protocol version '1.18.1'` 并持续重试。该进程已停止，故本机 Unity/Xcode 门禁**未通过、未被记录为绿灯**；需修复 Unity Hub/许可证客户端协议不匹配后重跑 `tools/phase1/verify.sh local`。
 
 **涉及文件：**
 
@@ -892,7 +934,7 @@ git commit -m "feat: make UPM iOS build self-contained"
 - 修改：`unity_plugin/AreaTargetPlugin/README.md`
 - 修改：`docs/ios-device-test-guide.md`
 
-- [ ] **步骤 1：添加失败的 verify driver 测试**
+- [x] **步骤 1：添加失败的 verify driver 测试**
 
 创建 `tests/phase1/test_verify_driver.py`，用替换后的 PATH 假命令验证：
 
@@ -901,7 +943,7 @@ git commit -m "feat: make UPM iOS build self-contained"
 - `device` 缺少可见设备时返回非零并输出设备发现命令。
 - 子检查失败时整个 driver 返回非零并保留失败步骤名称。
 
-- [ ] **步骤 2：运行测试并确认失败**
+- [x] **步骤 2：运行测试并确认失败**
 
 运行：
 
@@ -911,7 +953,7 @@ venv/bin/python -m pytest tests/phase1/test_verify_driver.py -v
 
 预期结果：失败，因为 `tools/phase1/verify.sh` 尚不存在。
 
-- [ ] **步骤 3：实现三个显式模式**
+- [x] **步骤 3：实现三个显式模式**
 
 `verify.sh` 使用以下检查序列：
 
@@ -922,7 +964,7 @@ contract → Python pipeline → Unity EditMode → native macOS/iOS → UPM con
 
 `ci` 运行前两项、native、UPM 内容和干净 UPM install；对 Unity iOS export、generic Xcode build 和 device smoke 打印 `SKIP` 及“GitHub-hosted CI 未配置 Unity/iOS signing”的原因。`local` 不允许跳过 Unity 和 generic Xcode build。`device` 在 `local` 基础上要求 `xcrun xctrace list devices` 发现一个 iPhone 和一个 iPad，分别执行 smoke 步骤。
 
-- [ ] **步骤 4：将非设备阶段 1 检查加入 CI**
+- [x] **步骤 4：将非设备阶段 1 检查加入 CI**
 
 在 `.github/workflows/ci.yml`：
 
@@ -932,23 +974,23 @@ contract → Python pipeline → Unity EditMode → native macOS/iOS → UPM con
 
 工作流继续使用 `actions/checkout@v6` 和 `actions/setup-python@v6`，不得回退到 Node.js 20 runtime。
 
-- [ ] **步骤 5：更新操作文档**
+- [x] **步骤 5：更新操作文档**
 
 在 `TEST_PLAN.md`、根 README、UPM README 与 `docs/ios-device-test-guide.md` 写入：三个 verify 模式、从 UPM 验证工程导出 iOS 的命令、诊断导出位置、iPhone/iPad 双设备要求、三场地/30 分钟验收定义和阶段 1 支持边界。
 
-- [ ] **步骤 6：运行本地验证**
+- [x] **步骤 6：运行本地验证**
 
 运行：
 
 ```bash
-venv/bin/python -m pytest tests/phase1 tests/ -v --tb=short
+venv/bin/python -m pytest --import-mode=importlib tests/phase1 tests/ -v --tb=short
 tools/phase1/verify.sh ci
 tools/phase1/verify.sh local
 ```
 
 预期结果：前两个命令通过；第三个命令在具备 Unity/Xcode 时通过，缺失环境时必须明确失败而不是绿灯。记录真实结果。
 
-- [ ] **步骤 7：提交任务 8**
+- [x] **步骤 7：提交任务 8**
 
 ```bash
 git add \
@@ -969,15 +1011,19 @@ git commit -m "test: add phase 1 iOS release gates"
 
 **可运行产物：** 同一张真实地图可由 iPhone 和 iPad 分别扫描/处理、在 Unity iOS 应用加载并定位，且各自导出隐私安全的诊断证据。
 
+> **进度（2026-07-14）：** 步骤 1–2 已完成。已通过在线 LiDAR iPhone 导出一份匿名场地扫描；scan manifest 合同检查通过（31 帧，均为 `landscapeRight`）。受控本地 Docker/Python 处理已生成 `optimized.glb`、`features.db` 和 map manifest；地图水平 AABB 面积约为 77.8 m²，manifest SHA-256 为 `68a5d9174a84abcaa1043911beffe08f72b19d9fe579cc9094138f91af730057`。处理期间发现并修复 ARKit `simd_float4x4` 的 float32 仿射尾值容差问题，相关 55 项 Python 回归已通过。空 UPM 工程的 Development iOS 导出和 generic-device Xcode 链接均已通过；独立真机验收工程已导出、签名、安装并使用同一 map manifest。为满足步骤 3 的诊断证据要求，实际部署的 `SLAMTestSceneManager` 已新增在应用进入后台或销毁时调用现有隐私安全 JSONL 导出器的最小入口，并通过 Unity 编辑器测试；不显示或记录导出绝对路径。iPhone 运行时已确认 `UnityARKit` provider 注册、ARWorldTracking 会话启动和地图资产加载。2026-07-14 的现场截图证明，失败发生在 `Task.Run` 内构造 `AreaTargetTracker` 时读取 `Application.version`，异常为 `get_version can only be called from the main thread`，SQLite/native 初始化实际尚未开始。主线程创建和失败清理、后台保留既有初始化的最小修复设计已批准，实施与真机复测进行中。步骤 3 保持未完成。iPad 尚未连接，因此步骤 4–6 未执行。未将扫描 ZIP、图像、地图制品、绝对路径或设备 UDID 写入 Git。
+
 **涉及文件：**
 
 - 新建：`docs/phase-1-ios-validation.md`
 - 新建：`docs/phase-1-device-acceptance-template.md`
 - 修改：`docs/ios-device-test-guide.md`
 - 修改：`unity_project/Assets/Scripts/ARTestSceneManager.cs`
+- 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMTestSceneManager.cs`
 - 修改：`unity_project/Assets/Scripts/SLAMTestScene/SLAMDebugPanel.cs`
+- 修改：`unity_plugin/AreaTargetPlugin/Tests/SLAMTestSceneManagerTests.cs`
 
-- [ ] **步骤 1：创建验收记录模板**
+- [x] **步骤 1：创建验收记录模板**
 
 `docs/phase-1-device-acceptance-template.md` 必须包含固定字段：
 
@@ -991,7 +1037,7 @@ map ID/version/hash；首次定位 UTC 时间；首次定位耗时；
 
 模板不得要求或存放场地地址、图像、扫描 ZIP 或设备 UDID。
 
-- [ ] **步骤 2：执行 iPhone 扫描与处理**
+- [x] **步骤 2：执行 iPhone 扫描与处理**
 
 连接 LiDAR iPhone，使用扫描器采集一个 20–100 m² 场地。对导出 manifest 运行合同验证；使用文档化 Docker/Python 命令处理 ZIP，生成 map manifest、`features.db` 和资产。把原始 scan 和地图制品保留在受控本地存储，不提交 Git。
 

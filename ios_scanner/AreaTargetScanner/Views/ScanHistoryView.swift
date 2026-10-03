@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 扫描历史列表视图，支持查看、分享和删除
+/// 扫描历史列表视图，支持查看、导出和删除
 struct ScanHistoryView: View {
     @ObservedObject var viewModel: ScanViewModel
     @State private var itemToDelete: ScanHistoryItem? = nil
@@ -83,6 +83,9 @@ struct ScanHistoryView: View {
         } message: {
             Text("将删除扫描数据和对应的 ZIP 文件，此操作不可撤销。")
         }
+        .alert("无法删除扫描", isPresented: Binding(get: { viewModel.deletionError != nil }, set: { if !$0 { viewModel.deletionError = nil } })) {
+            Button("好", role: .cancel) { viewModel.deletionError = nil }
+        } message: { Text(viewModel.deletionError ?? "") }
     }
 }
 
@@ -109,6 +112,9 @@ private struct ScanHistoryRow: View {
                 HStack(spacing: 12) {
                     Label("\(item.keyframeCount) 帧", systemImage: "camera")
                     Label(String(format: "%.1f MB", item.totalSizeMB), systemImage: "doc")
+                    if item.hasImmersalZip {
+                        Text("Immersal").foregroundStyle(.cyan)
+                    }
                     if item.hasZip {
                         Image(systemName: "doc.zipper")
                             .foregroundStyle(.orange)

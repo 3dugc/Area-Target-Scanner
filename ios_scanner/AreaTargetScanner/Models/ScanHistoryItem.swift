@@ -12,6 +12,7 @@ struct ScanHistoryItem: Identifiable, Comparable {
     var totalSizeMB: Double = 0
     var hasTexture: Bool = false
     var hasZip: Bool = false
+    var hasImmersalZip: Bool = false
     var keyframeCount: Int = 0
 
     static func < (lhs: ScanHistoryItem, rhs: ScanHistoryItem) -> Bool {

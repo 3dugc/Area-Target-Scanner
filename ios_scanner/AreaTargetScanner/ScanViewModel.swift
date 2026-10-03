@@ -21,8 +21,85 @@ final class ScanViewModel: ObservableObject {
         pointCount: 0, coverageArea: 0, keyframeCount: 0, isScanning: false
     )
     @Published var scanHistory: [ScanHistoryItem] = []
+    @Published var deletionError: String?
+    var deletionBlocked: (String) -> Bool = { _ in false }
+
+    @Published var gpsStatus = "GPS 未开启"
+    @Published private(set) var exportStatus: String?
+    @Published var exportError: String?
+    @Published var exportShareURL: URL?
+    @Published private(set) var immersalUnavailableReason: String? = "正在检查扫描数据…"
+    private var eligibilityID: UUID?
+    var isExporting: Bool { exportStatus != nil }
 
     private let scanner = ARKitScannerService()
+    private let exporter: ScanExporting
+    private let documentsDirectory: URL
+    private let locationService: ScanLocationService
+    private var exportID: UUID?
+    private var exportCancellation: ScanExportCancellation?
+
+    init(exporter: ScanExporting = ScanExportService(),
+         documentsDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!) {
+        self.exporter = exporter
+        self.documentsDirectory = documentsDirectory
+        self.locationService = ScanLocationService(store: scanner.locationStore)
+        locationService.$status.assign(to: &$gpsStatus)
+    }
+
+    func setAppActive(_ active: Bool) { locationService.setAppActive(active) }
+
+    func prepareExportAvailability(for path: String) async {
+        let id = UUID()
+        eligibilityID = id
+        immersalUnavailableReason = "正在检查扫描数据…"
+        let exporter = self.exporter
+        let result = await Task.detached(priority: .userInitiated) {
+            exporter.availability(scanDirectory: URL(fileURLWithPath: path), format: .immersal)
+        }.value
+        guard !Task.isCancelled, eligibilityID == id else { return }
+        immersalUnavailableReason = result
+    }
+
+    func beginExport(format: ScanExportFormat, from path: String) {
+        guard !isExporting else { return }
+        let directory = URL(fileURLWithPath: path)
+        let id = UUID()
+        let cancellation = ScanExportCancellation()
+        exportID = id
+        exportCancellation = cancellation
+        exportShareURL = nil
+        exportError = nil
+        exportStatus = "正在准备导出…"
+        let exporter = self.exporter
+        let worker = Task.detached(priority: .userInitiated) { [weak self] in
+            try exporter.export(scanDirectory: directory, format: format, progress: { status in
+                Task { @MainActor in
+                    guard let self, self.exportID == id, !cancellation.isCancelled else { return }
+                    self.exportStatus = status
+                }
+            }, isCancelled: { cancellation.isCancelled })
+        }
+        Task { [weak self] in
+            let result = await worker.result
+            guard let self, self.exportID == id else { return }
+            self.exportID = nil
+            self.exportCancellation = nil
+            self.exportStatus = nil
+            guard !cancellation.isCancelled, self.state == .preview(path) else { return }
+            switch result {
+            case .success(let url): self.exportShareURL = url
+            case .failure(let error): self.exportError = error.localizedDescription
+            }
+        }
+    }
+
+    func cancelExport() {
+        guard isExporting else { return }
+        exportCancellation?.cancel()
+        exportStatus = "正在取消…"
+    }
+
     private let scannerQueue = DispatchQueue(label: "com.areatarget.scanner.vm")
     private var progressTimer: Timer?
 
@@ -54,11 +131,13 @@ final class ScanViewModel: ObservableObject {
     // MARK: - Scan Control
 
     func startScanning() {
+        guard !isExporting else { return }
         let scanner = self.scanner
         scannerQueue.async { [weak self] in
             do {
                 try scanner.startScan()
                 Task { @MainActor in
+                    self?.locationService.start()
                     self?.state = .scanning
                     self?.startProgressUpdates()
                 }
@@ -72,6 +151,9 @@ final class ScanViewModel: ObservableObject {
     /// Stop scanning → immediately start processing → auto-preview
     func stopAndProcess() {
         stopProgressUpdates()
+        locationService.stop()
+        let outputPath = makeExportPath()
+        let exporter = self.exporter
         state = .processing("正在停止扫描...")
 
         let scanner = self.scanner
@@ -84,7 +166,6 @@ final class ScanViewModel: ObservableObject {
 
                 // Step 2: Export data with progress callback
                 await MainActor.run { self?.state = .processing("正在准备导出...") }
-                let outputPath = self?.makeExportPath() ?? ""
                 let _ = try scanner.exportScanData(outputPath: outputPath) { status in
                     Task { @MainActor in
                         self?.state = .processing(status)
@@ -93,11 +174,18 @@ final class ScanViewModel: ObservableObject {
 
                 // Step 3: Create zip
                 await MainActor.run { self?.state = .processing("正在打包ZIP...") }
-                let zipPath = outputPath + ".zip"
-                try self?.createZip(from: outputPath, to: zipPath)
-
-                // Step 4: Done → preview
-                await MainActor.run { self?.state = .preview(outputPath) }
+                do {
+                    _ = try exporter.export(scanDirectory: URL(fileURLWithPath: outputPath), format: .areaTarget,
+                                            progress: { _ in }, isCancelled: { false })
+                    await MainActor.run { self?.state = .preview(outputPath) }
+                } catch {
+                    // The saved scan is usable even when automatic ZIP creation fails.
+                    let message = error.localizedDescription
+                    await MainActor.run {
+                        self?.state = .preview(outputPath)
+                        self?.exportError = "扫描已保存，打包失败，可在导出中重试：\(message)"
+                    }
+                }
             } catch {
                 let msg = error.localizedDescription
                 await MainActor.run { self?.state = .error(msg) }
@@ -106,6 +194,8 @@ final class ScanViewModel: ObservableObject {
     }
 
     func resetToReady() {
+        guard !isExporting else { return }
+        locationService.stop()
         stopProgressUpdates()
         progress = ScanProgress(
             pointCount: 0, coverageArea: 0, keyframeCount: 0, isScanning: false
@@ -175,7 +265,10 @@ final class ScanViewModel: ObservableObject {
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) {
             [weak self] _ in
             let prog = scanner.getScanProgress()
-            Task { @MainActor in self?.progress = prog }
+            Task { @MainActor in
+                self?.progress = prog
+                self?.locationService.refreshStatus()
+            }
         }
     }
 
@@ -186,40 +279,10 @@ final class ScanViewModel: ObservableObject {
 
     // MARK: - Helpers
 
-    private nonisolated func makeExportPath() -> String {
-        let docs = FileManager.default.urls(
-            for: .documentDirectory, in: .userDomainMask
-        ).first!
+    private func makeExportPath() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
-        let timestamp = formatter.string(from: Date())
-        return docs.appendingPathComponent("scan_\(timestamp)").path
-    }
-
-    private nonisolated func createZip(from sourcePath: String, to zipPath: String) throws {
-        let sourceURL = URL(fileURLWithPath: sourcePath)
-        let zipURL = URL(fileURLWithPath: zipPath)
-        let fm = FileManager.default
-        if fm.fileExists(atPath: zipPath) {
-            try fm.removeItem(at: zipURL)
-        }
-        var coordinatorError: NSError?
-        var copyError: Error?
-        let coordinator = NSFileCoordinator()
-        coordinator.coordinate(
-            readingItemAt: sourceURL,
-            options: [.forUploading],
-            error: &coordinatorError
-        ) { tempZipURL in
-            do { try fm.copyItem(at: tempZipURL, to: zipURL) }
-            catch { copyError = error }
-        }
-        if let coordinatorError { throw coordinatorError }
-        if let copyError { throw copyError }
-        guard fm.fileExists(atPath: zipPath) else {
-            throw NSError(domain: "ScanExport", code: -1,
-                          userInfo: [NSLocalizedDescriptionKey: "创建 zip 文件失败"])
-        }
+        return documentsDirectory.appendingPathComponent("scan_\(formatter.string(from: Date()))").path
     }
 
     // MARK: - Scan History
@@ -227,8 +290,7 @@ final class ScanViewModel: ObservableObject {
     /// 加载 Documents 目录下所有 scan_ 开头的扫描记录
     func loadScanHistory() {
         let fm = FileManager.default
-        guard let docsURL = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        let docsPath = docsURL.path
+        let docsPath = documentsDirectory.path
 
         guard let contents = try? fm.contentsOfDirectory(atPath: docsPath) else { return }
 
@@ -263,15 +325,15 @@ final class ScanViewModel: ObservableObject {
                 }
             }
 
-            // 检查 ZIP
-            let zipPath = dirPath + ".zip"
-            item.hasZip = fm.fileExists(atPath: zipPath)
-
-            // 计算总大小（目录 + zip）
+            let directory = URL(fileURLWithPath: dirPath)
+            item.hasZip = fm.fileExists(atPath: ScanExportFormat.areaTarget.archiveURL(for: directory).path)
+            item.hasImmersalZip = fm.fileExists(atPath: ScanExportFormat.immersal.archiveURL(for: directory).path)
             item.totalSizeMB = Self.directorySize(path: dirPath, fm: fm) / (1024 * 1024)
-            if item.hasZip, let zipAttrs = try? fm.attributesOfItem(atPath: zipPath) {
-                let zipSize = (zipAttrs[.size] as? Double) ?? 0
-                item.totalSizeMB += zipSize / (1024 * 1024)
+            for format in ScanExportFormat.allCases {
+                if let attrs = try? fm.attributesOfItem(atPath: format.archiveURL(for: directory).path),
+                   let size = attrs[.size] as? NSNumber {
+                    item.totalSizeMB += size.doubleValue / (1024 * 1024)
+                }
             }
 
             items.append(item)
@@ -282,17 +344,23 @@ final class ScanViewModel: ObservableObject {
 
     /// 删除一条扫描记录（目录 + ZIP）
     func deleteScan(_ item: ScanHistoryItem) {
+        guard !isExporting else { return }
+        guard !deletionBlocked(item.directoryPath) else {
+            deletionError = "Immersal 上传任务仍需要这条扫描。请先完成上传，或在 Immersal 任务页停止本机任务。"
+            return
+        }
+        deletionError = nil
         let fm = FileManager.default
         try? fm.removeItem(atPath: item.directoryPath)
-        let zipPath = item.directoryPath + ".zip"
-        if fm.fileExists(atPath: zipPath) {
-            try? fm.removeItem(atPath: zipPath)
+        for format in ScanExportFormat.allCases {
+            try? fm.removeItem(at: format.archiveURL(for: URL(fileURLWithPath: item.directoryPath)))
         }
         scanHistory.removeAll { $0.id == item.id }
     }
 
     /// 显示历史列表
     func showHistory() {
+        guard !isExporting else { return }
         loadScanHistory()
         state = .history
     }

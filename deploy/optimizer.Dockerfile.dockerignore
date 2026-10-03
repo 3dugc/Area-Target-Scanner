@@ -1,0 +1,11 @@
+# Dockerfile-specific context: only the pinned optimizer and valid deployment lock.
+**
+!deploy/optimizer.Dockerfile
+!deploy/optimizer-package-lock.json
+!model_optimizer/package.json
+!model_optimizer/tsconfig.json
+!model_optimizer/src/**
+!model_optimizer/public/**
+**/__pycache__
+**/*.pyc
+**/.DS_Store

@@ -9,6 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "unity_plugin/AreaTargetPlugin"
 DIST = ROOT / "dist"
+IOS_PLUGIN_SOURCE = ROOT / "unity_project/Assets/Plugins/iOS/libvisual_localizer.a"
+IOS_OPENCV_FRAMEWORK_SOURCE = ROOT / "native_visual_localizer/opencv_ios/opencv2.framework"
 EXCLUDED_NAMES = {
     "Tests",
     "Tests.meta",
@@ -59,11 +61,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="area-target-upm-") as temp:
         package = Path(temp) / "package"
         shutil.copytree(SOURCE, package, ignore=ignored)
-        for platform, filename in (
-            ("iOS", "libvisual_localizer.a"),
-            ("macOS", "libvisual_localizer.dylib"),
-        ):
-            source = ROOT / "unity_project/Assets/Plugins" / platform / filename
+        for platform, filename in (("iOS", "libvisual_localizer.a"), ("macOS", "libvisual_localizer.dylib")):
+            source = IOS_PLUGIN_SOURCE if platform == "iOS" else ROOT / "unity_project/Assets/Plugins" / platform / filename
             if not source.is_file() or source.stat().st_size == 0:
                 raise SystemExit(f"missing native artifact: {source}")
             target = package / "Runtime/Plugins" / platform / filename
@@ -72,6 +71,14 @@ def main():
             meta = source.with_suffix(source.suffix + ".meta")
             if meta.is_file():
                 shutil.copy2(meta, target.with_suffix(target.suffix + ".meta"))
+
+        if not IOS_OPENCV_FRAMEWORK_SOURCE.is_dir():
+            raise SystemExit(f"missing iOS OpenCV framework: {IOS_OPENCV_FRAMEWORK_SOURCE}")
+        shutil.copytree(
+            IOS_OPENCV_FRAMEWORK_SOURCE,
+            package / "Runtime/Plugins/iOS/opencv2.framework",
+            symlinks=True,
+        )
         with output.open("wb") as raw:
             with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as compressed:
                 with tarfile.open(fileobj=compressed, mode="w") as archive:
