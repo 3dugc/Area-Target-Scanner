@@ -21,14 +21,18 @@ RUN mkdir -p /app/bin && \
     g++ -std=c++17 -O2 -DNDEBUG -I/app/native/xatlas \
         /app/native/xatlas_helper.cpp /app/native/xatlas/xatlas.cpp \
         -o /app/bin/xatlas_helper && \
-    useradd --create-home --shell /bin/bash appuser
+    useradd --create-home --shell /bin/bash appuser && \
+    mkdir -p /tmp/pipeline_uploads /tmp/pipeline_outputs && \
+    chown -R appuser:appuser /tmp/pipeline_uploads /tmp/pipeline_outputs
 
 ENV PYTHONPATH=/app
 
 EXPOSE 5000
 
-# volume 目录在运行时由 docker compose 挂载，需要在 entrypoint 确保权限
-# 这里不切换 user，因为 named volume 首次创建时需要 root 权限
-# 改为在 CMD 中用 root 运行（开发环境）
+USER appuser
 
-CMD ["python", "web_service/app.py"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=4)"
+
+# One process owns the SQLite-backed job queue and cleanup thread.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "web_service.app:app"]

@@ -1,0 +1,276 @@
+name: Deploy
+
+on:
+  push:
+    branches: [develop, main, publish]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: hkccr.ccs.tencentyun.com
+  SCANNER_IMAGE: hkccr.ccs.tencentyun.com/plugins/area-target-scanner
+  OPTIMIZER_IMAGE: hkccr.ccs.tencentyun.com/plugins/area-target-optimizer
+  # Match the model_optimizer gitlink; changing the API needs a compatibility review.
+  OPTIMIZER_COMMIT: 8ced6f3a908c5f2fcdec578238e65064e9f009e7
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate publication branch and registry secrets
+        env:
+          REGISTRY_USERNAME: ${{ secrets.TENCENT_REGISTRY_USERNAME || secrets.TENCENT_REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/develop|refs/heads/main|refs/heads/publish) ;;
+            *) echo "::error::Deploy only supports develop, main, and publish branches."; exit 1 ;;
+          esac
+          if [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; then
+            echo "::error::Set TENCENT_REGISTRY_USERNAME (or TENCENT_REGISTRY_USER) and TENCENT_REGISTRY_PASSWORD repository secrets."
+            exit 1
+          fi
+
+      - name: Verify Tencent registry credentials
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TENCENT_REGISTRY_USERNAME || secrets.TENCENT_REGISTRY_USER }}
+          password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+
+  pipeline-tests:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            web_service/requirements.txt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libegl1 libusb-1.0-0 libidn2-0 libgl1 \
+            libglib2.0-0 libgomp1 libsm6 libxext6 libxrender1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r web_service/requirements.txt -r requirements-dev.txt
+
+      - name: Test processing pipeline and web job lifecycle
+        run: |
+          python -m pytest --import-mode=importlib -v --tb=short \
+            tests/test_validate_input.py \
+            tests/test_optimizer_client.py \
+            tests/test_optimize_model.py \
+            tests/test_pipeline_run.py \
+            tests/test_optimized_pipeline_properties.py \
+            tests/test_feature_extraction.py \
+            tests/test_feature_db.py \
+            tests/test_web_job_store.py \
+            tests/test_efficiency_profiles.py \
+            tests/test_uv_unwrap_worker.py \
+            tests/test_xatlas_native_helper.py \
+            tests/test_e2e.py
+
+  optimizer-tests:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: model_optimizer
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check out the compatible optimizer over HTTPS
+        working-directory: .
+        run: |
+          git config -f .gitmodules submodule.model_optimizer.url https://github.com/3dugc/3D-Model-Optimizer.git
+          git submodule sync -- model_optimizer
+          git submodule update --init --depth 1 -- model_optimizer
+          test "$(git -C model_optimizer rev-parse HEAD)" = "$OPTIMIZER_COMMIT"
+          cp deploy/optimizer-package-lock.json model_optimizer/package-lock.json
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: deploy/optimizer-package-lock.json
+
+      - name: Install locked optimizer dependencies
+        run: npm ci
+
+      - name: Build optimizer
+        run: npm run build
+
+      - name: Test optimizer
+        run: npm test
+
+  publish-images:
+    needs: [pipeline-tests, optimizer-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check out the compatible optimizer over HTTPS
+        run: |
+          git config -f .gitmodules submodule.model_optimizer.url https://github.com/3dugc/3D-Model-Optimizer.git
+          git submodule sync -- model_optimizer
+          git submodule update --init --depth 1 -- model_optimizer
+          test "$(git -C model_optimizer rev-parse HEAD)" = "$OPTIMIZER_COMMIT"
+          cp deploy/optimizer-package-lock.json model_optimizer/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Scanner image metadata
+        id: scanner-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.SCANNER_IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=publish,enable=${{ github.ref == 'refs/heads/publish' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/publish' }}
+
+      - name: Optimizer image metadata
+        id: optimizer-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.OPTIMIZER_IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=publish,enable=${{ github.ref == 'refs/heads/publish' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/publish' }}
+
+      - name: Build scanner image for runtime verification
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: area-target-scanner-ci:smoke
+          labels: ${{ steps.scanner-meta.outputs.labels }}
+          cache-from: type=gha,scope=area-target-scanner
+          cache-to: type=gha,mode=max,scope=area-target-scanner
+
+      - name: Build compatible optimizer image for runtime verification
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/optimizer.Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: area-target-optimizer-ci:smoke
+          labels: ${{ steps.optimizer-meta.outputs.labels }}
+          cache-from: type=gha,scope=area-target-optimizer
+          cache-to: type=gha,mode=max,scope=area-target-optimizer
+
+      - name: Start isolated runtime services
+        run: |
+          docker network create area-target-ci
+          docker run -d --name area-target-optimizer-ci \
+            --network area-target-ci --network-alias model_optimizer \
+            -e NODE_ENV=production -e PORT=3000 \
+            area-target-optimizer-ci:smoke
+          for attempt in $(seq 1 30); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' area-target-optimizer-ci)" = healthy ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' area-target-optimizer-ci)" = healthy
+          docker run -d --name area-target-scanner-ci \
+            --network area-target-ci -p 127.0.0.1:15000:5000 \
+            -e MODEL_OPTIMIZER_URL=http://model_optimizer:3000 \
+            -e PIPELINE_MAX_WORKERS=1 -e UV_XATLAS_NATIVE=1 \
+            -e UV_XATLAS_HELPER_PATH=/app/bin/xatlas_helper \
+            -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 \
+            -e MKL_NUM_THREADS=1 -e NUMEXPR_NUM_THREADS=1 \
+            area-target-scanner-ci:smoke
+
+      - name: Verify upload, processing, and bundle download
+        run: python tools/deployment/smoke.py --url http://127.0.0.1:15000 --timeout 180
+
+      - name: Login to Tencent Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TENCENT_REGISTRY_USERNAME || secrets.TENCENT_REGISTRY_USER }}
+          password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+
+      # Retag the loaded images so the published bytes are the ones tested above.
+      - name: Publish verified images
+        env:
+          SCANNER_TAGS: ${{ steps.scanner-meta.outputs.tags }}
+          OPTIMIZER_TAGS: ${{ steps.optimizer-meta.outputs.tags }}
+        run: |
+          test -n "$SCANNER_TAGS"
+          test -n "$OPTIMIZER_TAGS"
+          while IFS= read -r image_tag; do
+            docker tag area-target-optimizer-ci:smoke "$image_tag"
+            docker push "$image_tag"
+          done <<< "$OPTIMIZER_TAGS"
+          while IFS= read -r image_tag; do
+            docker tag area-target-scanner-ci:smoke "$image_tag"
+            docker push "$image_tag"
+          done <<< "$SCANNER_TAGS"
+          {
+            echo '### Published verified linux/amd64 images'
+            echo '```text'
+            echo "$SCANNER_TAGS"
+            echo "$OPTIMIZER_TAGS"
+            echo '```'
+            echo "Commit: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Runtime logs on failure
+        if: failure()
+        run: |
+          docker logs area-target-scanner-ci 2>&1 || true
+          docker logs area-target-optimizer-ci 2>&1 || true
+
+      - name: Clean up runtime verification
+        if: always()
+        run: |
+          docker rm -f area-target-scanner-ci area-target-optimizer-ci 2>/dev/null || true
+          docker network rm area-target-ci 2>/dev/null || true

@@ -1,0 +1,85 @@
+services:
+  processing-pipeline:
+    image: hkccr.ccs.tencentyun.com/plugins/area-target-scanner:${AREA_TARGET_IMAGE_TAG:-publish}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    cpus: 1.5
+    mem_limit: 2g
+    environment:
+      UPLOAD_DIR: /tmp/pipeline_uploads
+      OUTPUT_DIR: /tmp/pipeline_outputs
+      MODEL_OPTIMIZER_URL: http://model_optimizer:3000
+      PIPELINE_MAX_WORKERS: 1
+      PIPELINE_MAX_QUEUE_SIZE: 3
+      STATUS_DB_READ_TTL_SECONDS: 1
+      UV_WORKER_NICE: 10
+      UV_XATLAS_NATIVE: 1
+      UV_XATLAS_HELPER_PATH: /app/bin/xatlas_helper
+      UV_FAST_TARGET_FACES: 50000
+      UV_FAST_DECIMATE_THRESHOLD_FACES: 60000
+      UV_ALLOW_QUALITY_DEGRADE: 0
+      JOB_RETENTION_HOURS: 24
+      FAILED_JOB_RETENTION_HOURS: 6
+      OMP_NUM_THREADS: 1
+      OPENBLAS_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      NUMEXPR_NUM_THREADS: 1
+    volumes:
+      - pipeline_uploads:/tmp/pipeline_uploads
+      - pipeline_outputs:/tmp/pipeline_outputs
+    networks:
+      - proxy
+      - backend
+    depends_on:
+      model_optimizer:
+        condition: service_healthy
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: proxy
+      traefik.http.routers.area-target.rule: Host(`${AREA_TARGET_HOST:-area-target.p.01xr.com}`)
+      traefik.http.routers.area-target.entrypoints: websecure
+      traefik.http.routers.area-target.tls: "true"
+      traefik.http.routers.area-target.tls.certresolver: letsencrypt
+      traefik.http.routers.area-target.service: area-target
+      traefik.http.services.area-target.loadbalancer.server.port: "5000"
+      com.centurylinklabs.watchtower.enable: "true"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  model_optimizer:
+    image: hkccr.ccs.tencentyun.com/plugins/area-target-optimizer:${AREA_TARGET_IMAGE_TAG:-publish}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    cpus: 0.75
+    mem_limit: 768m
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    volumes:
+      - model_optimizer_temp:/app/temp
+    networks:
+      - backend
+    labels:
+      traefik.enable: "false"
+      com.centurylinklabs.watchtower.enable: "true"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  pipeline_uploads:
+  pipeline_outputs:
+  model_optimizer_temp:
+
+networks:
+  proxy:
+    external: true
+  backend:
+    internal: true
