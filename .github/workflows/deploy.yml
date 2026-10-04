@@ -97,6 +97,7 @@ jobs:
             tests/test_mobile_scan_preparation.py \
             tests/test_mobile_feature_limits.py \
             tests/test_uv_frame_calibration.py \
+            tests/test_uv_texture_memory.py \
             tests/test_deployment_smoke.py \
             tests/test_efficiency_profiles.py \
             tests/test_uv_unwrap_worker.py \
