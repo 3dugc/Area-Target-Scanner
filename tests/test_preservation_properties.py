@@ -10,6 +10,8 @@ Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
 from __future__ import annotations
 
 import os
+import io
+from PIL import Image
 import tempfile
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -408,13 +410,18 @@ class TestPipelineFinalProgressState:
     **Validates: Requirements 3.6**
     """
 
-    def test_pipeline_completion_sets_100_percent_and_completed(self):
+    def test_pipeline_completion_sets_100_percent_and_completed(self, tmp_path, monkeypatch):
         """When pipeline.run() completes successfully, the job should
         end with progress=100 and status="completed".
 
         **Validates: Requirements 3.6**
         """
+        import web_service.app as app_module
         from web_service.app import jobs, run_pipeline
+        monkeypatch.setattr(app_module, 'UPLOAD_DIR', str(tmp_path / 'uploads'))
+        monkeypatch.setattr(app_module, 'OUTPUT_DIR', str(tmp_path / 'outputs'))
+        image = io.BytesIO()
+        Image.new('RGB', (1, 1)).save(image, format='JPEG')
 
         # Create a mock job
         job_id = "test_preservation_progress"
@@ -434,14 +441,14 @@ class TestPipelineFinalProgressState:
             zip_path = os.path.join(tmpdir, "test.zip")
             with zipfile.ZipFile(zip_path, "w") as zf:
                 zf.writestr("model.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
-                zf.writestr("texture.jpg", b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+                zf.writestr("texture.jpg", image.getvalue())
                 zf.writestr("model.mtl", "newmtl material0\n")
                 zf.writestr(
                     "poses.json",
                     '{"frames": [{"imageFile": "images/frame_0000.jpg", '
                     '"transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,2,1]}]}',
                 )
-                zf.writestr("images/frame_0000.jpg", b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+                zf.writestr("images/frame_0000.jpg", image.getvalue())
 
             mock_pipeline_instance = MagicMock()
             mock_pipeline_instance.validate_input.return_value = MagicMock(
@@ -464,7 +471,7 @@ class TestPipelineFinalProgressState:
             ):
 
                 output_dir = os.path.join(
-                    os.environ.get("OUTPUT_DIR", "/tmp/pipeline_outputs"),
+                    app_module.OUTPUT_DIR,
                     job_id,
                 )
                 os.makedirs(output_dir, exist_ok=True)

@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
+from web_service.mobile_api import register_mobile_api
 
 app = Flask(__name__, static_folder="static")
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
@@ -922,7 +923,6 @@ def download(job_id):
     )
 
 
-from web_service.mobile_api import register_mobile_api
 register_mobile_api(app, __import__(__name__, fromlist=["app"]))
 
 cleanup_expired_jobs()
