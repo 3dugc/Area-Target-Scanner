@@ -1,6 +1,8 @@
 """Tests for process-isolated UV unwrap orchestration."""
 
 import os
+import io
+from PIL import Image
 import queue
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -67,10 +69,12 @@ class FakeProcess:
 
 
 def _build_minimal_scan_zip(path):
+    image = io.BytesIO()
+    Image.new("RGB", (1, 1)).save(image, format="JPEG")
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("scan/model.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
         zf.writestr("scan/model.mtl", "newmtl textured_material\n")
-        zf.writestr("scan/texture.jpg", b"\xff\xd8\xff\xe0" + b"\x00" * 64)
+        zf.writestr("scan/texture.jpg", image.getvalue())
         zf.writestr(
             "scan/poses.json",
             '{"frames": [{"imageFile": "images/frame_0000.jpg", '
@@ -80,7 +84,7 @@ def _build_minimal_scan_zip(path):
             "scan/intrinsics.json",
             '{"fx":1,"fy":1,"cx":0,"cy":0,"width":1,"height":1}',
         )
-        zf.writestr("scan/images/frame_0000.jpg", b"\xff\xd8\xff\xe0" + b"\x00" * 64)
+        zf.writestr("scan/images/frame_0000.jpg", image.getvalue())
 
 
 def test_uv_unwrap_subprocess_progress_updates_job(monkeypatch):
@@ -170,10 +174,12 @@ def test_uv_unwrap_subprocess_timeout_terminates_worker(monkeypatch):
         app_module.jobs.pop(job_id, None)
 
 
-def test_run_pipeline_uv_unwrap_uses_process_wrapper(tmp_path):
+def test_run_pipeline_uv_unwrap_uses_process_wrapper(tmp_path, monkeypatch):
     import trimesh as _trimesh_mod
     import web_service.app as app_module
 
+    monkeypatch.setattr(app_module, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(app_module, "OUTPUT_DIR", str(tmp_path / "outputs"))
     job_id = "uv_wrapper"
     zip_path = tmp_path / "scan.zip"
     _build_minimal_scan_zip(zip_path)
@@ -211,9 +217,11 @@ def test_run_pipeline_uv_unwrap_uses_process_wrapper(tmp_path):
                 shutil.rmtree(output_dir, ignore_errors=True)
 
 
-def test_run_pipeline_uv_unwrap_failure_sets_failed_status(tmp_path):
+def test_run_pipeline_uv_unwrap_failure_sets_failed_status(tmp_path, monkeypatch):
     import web_service.app as app_module
 
+    monkeypatch.setattr(app_module, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(app_module, "OUTPUT_DIR", str(tmp_path / "outputs"))
     job_id = "uv_failure"
     zip_path = tmp_path / "scan.zip"
     _build_minimal_scan_zip(zip_path)

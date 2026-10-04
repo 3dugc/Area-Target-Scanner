@@ -12,12 +12,14 @@ import traceback
 import uuid
 import zipfile
 import hashlib
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
 app = Flask(__name__, static_folder="static")
+app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ JOB_CLEANUP_INTERVAL_SECONDS = int(
     os.environ.get("JOB_CLEANUP_INTERVAL_SECONDS", "3600")
 )
 JOB_DB_PATH = os.path.join(OUTPUT_DIR, "jobs.sqlite")
+MAX_RESULT_ZIP_BYTES = 512 * 1024 * 1024
 
 TERMINAL_STATUSES = {"completed", "failed"}
 ACTIVE_STATUSES = {"queued", "extracting", "processing"}
@@ -83,6 +86,11 @@ class JobStore:
         "source_job_id",
         "created_at",
         "finished_at",
+        "token_hash",
+        "error_code",
+        "result_sha256",
+        "result_size",
+        "stage",
     }
 
     def __init__(self, db_path):
@@ -122,6 +130,9 @@ class JobStore:
             self._ensure_column(conn, "profile", "TEXT NOT NULL DEFAULT 'fast'")
             self._ensure_column(conn, "input_hash", "TEXT")
             self._ensure_column(conn, "source_job_id", "TEXT")
+            for name, definition in (("token_hash", "TEXT"), ("error_code", "TEXT"),
+                                     ("result_sha256", "TEXT"), ("result_size", "INTEGER"), ("stage", "TEXT")):
+                self._ensure_column(conn, name, definition)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)"
             )
@@ -141,28 +152,31 @@ class JobStore:
         if name not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
 
+    def _insert(self, conn, job):
+        values = {field: job.get(field) for field in self.fields}
+        values['uv_unwrap'] = 1 if job.get('uv_unwrap') else 0
+        values['profile'] = job.get('profile') or 'fast'
+        names = sorted(self.fields)
+        conn.execute('INSERT INTO jobs (' + ','.join(names) + ') VALUES (' +
+                     ','.join(':' + name for name in names) + ')', values)
+
     def create(self, job):
-        values = dict(job)
-        values["uv_unwrap"] = 1 if values.get("uv_unwrap") else 0
-        values.setdefault("profile", "fast")
-        values.setdefault("input_hash", None)
-        values.setdefault("source_job_id", None)
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO jobs (
-                    id, status, step, progress, error, result_zip,
-                    uv_unwrap, profile, input_hash, source_job_id,
-                    created_at, finished_at
-                ) VALUES (
-                    :id, :status, :step, :progress, :error, :result_zip,
-                    :uv_unwrap, :profile, :input_hash, :source_job_id,
-                    :created_at, :finished_at
-                )
-                """,
-                values,
-            )
-        return self.get(job["id"])
+            self._insert(conn, job)
+        return self.get(job['id'])
+
+    def admit(self, job, capacity):
+        """Atomically reconcile identity and reserve a bounded active slot."""
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            existing = conn.execute('SELECT * FROM jobs WHERE id=?', (job['id'],)).fetchone()
+            if existing:
+                return 'existing', _normalize_job_row(existing)
+            count = conn.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','extracting','processing')").fetchone()[0]
+            if count >= capacity:
+                return 'full', None
+            self._insert(conn, job)
+        return 'created', self.get(job['id'])
 
     def update(self, job_id, **kwargs):
         updates = {k: v for k, v in kwargs.items() if k in self.fields and k != "id"}
@@ -209,7 +223,7 @@ class JobStore:
             row = conn.execute(
                 """
                 SELECT * FROM jobs
-                WHERE input_hash=? AND status='completed' AND result_zip IS NOT NULL
+                WHERE input_hash=? AND token_hash IS NULL AND status='completed' AND result_zip IS NOT NULL
                 ORDER BY finished_at DESC, created_at DESC
                 LIMIT 1
                 """,
@@ -270,7 +284,7 @@ class JobStore:
             conn.execute(
                 f"""
                 UPDATE jobs
-                SET status=?, error=?, finished_at=?
+                SET status=?, error=?, finished_at=?, error_code='processing_interrupted', stage='failed'
                 WHERE status IN ({placeholders})
                 """,
                 params,
@@ -282,6 +296,7 @@ job_store.mark_interrupted_jobs_failed()
 jobs = {job["id"]: job for job in job_store.list_all()}
 _job_cache_read_at = {job_id: time.monotonic() for job_id in jobs}
 _jobs_lock = threading.Lock()
+_admission_lock = threading.Lock()
 pipeline_executor = ThreadPoolExecutor(
     max_workers=max(1, PIPELINE_MAX_WORKERS),
     thread_name_prefix="pipeline",
@@ -290,6 +305,23 @@ pipeline_executor = ThreadPoolExecutor(
 
 def _update_job(job_id, **kwargs):
     """Thread-safe helper to update job fields in SQLite and memory cache."""
+    # Hash exact downloadable bytes once at publication, never on status reads.
+    if kwargs.get('status') == 'completed' and kwargs.get('result_zip'):
+        kwargs['result_size'] = os.path.getsize(kwargs['result_zip'])
+        if kwargs['result_size'] > MAX_RESULT_ZIP_BYTES:
+            raise ValueError('The result ZIP exceeds the 512 MiB limit')
+        kwargs['result_sha256'] = _sha256_file(kwargs['result_zip'])
+    if kwargs.get('status') in ('completed', 'failed'):
+        kwargs['stage'] = kwargs['status']
+    elif kwargs.get('status') == 'extracting':
+        kwargs['stage'] = 'extracting'
+    elif kwargs.get('step'):
+        step = kwargs['step']
+        for marker, stage in [('0/4', 'uv_unwrap'), ('1/4', 'model_optimization'),
+                              ('2/4', 'model_optimization'), ('3/4', 'feature_extraction'), ('4/4', 'packaging')]:
+            if marker in step:
+                kwargs['stage'] = stage
+                break
     stored_job = job_store.update(job_id, **kwargs)
     with _jobs_lock:
         if stored_job:
@@ -479,59 +511,49 @@ def _run_uv_unwrap_job(
 def find_scan_root(extract_dir):
     """Find the directory containing model.obj and poses.json inside extracted zip."""
     for root, dirs, files in os.walk(extract_dir):
-        if "model.obj" in files and "poses.json" in files:
+        if "model.obj" in files and ("poses.json" in files or "manifest.json" in files):
             return root
     return None
 
 
 def safe_extract(zf, extract_dir, max_size=500 * 1024 * 1024):
-    """Safely extract a ZIP file, rejecting path traversal and enforcing size limits.
-
-    Args:
-        zf: An open zipfile.ZipFile object.
-        extract_dir: Target directory for extraction.
-        max_size: Maximum total uncompressed size in bytes (default 500MB).
-
-    Raises:
-        ValueError: If a ZIP entry contains path traversal or total size exceeds max_size.
-    """
-    real_extract_dir = os.path.realpath(extract_dir)
+    """Preflight every member, then stream bounded regular files into a private root."""
+    from processing_pipeline.scan_security import contained_path
+    entries = zf.infolist()
+    if len(entries) > 10000:
+        raise ValueError('ZIP contains too many entries')
     total_size = 0
-
-    for entry in zf.infolist():
-        # Check for path traversal
-        target_path = os.path.realpath(os.path.join(extract_dir, entry.filename))
-        if (
-            not target_path.startswith(real_extract_dir + os.sep)
-            and target_path != real_extract_dir
-        ):
-            raise ValueError(
-                f"Path traversal detected in ZIP entry: {entry.filename}"
-            )
-
-        # Accumulate uncompressed size
+    seen = set()
+    destinations = []
+    for entry in entries:
+        name = entry.filename.rstrip('/') if entry.is_dir() else entry.filename
+        target = contained_path(extract_dir, name)
+        if target in seen:
+            raise ValueError('ZIP contains duplicate paths')
+        seen.add(target)
+        mode = stat.S_IFMT(entry.external_attr >> 16)
+        if mode not in (0, stat.S_IFREG, stat.S_IFDIR) or (mode == stat.S_IFDIR and not entry.is_dir()):
+            raise ValueError('ZIP members must be regular files or directories')
+        if entry.flag_bits & 1:
+            raise ValueError('Encrypted ZIP entries are unsupported')
         total_size += entry.file_size
         if total_size > max_size:
-            raise ValueError(
-                f"ZIP extraction would exceed size limit of {max_size} bytes "
-                f"(accumulated {total_size} bytes)"
-            )
-
-        # Extract this single entry safely
-        zf.extract(entry, extract_dir)
-
-        # Post-check: verify actual written path (防 TOCTOU)
-        actual_path = os.path.realpath(os.path.join(extract_dir, entry.filename))
-        if (
-            not actual_path.startswith(real_extract_dir + os.sep)
-            and actual_path != real_extract_dir
-        ):
-            # Remove the extracted file and raise
-            if os.path.exists(actual_path):
-                os.remove(actual_path)
-            raise ValueError(
-                f"Post-extraction path traversal detected: {entry.filename}"
-            )
+            raise ValueError('ZIP extraction would exceed size limit')
+        destinations.append((entry, target))
+    actual_size = 0
+    for entry, target in destinations:
+        if entry.is_dir():
+            os.makedirs(target, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        # Recheck after creating parents, and refuse existing symlinks/files.
+        contained_path(extract_dir, entry.filename)
+        with zf.open(entry) as source, open(target, 'xb') as output:
+            for block in iter(lambda: source.read(1024 * 1024), b''):
+                actual_size += len(block)
+                if actual_size > max_size:
+                    raise ValueError('ZIP extraction would exceed size limit')
+                output.write(block)
 
 
 def _normalize_profile(value):
@@ -665,10 +687,18 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             _update_job(
                 job_id,
                 status="failed",
-                error="ZIP 中未找到 model.obj 和 poses.json",
+                error="ZIP 中未找到 model.obj 和相机数据",
+                error_code="invalid_scan",
                 finished_at=_now_iso(),
             )
             return
+
+        from processing_pipeline.scan_security import validate_frame_resources
+        validate_frame_resources(scan_root)
+        protected = bool((_get_job_snapshot(job_id) or {}).get('token_hash'))
+        if protected:
+            from processing_pipeline.scan_security import validate_scan
+            validate_scan(scan_root, uv_unwrap, prepare_uv=True)
 
         # Optional: UV unwrap (xatlas re-unwrap + texture re-projection)
         if uv_unwrap:
@@ -779,7 +809,7 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
 
     except Exception as e:
         logger.exception("job %s failed", job_id)
-        _update_job(job_id, status="failed", error=str(e), finished_at=_now_iso())
+        _update_job(job_id, status="failed", error=str(e), error_code="processing_failed", finished_at=_now_iso())
     finally:
         if work_dir and os.path.isdir(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
@@ -840,11 +870,7 @@ def upload():
         })
         return jsonify({"job_id": job_id})
 
-    if _queue_capacity_exceeded():
-        _safe_remove_path(job_dir)
-        return jsonify({"error": "处理队列已满，请稍后再试"}), 429
-
-    _create_job({
+    queued_job = {
         "id": job_id,
         "status": "queued",
         "step": "等待处理",
@@ -857,7 +883,17 @@ def upload():
         "source_job_id": None,
         "created_at": _now_iso(),
         "finished_at": None,
-    })
+    }
+
+    outcome, stored_job = job_store.admit(
+        queued_job, max(1, PIPELINE_MAX_WORKERS) + max(0, PIPELINE_MAX_QUEUE_SIZE)
+    )
+    if outcome != 'created':
+        _safe_remove_path(job_dir)
+        return jsonify({"error": "处理队列已满，请稍后再试"}), 429
+    with _jobs_lock:
+        jobs[job_id] = stored_job
+        _job_cache_read_at[job_id] = time.monotonic()
 
     _submit_pipeline_job(job_id, zip_path, uv_unwrap, profile)
 
@@ -867,7 +903,7 @@ def upload():
 @app.route("/api/status/<job_id>")
 def status(job_id):
     job = _get_job_snapshot(job_id)
-    if not job:
+    if not job or job.get("token_hash"):
         return jsonify({"error": "任务不存在"}), 404
     return jsonify(job)
 
@@ -875,7 +911,7 @@ def status(job_id):
 @app.route("/api/download/<job_id>")
 def download(job_id):
     job = _get_job_snapshot(job_id)
-    if not job or job["status"] != "completed":
+    if not job or job.get("token_hash") or job["status"] != "completed":
         return jsonify({"error": "资产包未就绪"}), 404
     if not job.get("result_zip") or not os.path.isfile(job["result_zip"]):
         return jsonify({"error": "资产包文件不存在或已过期"}), 404
@@ -885,6 +921,9 @@ def download(job_id):
         download_name=f"asset_bundle_{job_id}.zip",
     )
 
+
+from web_service.mobile_api import register_mobile_api
+register_mobile_api(app, __import__(__name__, fromlist=["app"]))
 
 cleanup_expired_jobs()
 _start_cleanup_thread()
