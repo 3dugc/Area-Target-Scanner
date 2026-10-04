@@ -13,6 +13,7 @@ import struct
 import subprocess
 import tempfile
 import threading
+from collections import OrderedDict
 
 import numpy as np
 import xatlas
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 FAST_ATLAS_SIZE = int(os.environ.get("UV_FAST_ATLAS_SIZE", "2048"))
 QUALITY_ATLAS_SIZE = int(os.environ.get("UV_QUALITY_ATLAS_SIZE", "4096"))
 ATLAS_SIZE = QUALITY_ATLAS_SIZE
+DECODED_IMAGE_CACHE_BYTES = 64 * 1024 * 1024
+_ATLAS_FILL_CHUNK_ROWS = 128
 UV_XATLAS_NATIVE = os.environ.get("UV_XATLAS_NATIVE", "1") == "1"
 UV_XATLAS_HELPER_PATH = os.environ.get("UV_XATLAS_HELPER_PATH", "/app/bin/xatlas_helper")
 UV_FAST_TARGET_FACES = int(os.environ.get("UV_FAST_TARGET_FACES", "50000"))
@@ -504,6 +507,84 @@ def _vectorized_assign_frames(centers, normals, pose_matrices, intr):
     return assignments
 
 
+class _DecodedImageCache:
+    """Retain RGB8 frames by actual bytes, without changing face traversal order."""
+
+    def __init__(self, scan_dir, frames, max_bytes=DECODED_IMAGE_CACHE_BYTES):
+        self.scan_dir = scan_dir
+        self.frames = frames
+        self.max_bytes = max_bytes
+        self._images = OrderedDict()
+        self.retained_bytes = 0
+        self.peak_bytes = 0
+        self.largest_frame_bytes = 0
+        self.load_count = 0
+        self.hit_count = 0
+        self.eviction_count = 0
+
+    def get(self, frame_idx):
+        if frame_idx in self._images:
+            self._images.move_to_end(frame_idx)
+            self.hit_count += 1
+            return self._images[frame_idx]
+
+        path = contained_path(self.scan_dir, self.frames[frame_idx]["imageFile"], require_file=True)
+        width, height = image_dimensions(path)
+        frame_bytes = width * height * 3
+        # Evict before decoding, so the temporary new frame does not grow a full cache.
+        while self._images and self.retained_bytes + frame_bytes > self.max_bytes:
+            _, old_image = self._images.popitem(last=False)
+            self.retained_bytes -= old_image.nbytes
+            self.eviction_count += 1
+            del old_image
+        with Image.open(path) as image:
+            with image.convert("RGB") as rgb:
+                pixels = np.array(rgb, dtype=np.uint8)
+        self.load_count += 1
+        self.largest_frame_bytes = max(self.largest_frame_bytes, pixels.nbytes)
+        # A valid individual image can exceed this cache policy; sample it once, uncached.
+        if pixels.nbytes <= self.max_bytes:
+            self._images[frame_idx] = pixels
+            self.retained_bytes += pixels.nbytes
+            self.peak_bytes = max(self.peak_bytes, self.retained_bytes)
+        return pixels
+
+    def clear(self):
+        self._images.clear()
+        self.retained_bytes = 0
+
+
+def _normalize_and_fill_atlas(atlas, atlas_weight):
+    """Fill from one global nearest-neighbor map; bound gather temporaries by rows."""
+    mask = atlas_weight > 0
+    filled_count = np.count_nonzero(mask)
+    filled_pct = filled_count / mask.size * 100
+    if not filled_count:
+        return filled_pct
+
+    height = mask.shape[0]
+    for start in range(0, height, _ATLAS_FILL_CHUNK_ROWS):
+        stop = min(start + _ATLAS_FILL_CHUNK_ROWS, height)
+        valid = mask[start:stop]
+        weights = atlas_weight[start:stop][valid]
+        for ch in range(3):
+            atlas[start:stop, :, ch][valid] /= weights
+    if filled_count == mask.size:
+        return filled_pct
+
+    # Tiling the transform would change nearest sources across tile boundaries.
+    # Distances are unused: requesting only indices avoids the float64 distance workspace.
+    indices = distance_transform_edt(~mask, return_distances=False, return_indices=True)
+    for start in range(0, height, _ATLAS_FILL_CHUNK_ROWS):
+        stop = min(start + _ATLAS_FILL_CHUNK_ROWS, height)
+        empty = ~mask[start:stop]
+        nearest_y = indices[0, start:stop][empty]
+        nearest_x = indices[1, start:stop][empty]
+        for ch in range(3):
+            atlas[start:stop, :, ch][empty] = atlas[:, :, ch][nearest_y, nearest_x]
+    return filled_pct
+
+
 def render_texture_atlas(
     new_verts,
     new_uvs,
@@ -529,17 +610,7 @@ def render_texture_atlas(
         pose_matrices.append(t)
         view_matrices.append(np.linalg.inv(t))
 
-    image_cache = {}
-
-    def get_image(frame_idx):
-        if frame_idx not in image_cache:
-            img_path = contained_path(scan_dir, frames[frame_idx]["imageFile"], require_file=True)
-            image_dimensions(img_path)
-            image_cache[frame_idx] = np.array(
-                Image.open(img_path).convert("RGB"),
-                dtype=np.float32,
-            )
-        return image_cache[frame_idx]
+    image_cache = _DecodedImageCache(scan_dir, frames)
 
     # Use actual image dimensions and its own scaled K for both assignment and sampling.
     calibrations = []
@@ -594,7 +665,7 @@ def render_texture_atlas(
 
         frame_idx = assignments[fi]
         view = view_matrices[frame_idx]
-        img = get_image(frame_idx)
+        img = image_cache.get(frame_idx)
         h, w = img.shape[:2]
         fx, fy, cx, cy = (calibrations[frame_idx][name] for name in ("fx", "fy", "cx", "cy"))
 
@@ -682,21 +753,16 @@ def render_texture_atlas(
 
     logger.info("  Rasterized in %.1fs", time.time() - t2)
 
-    # Normalize
+    logger.info(
+        "  Decoded frame cache: budget=%dB peak=%dB largest=%dB loads=%d hits=%d evictions=%d",
+        image_cache.max_bytes, image_cache.peak_bytes, image_cache.largest_frame_bytes,
+        image_cache.load_count, image_cache.hit_count, image_cache.eviction_count,
+    )
+    # Drop both retained frames and the last loop-local references before global fill.
+    image_cache.clear()
+    img = colors = None
     _emit_progress(on_progress, "0/4 UV 纹理展开 (填充纹理空洞)", 27)
-    mask = atlas_weight > 0
-    for ch in range(3):
-        atlas[:, :, ch][mask] /= atlas_weight[mask]
-
-    # Fill empty pixels with nearest neighbor
-    for ch in range(3):
-        channel = atlas[:, :, ch]
-        empty = ~mask
-        if empty.any() and mask.any():
-            _, indices = distance_transform_edt(empty, return_distances=True, return_indices=True)
-            channel[empty] = channel[indices[0][empty], indices[1][empty]]
-
-    filled_pct = mask.sum() / mask.size * 100
+    filled_pct = _normalize_and_fill_atlas(atlas, atlas_weight)
     logger.info("Atlas rendered: %.1f%% pixels filled (total %.1fs)", filled_pct, time.time() - t0)
     return np.clip(atlas, 0, 255).astype(np.uint8)
 
