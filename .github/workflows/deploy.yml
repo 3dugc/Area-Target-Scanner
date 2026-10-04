@@ -91,6 +91,9 @@ jobs:
             tests/test_feature_extraction.py \
             tests/test_feature_db.py \
             tests/test_web_job_store.py \
+            tests/test_mobile_api.py \
+            tests/test_scan_security.py \
+            tests/test_deployment_smoke.py \
             tests/test_efficiency_profiles.py \
             tests/test_uv_unwrap_worker.py \
             tests/test_xatlas_native_helper.py \

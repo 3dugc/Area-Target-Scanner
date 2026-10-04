@@ -18,6 +18,7 @@ import numpy as np
 import xatlas
 from PIL import Image
 from scipy.ndimage import distance_transform_edt
+from processing_pipeline.scan_security import contained_path, load_metadata, image_dimensions, MAX_FRAMES
 
 logger = logging.getLogger(__name__)
 
@@ -528,7 +529,8 @@ def render_texture_atlas(
 
     def get_image(frame_idx):
         if frame_idx not in image_cache:
-            img_path = os.path.join(scan_dir, frames[frame_idx]["imageFile"])
+            img_path = contained_path(scan_dir, frames[frame_idx]["imageFile"], require_file=True)
+            image_dimensions(img_path)
             image_cache[frame_idx] = np.array(
                 Image.open(img_path).convert("RGB"),
                 dtype=np.float32,
@@ -742,6 +744,15 @@ def uv_unwrap_scan(scan_dir, profile="quality", on_progress=None, atlas_size=Non
         if not os.path.isfile(p):
             raise FileNotFoundError(f"UV unwrap requires: {p}")
 
+    # Bound untrusted camera metadata before native mesh processing.
+    intr = load_metadata(intrinsics_path)
+    poses_data = load_metadata(poses_path)
+    frames = poses_data.get("frames") if isinstance(poses_data, dict) else None
+    if not isinstance(frames, list) or len(frames) > MAX_FRAMES:
+        raise ValueError("Invalid or oversized camera frame metadata")
+    for frame in frames:
+        image_dimensions(contained_path(scan_dir, frame["imageFile"], require_file=True))
+
     # 1. Parse OBJ
     logger.info(
         "UV unwrap: loading mesh from %s (profile=%s, atlas=%d)",
@@ -788,10 +799,6 @@ def uv_unwrap_scan(scan_dir, profile="quality", on_progress=None, atlas_size=Non
 
     # 3. Load camera data
     _emit_progress(on_progress, "0/4 UV 纹理展开 (加载相机数据)", 16)
-    with open(intrinsics_path) as f:
-        intr = json.load(f)
-    with open(poses_path) as f:
-        poses_data = json.load(f)
 
     # 4. Render texture atlas
     atlas_img = render_texture_atlas(

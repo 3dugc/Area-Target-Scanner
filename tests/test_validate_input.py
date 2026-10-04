@@ -70,6 +70,12 @@ def _make_scan_dir(
         with open(os.path.join(scan_dir, "intrinsics.json"), "w") as f:
             json.dump(data, f)
 
+    # Camera metadata references actual regular keyframe files.
+    for frame in (frames or []):
+        image_path = os.path.join(scan_dir, frame['imageFile'])
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        with open(image_path, 'wb') as image:
+            image.write(b'fixture')
     return scan_dir
 
 
