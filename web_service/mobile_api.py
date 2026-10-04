@@ -15,7 +15,8 @@ from datetime import datetime, timedelta, timezone
 from flask import jsonify, request, send_file
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
-from processing_pipeline.scan_security import validate_scan
+from processing_pipeline.scan_security import validate_scan, image_dimensions, load_metadata, contained_path
+from processing_pipeline.scan_preparation import processing_requirements, validate_client_preparation
 
 TOKEN_PATTERN = re.compile(r'Bearer ([0-9a-f]{64})\Z')
 STAGES = {'queued', 'extracting', 'uv_unwrap', 'model_optimization', 'feature_extraction', 'packaging', 'completed', 'failed'}
@@ -132,6 +133,10 @@ def register_mobile_api(app, server):
             response.headers['Cache-Control'] = 'no-store'
         return response
 
+    @app.get('/api/v1/processing-requirements')
+    def requirements():
+        return jsonify(processing_requirements(maximum_request_bytes=app.config['MAX_CONTENT_LENGTH']))
+
     @app.post('/api/v1/jobs')
     def submit():
         digest = token_hash()
@@ -172,7 +177,15 @@ def register_mobile_api(app, server):
                 scan_root = server.find_scan_root(extract_dir)
                 if scan_root is None:
                     raise ValueError('No scan root')
-                validate_scan(scan_root, uv_unwrap)
+                frames = validate_scan(scan_root, uv_unwrap, max_total_frame_pixels=None)
+                manifest_path = Path(scan_root) / 'manifest.json'
+                if manifest_path.is_file():
+                    manifest = load_metadata(manifest_path)
+                    if manifest.get('clientPreparation') is not None:
+                        dimensions = [image_dimensions(contained_path(scan_root, frame['path'], require_file=True)) for frame in frames]
+                        validate_client_preparation(manifest['clientPreparation'], frame_count=len(frames),
+                                                    actual_pixels=sum(w * h for w, h in dimensions),
+                                                    maximum_long_edge=max(max(size) for size in dimensions))
             except (ValueError, OSError, TypeError, KeyError, RecursionError) as error:
                 raise APIError(400, 'invalid_scan', 'The scan must contain a valid model, keyframe images, and camera data.') from error
             shutil.rmtree(extract_dir)
