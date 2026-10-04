@@ -123,6 +123,10 @@ def _write_phase1_scan_dir(tmp_path, manifest: dict) -> str:
     (scan_dir / "manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
     )
+    for frame in manifest.get('frames', []):
+        image = scan_dir / frame['imageFile']
+        image.parent.mkdir(parents=True, exist_ok=True)
+        image.write_bytes(b'fixture')
     return str(scan_dir)
 
 

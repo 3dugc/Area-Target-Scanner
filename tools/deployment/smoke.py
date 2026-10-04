@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import base64
 import io
+import hashlib
+import secrets
 import json
 import math
 from pathlib import Path
@@ -99,21 +101,34 @@ def create_fixture(destination: Path) -> Path:
     return destination
 
 
-def fetch(url: str, deadline: float, data: bytes | None = None,
-          headers: dict | None = None) -> bytes:
+def fetch_response(url: str, deadline: float, data: bytes | None = None,
+                   headers: dict | None = None) -> tuple[int, bytes]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("Deployment smoke test exceeded its timeout")
     request = urllib.request.Request(url, data=data, headers=headers or {})
     try:
         with urllib.request.urlopen(request, timeout=min(15, remaining)) as response:
-            body = response.read(MAX_RESPONSE_BYTES + 1)
+            status, body = response.status, response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as error:
-        detail = error.read(4096).decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {error.code} at {urllib.parse.urlsplit(url).path}: {detail}") from error
+        status, body = error.code, error.read(4096)
     if len(body) > MAX_RESPONSE_BYTES:
         raise RuntimeError("Smoke response exceeds 50 MiB")
+    return status, body
+
+
+def fetch(url: str, deadline: float, data: bytes | None = None,
+          headers: dict | None = None) -> bytes:
+    status, body = fetch_response(url, deadline, data, headers)
+    if status >= 400:
+        detail = body.decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {status} at {urllib.parse.urlsplit(url).path}: {detail}")
     return body
+
+
+def expect_status(url: str, deadline: float, expected: int, headers: dict | None = None) -> None:
+    status, _ = fetch_response(url, deadline, headers=headers)
+    require(status == expected, f"Expected HTTP {expected} at {urllib.parse.urlsplit(url).path}, got {status}")
 
 
 def wait_ready(url: str, deadline: float) -> None:
@@ -205,14 +220,32 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False) -> dict:
         fixture = create_fixture(directory / "synthetic-scan.zip")
         wait_ready(url, deadline)
         body, content_type = multipart_fixture(fixture, skip_uv=skip_uv)
-        uploaded = json.loads(fetch(url + "/api/upload", deadline, body, {"Content-Type": content_type}))
-        job_id = uploaded.get("job_id")
-        require(isinstance(job_id, str) and bool(job_id), "Upload did not return a job_id")
+        job_id = str(uuid.uuid4())
+        # Persist identity in this synthetic run before the first network request.
+        token = secrets.token_hex(32)
+        auth = {"Authorization": "Bearer " + token}
+        submit_headers = {**auth, "Idempotency-Key": job_id, "Content-Type": content_type}
+        status, response = fetch_response(url + "/api/v1/jobs", deadline, body, submit_headers)
+        require(status == 202, f"New protected upload returned HTTP {status}: {response[:4096]!r}")
+        uploaded = json.loads(response)
+        require(uploaded.get("job_id") == job_id, "Upload identity does not match the client UUID")
+        retry_status, retry_response = fetch_response(url + "/api/v1/jobs", deadline, body, submit_headers)
+        require(retry_status == 200 and json.loads(retry_response).get("job_id") == job_id,
+                "Identical protected retry was not reconciled")
         job_path = urllib.parse.quote(job_id, safe="")
+        status_url = f"{url}/api/v1/jobs/{job_path}"
+        result_url = status_url + "/result"
+        wrong_auth = {"Authorization": "Bearer " + secrets.token_hex(32)}
+        expect_status(status_url, deadline, 401)
+        expect_status(status_url, deadline, 404, wrong_auth)
+        expect_status(result_url, deadline, 401)
+        expect_status(result_url, deadline, 404, wrong_auth)
+        expect_status(f"{url}/api/status/{job_path}", deadline, 404)
+        expect_status(f"{url}/api/download/{job_path}", deadline, 404)
         previous = None
         while True:
-            job = json.loads(fetch(f"{url}/api/status/{job_path}", deadline))
-            marker = (job.get("status"), job.get("step"))
+            job = json.loads(fetch(status_url, deadline, headers=auth))
+            marker = (job.get("status"), job.get("stage"))
             if marker != previous:
                 print(f"Smoke job {job_id}: {marker[0]} / {marker[1]}", flush=True)
                 previous = marker
@@ -222,8 +255,15 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False) -> dict:
                 raise RuntimeError(f"Pipeline job failed: {job.get('error')}")
             require(job.get("status") in ("queued", "extracting", "processing"), "Unexpected pipeline job status")
             time.sleep(min(1, max(0, deadline - time.monotonic())))
-        bundle = fetch(f"{url}/api/download/{job_path}", deadline)
-        return {"job_id": job_id, **verify_bundle(bundle, directory)}
+        metadata = job.get("result")
+        require(isinstance(metadata, dict) and metadata.get("format") == "area-target-bundle"
+                and metadata.get("url") == f"/api/v1/jobs/{job_path}/result", "Invalid protected result metadata")
+        bundle = fetch(result_url, deadline, headers=auth)
+        require(len(bundle) == metadata.get("size_bytes"), "Downloaded ZIP byte count does not match result metadata")
+        require(hashlib.sha256(bundle).hexdigest() == metadata.get("sha256"), "Downloaded ZIP SHA256 does not match result metadata")
+        expect_status(f"{url}/api/download/{job_path}", deadline, 404)
+        return {"job_id": job_id, "size_bytes": len(bundle), "sha256": metadata["sha256"],
+                "protected_api": True, **verify_bundle(bundle, directory)}
 
 
 def main() -> int:

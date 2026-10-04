@@ -178,6 +178,8 @@ class TestInputValidationCompleteness:
             all_present = present_files == set(REQUIRED_FILES)
 
             if all_present:
+                os.makedirs(os.path.join(scan_dir, "images"), exist_ok=True)
+                open(os.path.join(scan_dir, "images/frame_0000.jpg"), "wb").close()
                 result = pipeline.validate_input(scan_dir)
                 # All file paths in ScanInput must point to existing files
                 assert os.path.isfile(result.obj_path)
@@ -254,6 +256,8 @@ class TestPoseMatrixColumnMajor:
             with open(os.path.join(scan_dir, "poses.json"), "w") as f:
                 json.dump(poses, f)
 
+            os.makedirs(os.path.join(scan_dir, "images"), exist_ok=True)
+            open(os.path.join(scan_dir, "images/frame_0000.jpg"), "wb").close()
             result = pipeline.validate_input(scan_dir)
 
             # The parsed pose should equal column-major reshape
@@ -348,6 +352,8 @@ class TestCameraIntrinsicsOptionality:
                 with open(os.path.join(scan_dir, "intrinsics.json"), "w") as f:
                     json.dump(intrinsics_data, f)
 
+            os.makedirs(os.path.join(scan_dir, "images"), exist_ok=True)
+            open(os.path.join(scan_dir, "images/frame_0000.jpg"), "wb").close()
             result = pipeline.validate_input(scan_dir)
 
             if has_intrinsics:
