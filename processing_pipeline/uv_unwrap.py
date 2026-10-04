@@ -18,7 +18,7 @@ import numpy as np
 import xatlas
 from PIL import Image
 from scipy.ndimage import distance_transform_edt
-from processing_pipeline.scan_security import contained_path, load_metadata, image_dimensions, MAX_FRAMES
+from processing_pipeline.scan_security import contained_path, load_metadata, image_dimensions, validate_intrinsics, MAX_FRAMES
 
 logger = logging.getLogger(__name__)
 
@@ -455,8 +455,9 @@ def _vectorized_assign_frames(centers, normals, pose_matrices, intr):
     # Precompute view matrices for projection check
     view_matrices = np.array([np.linalg.inv(p) for p in pose_matrices], dtype=np.float64)
 
-    fx, fy, cx, cy = intr['fx'], intr['fy'], intr['cx'], intr['cy']
-    img_w, img_h = intr['width'], intr['height']
+    calibrations = [intr] * n_frames if isinstance(intr, dict) else intr
+    if len(calibrations) != n_frames:
+        raise ValueError("Camera calibration count does not match frame count")
 
     # to_cam: (n_faces, n_frames, 3)
     to_cam = cam_positions[np.newaxis, :, :] - centers[:, np.newaxis, :]
@@ -481,6 +482,9 @@ def _vectorized_assign_frames(centers, normals, pose_matrices, intr):
 
     # For each frame, project all centers
     for i in range(n_frames):
+        calibration = calibrations[i]
+        fx, fy, cx, cy = (calibration[name] for name in ("fx", "fy", "cx", "cy"))
+        img_w, img_h = calibration["width"], calibration["height"]
         # p_cam: (n_faces, 4)
         p_cam = (view_matrices[i] @ centers_h.T).T
         # Must have negative Z (camera looks along -Z)
@@ -537,7 +541,15 @@ def render_texture_atlas(
             )
         return image_cache[frame_idx]
 
-    fx, fy, cx, cy = intr['fx'], intr['fy'], intr['cx'], intr['cy']
+    # Use actual image dimensions and its own scaled K for both assignment and sampling.
+    calibrations = []
+    for frame in frames:
+        path = contained_path(scan_dir, frame["imageFile"], require_file=True)
+        width, height = image_dimensions(path)
+        calibration = frame.get("intrinsics") or intr
+        validate_intrinsics(calibration, width, height)
+        calibrations.append({**{name: calibration[name] for name in ("fx", "fy", "cx", "cy")},
+                             "width": width, "height": height})
 
     # Step 1: Batch compute face centers and normals
     t0 = time.time()
@@ -557,7 +569,7 @@ def render_texture_atlas(
     # Step 2: Vectorized frame assignment
     t1 = time.time()
     _emit_progress(on_progress, "0/4 UV 纹理展开 (分配纹理帧)", 19)
-    assignments = _vectorized_assign_frames(centers, normals, pose_matrices, intr)
+    assignments = _vectorized_assign_frames(centers, normals, pose_matrices, calibrations)
     assigned_count = (assignments >= 0).sum()
     logger.info("  Assigned %d/%d faces in %.1fs", assigned_count, len(new_faces), time.time() - t1)
 
@@ -584,6 +596,7 @@ def render_texture_atlas(
         view = view_matrices[frame_idx]
         img = get_image(frame_idx)
         h, w = img.shape[:2]
+        fx, fy, cx, cy = (calibrations[frame_idx][name] for name in ("fx", "fy", "cx", "cy"))
 
         face = new_faces[fi]
         uv0, uv1, uv2 = new_uvs[face[0]], new_uvs[face[1]], new_uvs[face[2]]

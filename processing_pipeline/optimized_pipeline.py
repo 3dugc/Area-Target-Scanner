@@ -175,6 +175,9 @@ class OptimizedPipeline:
         optimizer_url: Base URL of the 3D-Model-Optimizer service.
         optimizer_preset: Optimization preset passed to the optimizer
             (e.g. ``"balanced"``).
+        mobile_feature_limits: Explicitly bound native mobile databases to 80
+            keyframes and (for quality) 500 AKAZE features per frame. Legacy CLI
+            defaults remain unchanged; mobile workers opt in.
     """
 
     def __init__(
@@ -182,9 +185,11 @@ class OptimizedPipeline:
         optimizer_url: str = "http://model_optimizer:3000",
         optimizer_preset: str = "balanced",
         processing_profile: str = "quality",
+        mobile_feature_limits: bool = False,
     ) -> None:
         self.optimizer_url = optimizer_url
         self.optimizer_preset = optimizer_preset
+        self.mobile_feature_limits = mobile_feature_limits
         self.processing_profile = (
             processing_profile
             if processing_profile in FEATURE_PROFILE_OPTIONS
@@ -318,7 +323,12 @@ class OptimizedPipeline:
         o3d_mesh = self._trimesh_to_o3d(mesh_tri)
 
         # Reuse existing ORB + ray-casting + BoW logic
-        feature_options = FEATURE_PROFILE_OPTIONS[self.processing_profile]
+        feature_options = dict(FEATURE_PROFILE_OPTIONS[self.processing_profile])
+        if self.mobile_feature_limits:
+            feature_options["max_keyframes"] = 80
+            if feature_options["extract_akaze"]:
+                feature_options["max_akaze_features"] = 500
+        # quality: 80 * (2000 ORB + 500 AKAZE) <= the native reader's 200k cap.
         return build_feature_database(
             images,
             o3d_mesh,

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Area Target mobile API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Capability-protected idempotent ARKit scan processing. Save the UUID and random token before the first request."
   },
   "servers": [
@@ -45,7 +45,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "Scan ZIP with OBJ, camera metadata, and original keyframe images"
+                    "description": "Scan ZIP with OBJ, camera metadata and keyframe images; may be a client-prepared derivative following processing-requirements. Original raw scans are also supported."
                   },
                   "profile": {
                     "type": "string",
@@ -336,6 +336,25 @@
           }
         }
       }
+    },
+    "/api/v1/processing-requirements": {
+      "get": {
+        "summary": "Read versioned client scan preparation requirements",
+        "description": "Public configuration, no task token required. Preserve the original scan and prepare a derivative ZIP. If this known policy is unavailable, raw uploads remain supported; the server independently validates and prepares inputs.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Current server-authoritative preparation and safety budgets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingRequirements"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -512,6 +531,145 @@
               }
             ],
             "nullable": true
+          }
+        }
+      },
+      "ProcessingRequirements": {
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "policy",
+          "policyVersion",
+          "profiles",
+          "safety"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "example": 1
+          },
+          "policy": {
+            "type": "string",
+            "example": "mobile-scan-preparation-v1"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "example": 1
+          },
+          "profiles": {
+            "type": "object",
+            "required": [
+              "fast",
+              "quality"
+            ],
+            "properties": {
+              "fast": {
+                "type": "object",
+                "required": [
+                  "maxFrames",
+                  "maximumLongEdge",
+                  "maximumTotalPixels"
+                ],
+                "properties": {
+                  "maxFrames": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 80
+                  },
+                  "maximumLongEdge": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1600
+                  },
+                  "maximumTotalPixels": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 200000000
+                  }
+                }
+              },
+              "quality": {
+                "type": "object",
+                "required": [
+                  "maxFrames",
+                  "maximumLongEdge",
+                  "maximumTotalPixels"
+                ],
+                "properties": {
+                  "maxFrames": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 80
+                  },
+                  "maximumLongEdge": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1600
+                  },
+                  "maximumTotalPixels": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 200000000
+                  }
+                }
+              }
+            }
+          },
+          "safety": {
+            "type": "object",
+            "required": [
+              "maximumRequestBytes",
+              "maximumExpandedBytes",
+              "maximumArchiveEntries",
+              "maximumSourceFrameCount",
+              "maximumImagePixels",
+              "maximumImageDimension",
+              "maximumMetadataBytes"
+            ],
+            "properties": {
+              "maximumRequestBytes": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 536870912
+              },
+              "maximumExpandedBytes": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 524288000
+              },
+              "maximumArchiveEntries": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 10000
+              },
+              "maximumSourceFrameCount": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 10000
+              },
+              "maximumImagePixels": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 32000000
+              },
+              "maximumImageDimension": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 8192
+              },
+              "maximumMetadataBytes": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 8388608
+              }
+            }
           }
         }
       }

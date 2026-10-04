@@ -102,7 +102,7 @@ def validate_model_references(scan_root, *, textured):
                     image_dimensions(contained_path(scan_root, reference, require_file=True))
 
 
-def validate_scan(scan_root, uv_unwrap=False, *, prepare_uv=False):
+def validate_scan(scan_root, uv_unwrap=False, *, prepare_uv=False, max_total_frame_pixels=MAX_TOTAL_FRAME_PIXELS):
     """Validate camera data and all actual resources before admitting mobile work."""
     from processing_pipeline.optimized_pipeline import _read_scan_manifest, arkit_column_major_to_matrix
 
@@ -140,13 +140,13 @@ def validate_scan(scan_root, uv_unwrap=False, *, prepare_uv=False):
         seen.add(path)
         width, height = image_dimensions(path)
         total_pixels += width * height
-        if total_pixels > MAX_TOTAL_FRAME_PIXELS:
+        if max_total_frame_pixels is not None and total_pixels > max_total_frame_pixels:
             raise ValueError('Scan images exceed the total pixel limit')
         if 'width' in frame and (frame['width'], frame['height']) != (width, height):
             raise ValueError('Camera metadata does not match image dimensions')
         validate_intrinsics(frame.get('intrinsics'), width, height)
-    # The existing unwrap renderer consumes poses.json and a common camera calibration.
-    # Generate those from validated authoritative schema-v1 data for manifest-first scans.
+    # UV reads per-frame calibration from poses.json; the first camera is a legacy fallback.
+    # Workers request these files only in the independent prepared working directory.
     if uv_unwrap and prepare_uv and manifest_path.is_file():
         calibration = dict(normalized[0]['intrinsics'])
         calibration.update(width=normalized[0]['width'], height=normalized[0]['height'])
@@ -155,7 +155,7 @@ def validate_scan(scan_root, uv_unwrap=False, *, prepare_uv=False):
     return normalized
 
 
-def validate_frame_resources(scan_root):
+def validate_frame_resources(scan_root, *, max_total_frame_pixels=MAX_TOTAL_FRAME_PIXELS):
     """Guard all server entry points before OpenCV, Pillow, or native processing."""
     manifest_path = Path(scan_root) / 'manifest.json'
     if manifest_path.is_file():
@@ -172,7 +172,7 @@ def validate_frame_resources(scan_root):
             raise ValueError('Camera frames must be objects')
         width, height = image_dimensions(contained_path(scan_root, frame.get('imageFile'), require_file=True))
         total_pixels += width * height
-        if total_pixels > MAX_TOTAL_FRAME_PIXELS:
+        if max_total_frame_pixels is not None and total_pixels > max_total_frame_pixels:
             raise ValueError('Scan images exceed the total pixel limit')
     texture = Path(scan_root) / 'texture.jpg'
     if texture.is_file():
