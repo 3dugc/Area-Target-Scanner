@@ -565,8 +565,10 @@ class TestSafeExtractEdgeCases:
         extract_dir = str(tmp_path / "extracted")
         os.makedirs(extract_dir)
         with zipfile.ZipFile(zip_path, "r") as zf:
-            with pytest.raises(ValueError, match="[Tt]raversal"):
+            with pytest.raises(ValueError):
                 safe_extract(zf, extract_dir)
+        assert not (tmp_path / 'escape.txt').exists()
+        assert list((tmp_path / 'extracted').iterdir()) == []
 
 
 # ===========================================================================
