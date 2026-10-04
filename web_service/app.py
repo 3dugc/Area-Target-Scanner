@@ -1,6 +1,8 @@
 """Flask web service for the Area Target processing pipeline."""
 
 import logging
+import json
+import tempfile
 import multiprocessing
 import os
 import queue
@@ -668,6 +670,8 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
     extract_dir = os.path.join(UPLOAD_DIR, job_id, "extracted")
     output_dir = os.path.join(OUTPUT_DIR, job_id)
     work_dir = None
+    prepared_dir = None
+    preparation = None
     job_started = time.monotonic()
 
     try:
@@ -695,11 +699,19 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             return
 
         from processing_pipeline.scan_security import validate_frame_resources
-        validate_frame_resources(scan_root)
         protected = bool((_get_job_snapshot(job_id) or {}).get('token_hash'))
         if protected:
             from processing_pipeline.scan_security import validate_scan
+            from processing_pipeline.scan_preparation import prepare_scan
+            # Admission accepts bounded raw archives; expensive stages see only a working derivative.
+            validate_frame_resources(scan_root, max_total_frame_pixels=None)
+            prepared_dir = tempfile.mkdtemp(prefix='prepared_', dir=os.path.join(UPLOAD_DIR, job_id))
+            preparation = prepare_scan(scan_root, os.path.join(prepared_dir, 'scan'),
+                                       profile=profile, uv_unwrap=uv_unwrap)
+            scan_root = str(preparation.root)
             validate_scan(scan_root, uv_unwrap, prepare_uv=True)
+        else:
+            validate_frame_resources(scan_root)
 
         # Optional: UV unwrap (xatlas re-unwrap + texture re-projection)
         if uv_unwrap:
@@ -726,6 +738,7 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
         pipeline = OptimizedPipeline(
             optimizer_url=optimizer_url,
             processing_profile=profile,
+            mobile_feature_limits=protected,
         )
         os.makedirs(output_dir, exist_ok=True)
 
@@ -748,7 +761,6 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
         # Step 2: Model optimization
         stage_started = time.monotonic()
         _update_job(job_id, step="2/4 模型优化")
-        import tempfile
         import trimesh
         work_dir = tempfile.mkdtemp(prefix="pipeline_")
         glb_path = pipeline.optimize_model(scan_input, work_dir)
@@ -783,6 +795,16 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
         stage_started = time.monotonic()
         _update_job(job_id, step="4/4 资产打包")
         pipeline.export_asset_bundle(glb_path, mesh_tri, features, output_dir)
+        if preparation is not None:
+            manifest_path = os.path.join(output_dir, 'manifest.json')
+            from processing_pipeline.scan_security import load_metadata
+            manifest = load_metadata(manifest_path)
+            manifest['scanPreparation'] = preparation.metadata
+            if preparation.client_preparation is not None:
+                manifest['clientPreparation'] = preparation.client_preparation
+            manifest.setdefault('buildConfiguration', {})['scanPreparation'] = preparation.metadata
+            with open(manifest_path, 'w', encoding='utf-8') as destination:
+                json.dump(manifest, destination, sort_keys=True)
         _update_job(job_id, progress=90 if uv_unwrap else 80)
 
         # Create downloadable zip
@@ -814,6 +836,8 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
     finally:
         if work_dir and os.path.isdir(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
+        if prepared_dir and os.path.isdir(prepared_dir):
+            shutil.rmtree(prepared_dir, ignore_errors=True)
 
 
 

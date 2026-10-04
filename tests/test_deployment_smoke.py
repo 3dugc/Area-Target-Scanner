@@ -56,3 +56,33 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
         assert submitted == 2
         assert any(path.startswith('/api/status/') for path, _, _ in calls)
         assert any(path.endswith('/result') and token == owner for path, _, token in calls)
+
+
+def test_large_fixture_reproduces_original_total_pixel_failure(tmp_path):
+    import struct
+    import zipfile
+    path = smoke.create_fixture(tmp_path / 'large.zip', large_scan=True)
+    with zipfile.ZipFile(path) as data:
+        manifest = json.loads(data.read('manifest.json'))
+        frames = manifest['frames']
+        assert len(frames) == 100
+        assert sum(f['image']['width'] * f['image']['height'] for f in frames) == 276_480_000
+        assert [f['index'] for f in frames] == list(range(100))
+        for frame in frames:
+            png = data.read(frame['imageFile'])
+            assert struct.unpack('>II', png[16:24]) == (1920, 1440)
+        assert path.stat().st_size < 50 * 1024 * 1024
+
+
+def test_large_smoke_requires_actual_bounded_preparation_with_scan_coverage():
+    metadata = {'schemaVersion': 1, 'policy': 'mobile-scan-preparation-v1', 'policyVersion': 1,
+                'profile': 'fast', 'preparedBy': 'server', 'originalFrameCount': 100,
+                'selectedFrameCount': 80, 'selectedIndices': [i * 99 // 79 for i in range(80)],
+                'processedPixelCount': 153_600_000, 'maximumOutputLongEdge': 1600,
+                'resizedFrameCount': 80, 'scaleDigest': 'a' * 64}
+    smoke.verify_large_preparation(metadata)
+    for change in ({'originalFrameCount': 72}, {'selectedFrameCount': 100},
+                   {'processedPixelCount': 204_800_000}, {'maximumOutputLongEdge': 1920},
+                   {'selectedIndices': list(range(80))}):
+        with pytest.raises(ValueError):
+            smoke.verify_large_preparation({**metadata, **change})
