@@ -93,6 +93,10 @@ jobs:
             tests/test_web_job_store.py \
             tests/test_mobile_api.py \
             tests/test_scan_security.py \
+            tests/test_scan_preparation.py \
+            tests/test_mobile_scan_preparation.py \
+            tests/test_mobile_feature_limits.py \
+            tests/test_uv_frame_calibration.py \
             tests/test_deployment_smoke.py \
             tests/test_efficiency_profiles.py \
             tests/test_uv_unwrap_worker.py \
@@ -233,6 +237,9 @@ jobs:
 
       - name: Verify upload, processing, and bundle download
         run: python tools/deployment/smoke.py --url http://127.0.0.1:15000 --timeout 180
+
+      - name: Verify oversized raw scan preparation
+        run: python tools/deployment/smoke.py --url http://127.0.0.1:15000 --large-scan --timeout 900
 
       - name: Login to Tencent Container Registry
         uses: docker/login-action@v4

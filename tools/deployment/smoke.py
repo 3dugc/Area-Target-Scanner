@@ -40,7 +40,7 @@ TEXTURE_JPEG = base64.b64decode(
 )
 
 
-def png_image(seed: int) -> bytes:
+def png_image(seed: int, width: int = WIDTH, height: int = HEIGHT) -> bytes:
     """Encode deterministic, corner-rich grayscale pixels as a real PNG."""
     rng = random.Random(seed)
     pixels = bytearray(rng.randrange(256) for _ in range(WIDTH * HEIGHT))
@@ -50,13 +50,19 @@ def png_image(seed: int) -> bytes:
         size, value = rng.randrange(4, 18), rng.choice((0, 255))
         for row in range(y, y + size):
             pixels[row * WIDTH + x:row * WIDTH + x + size] = bytes([value]) * size
-    raw = b"".join(b"\x00" + pixels[y * WIDTH:(y + 1) * WIDTH] for y in range(HEIGHT))
+    if (width, height) == (WIDTH, HEIGHT):
+        rows = [bytes(pixels[y * WIDTH:(y + 1) * WIDTH]) for y in range(HEIGHT)]
+    else:
+        # Upscale generated texture: genuine high-resolution PNGs, bounded ZIP bytes.
+        columns = [x * WIDTH // width for x in range(width)]
+        rows = [bytes(pixels[y * WIDTH + x] for x in columns) for y in range(HEIGHT)]
+    raw = b"".join(b"\x00" + rows[y * HEIGHT // height] for y in range(height))
 
     def chunk(kind: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
 
     return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", WIDTH, HEIGHT, 8, 0, 0, 0, 0))
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
@@ -74,17 +80,20 @@ def model_obj() -> str:
     return "\n".join(lines) + "\n"
 
 
-def create_fixture(destination: Path) -> Path:
+def create_fixture(destination: Path, large_scan: bool = False) -> Path:
+    width, height = (1920, 1440) if large_scan else (WIDTH, HEIGHT)
+    focal = 1600.0 if large_scan else 320.0
+    positions = [(-0.1, 0.0, 0.1)[i % 3] for i in range(100)] if large_scan else (-0.1, 0.0, 0.1)
     frames = []
-    for index, tx in enumerate((-0.1, 0.0, 0.1)):
+    for index, tx in enumerate(positions):
         # Flat ARKit column-major camera-to-world: translation at indices 12-14.
         frames.append({
             "index": index, "timestamp": float(index + 1),
             "imageFile": f"images/frame_{index:04d}.png",
             "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, tx, 0, 0, 1],
             "imageOrientation": "landscapeRight",
-            "image": {"width": WIDTH, "height": HEIGHT},
-            "intrinsics": {"fx": 320.0, "fy": 320.0, "cx": WIDTH / 2, "cy": HEIGHT / 2},
+            "image": {"width": width, "height": height},
+            "intrinsics": {"fx": focal, "fy": focal, "cx": width / 2, "cy": height / 2},
         })
     manifest = {"schemaVersion": 1, "coordinateSystem": "arkit-world",
                 "matrixLayout": "arkit-column-major", "units": "meters", "frames": frames}
@@ -94,10 +103,11 @@ def create_fixture(destination: Path) -> Path:
         archive.writestr("model.mtl", "newmtl synthetic\nKa 0.2 0.2 0.2\nKd 1 1 1\nKs 0 0 0\nd 1\nillum 1\nmap_Kd texture.jpg\n")
         archive.writestr("texture.jpg", TEXTURE_JPEG)
         archive.writestr("poses.json", json.dumps({"frames": frames}))
-        archive.writestr("intrinsics.json", json.dumps({"fx": 320.0, "fy": 320.0, "cx": WIDTH / 2, "cy": HEIGHT / 2, "width": WIDTH, "height": HEIGHT}))
+        archive.writestr("intrinsics.json", json.dumps({"fx": focal, "fy": focal, "cx": width / 2, "cy": height / 2, "width": width, "height": height}))
         archive.writestr("manifest.json", json.dumps(manifest))
+        images = [png_image(1024 + i, width, height) for i in range(3)]
         for index, frame in enumerate(frames):
-            archive.writestr(frame["imageFile"], png_image(1024 + index))
+            archive.writestr(frame["imageFile"], images[index % 3])
     return destination
 
 
@@ -210,15 +220,32 @@ def verify_bundle(data: bytes, directory: Path) -> dict:
             require(all(math.isfinite(value) for value in values) and values[12:] == (0, 0, 0, 1), "Invalid row-major camera pose")
         for point in connection.execute("SELECT x3d,y3d,z3d FROM features"):
             require(all(math.isfinite(x) and a - 1e-3 <= x <= b + 1e-3 for x, a, b in zip(point, low, high)), "Feature raycast lies outside mesh bounds")
-    return {"keyframes": counts["keyframes"], "features": counts["features"], "vocabulary": counts["vocabulary"], "bundle_bytes": len(data)}
+    return {"keyframes": counts["keyframes"], "features": counts["features"], "vocabulary": counts["vocabulary"], "bundle_bytes": len(data), "scan_preparation": manifest.get("scanPreparation")}
 
 
-def run_smoke(url: str, timeout: float, skip_uv: bool = False) -> dict:
+def verify_large_preparation(metadata: dict | None) -> None:
+    require(isinstance(metadata, dict), "Large scan bundle has no preparation metadata")
+    require(metadata.get("policy") == "mobile-scan-preparation-v1" and metadata.get("policyVersion") == 1,
+            "Unknown large scan preparation policy")
+    require(metadata.get("originalFrameCount") == 100 and metadata.get("selectedFrameCount") == 80,
+            "Large scan was not reduced from 100 to 80 frames")
+    indices = metadata.get("selectedIndices", [])
+    require(len(indices) == 80 and len(set(indices)) == 80 and indices == sorted(indices)
+            and indices[0] == 0 and indices[-1] == 99, "Preparation does not cover the original scan")
+    require(0 < metadata.get("processedPixelCount", 0) <= 200_000_000
+            and 0 < metadata.get("maximumOutputLongEdge", 0) <= 1600,
+            "Prepared images exceed processing budgets")
+
+
+def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool = False) -> dict:
     deadline = time.monotonic() + timeout
     with tempfile.TemporaryDirectory(prefix="area-target-smoke-") as temporary:
         directory = Path(temporary)
-        fixture = create_fixture(directory / "synthetic-scan.zip")
+        fixture = create_fixture(directory / "synthetic-scan.zip", large_scan=large_scan)
         wait_ready(url, deadline)
+        if large_scan:
+            requirements = json.loads(fetch(url + "/api/v1/processing-requirements", deadline))
+            require(requirements.get("policy") == "mobile-scan-preparation-v1", "Processing requirements are unavailable")
         body, content_type = multipart_fixture(fixture, skip_uv=skip_uv)
         job_id = str(uuid.uuid4())
         # Persist identity in this synthetic run before the first network request.
@@ -262,8 +289,13 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False) -> dict:
         require(len(bundle) == metadata.get("size_bytes"), "Downloaded ZIP byte count does not match result metadata")
         require(hashlib.sha256(bundle).hexdigest() == metadata.get("sha256"), "Downloaded ZIP SHA256 does not match result metadata")
         expect_status(f"{url}/api/download/{job_path}", deadline, 404)
+        verified = verify_bundle(bundle, directory)
+        if large_scan:
+            verify_large_preparation(verified.get("scan_preparation"))
+            require(verified["keyframes"] <= 80 and verified["features"] <= 80_000
+                    and verified["vocabulary"] <= 500, "Large fast scan exceeds iOS feature database budgets")
         return {"job_id": job_id, "size_bytes": len(bundle), "sha256": metadata["sha256"],
-                "protected_api": True, **verify_bundle(bundle, directory)}
+                "protected_api": True, **verified}
 
 
 def main() -> int:
@@ -271,19 +303,20 @@ def main() -> int:
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--url", help="Pipeline base URL; e.g. http://127.0.0.1:8080")
     action.add_argument("--fixture-only", type=Path, metavar="ZIP", help="Write a synthetic scan ZIP and skip HTTP operations")
+    parser.add_argument("--large-scan", action="store_true", help="Exercise 100 original 1920x1440 frames and bounded server preparation")
     parser.add_argument("--skip-uv", action="store_true", help="Skip the default native xatlas UV unwrap stage")
     parser.add_argument("--timeout", type=float, default=180, help="Overall service startup and processing timeout in seconds (default: 180)")
     args = parser.parse_args()
     try:
         if args.fixture_only:
-            path = create_fixture(args.fixture_only.resolve())
-            print(json.dumps({"fixture": str(path), "bytes": path.stat().st_size, "frames": 3}))
+            path = create_fixture(args.fixture_only.resolve(), large_scan=args.large_scan)
+            print(json.dumps({"fixture": str(path), "bytes": path.stat().st_size, "frames": 100 if args.large_scan else 3}))
             return 0
         parsed = urllib.parse.urlsplit(args.url)
         require(parsed.scheme in ("http", "https") and bool(parsed.netloc) and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment,
                 "--url must be an HTTP(S) base URL without credentials, query, or fragment")
         require(math.isfinite(args.timeout) and args.timeout > 0, "--timeout must be a positive finite number")
-        result = run_smoke(args.url.rstrip("/"), args.timeout, skip_uv=args.skip_uv)
+        result = run_smoke(args.url.rstrip("/"), args.timeout, skip_uv=args.skip_uv, large_scan=args.large_scan)
         print("Synthetic pipeline smoke passed: " + json.dumps(result, sort_keys=True), flush=True)
         return 0
     except Exception as error:
