@@ -13,7 +13,7 @@
 ## Task 1: Protect the workspace and align the integration base
 
 - [x] Snapshot modified/untracked original files, Git patches and hashes. After temporary paths were lost during session continuation, restore a persistent snapshot at `build/opencv5-unification/original-state`; preserve the dirty model_optimizer submodule in place.
-- [x] Merge latest `origin/develop` (`60d88bb`) into `codex/opencv5-upgrade`; the merge completed without conflicts.
+- [x] Merge latest `origin/develop` (`60d88bb`, then `ea7989e`) into `codex/opencv5-upgrade`; both merges completed without conflicts. The newer Swift login files are reconciled with the pending app without dropping its workspace/localization features.
 - [x] Import only the existing OpenCV-specific native iOS tooling and AreaTargetNative interface into the isolated branch. Do not import unrelated pending Swift features or the proprietary Immersal binary into the branch commit.
 - [x] Record a full active-entry-point inventory, distinguishing historical OpenCV 4 comparisons and third-party SDK internals from project-controlled runtime dependencies.
 
@@ -43,11 +43,11 @@
 
 **Files:** Original pending `AreaTargetLocalizationSession.swift`, `LocalizationReplayAdapters.swift`, their tests, and relevant pending iOS documentation. Keep these files' unrelated functional changes pending rather than committing them wholesale as part of the OpenCV migration.
 
-- [ ] Update the existing behavioral identity assertion to OpenCV 5 and observe it fail against the current 4.10 identity.
-- [ ] Use one current engine identity in live and replay paths; retain SDK/channel separation and existing report schema semantics.
-- [ ] Verify test fixtures and replay provenance advertise the actual new descriptor producer/runtime. Remove active 4.x assumptions in the app-owned paths; keep historical evidence marked historical.
-- [ ] Compile the current pending app with the upgraded native implementation in an isolated overlay of the preserved workspace. Run appropriate simulator unit/contract tests and unsigned device linking with Immersal included.
-- [ ] Verify Area Target/Immersal switching, local map and report paths preserve their current behavior; report unavailable live SDK/device acceptance explicitly.
+- [x] Update the existing behavioral identity assertion to OpenCV 5 and observe it fail against the current 4.10 identity.
+- [x] Use one current engine identity in live and replay paths; retain SDK/channel separation and existing report schema semantics.
+- [x] Verify test fixtures and replay provenance advertise the actual new descriptor producer/runtime. Remove active 4.x assumptions in the app-owned paths; keep historical evidence marked historical.
+- [x] Compile the current pending app with the upgraded native implementation in an isolated overlay of the preserved workspace. Run appropriate simulator unit/contract tests and unsigned device linking with Immersal included.
+- [x] Verify Area Target/Immersal switching, local map and report paths preserve their current behavior; report unavailable live SDK/device acceptance explicitly.
 
 ## Task 4: Latest develop regression and release tooling
 
@@ -57,12 +57,12 @@
 - [x] Run `VL_NATIVE_LIBRARY=... python tools/opencv5/run_regression.py --import-mode=importlib` on the latest integrated tree. Require complete fresh JUnit reports for both groups; never count a native early exit as success.
 - [x] Rebuild/deploy matched Unity artifacts, run native CTest/ABI and UPM tests. Run the current CI lint scope and validate Docker Compose.
 - [x] Resolve the existing Unity XR serialization assertion through a meaningful failing test and an editor-version-compatible semantic check if needed, then rerun EditMode and clean package/export/link gates in the isolated Unity project.
-- [ ] Run Docker image construction if the local daemon can be started normally; retain an explicit unavailable gate if it cannot be run. No remote publishing/deployment.
+- [x] Run actual linux/arm64 Docker image construction and isolated container runtime checks. The first Open3D import failed on missing libgfortran.so.5; after installing the runtime and separating cached install/check layers, image construction and ORB/AKAZE/PnP, ELF dependency, authentication and actual Gunicorn startup/shutdown checks all returned 0. No remote publishing/deployment.
 - [x] Inspect device visibility before attempting signed/runtime checks. Missing hardware or real cross-session inputs remains missing evidence, not a pass or a reason to claim recognition-rate improvement.
 
 ## Task 5: Review, commit and local develop integration
 
-- [ ] Independently review spec compliance and implementation quality, including project runtime version inventory and Area Target/Immersal private-symbol separation.
+- [x] Independently review spec compliance and implementation quality, including project runtime version inventory and Area Target/Immersal private-symbol separation.
 - [ ] Update the validation report with latest baseline, whole-project coverage, actual runtime versions, commands, test totals, binary hashes, limitations and pending device/field gates.
 - [ ] Commit only OpenCV-specific branch changes. Preserve the original Swift functionality and model_optimizer changes, including file contents and pending Git state as applicable.
 - [ ] Prepare a safe three-way integration of the original pending README changes. Merge the validated branch into local develop while preserving all other pending files; update the original Python environment to a single contrib headless 5 package and verify imports and native/SDK contracts in the actual workspace.

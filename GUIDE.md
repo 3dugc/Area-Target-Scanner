@@ -142,17 +142,15 @@ open ios_scanner/
 
 ### 3.1 环境要求
 
-- Unity 2021.3 LTS 或更高版本
-- AR Foundation 5.0+
-- [OpenCV for Unity](https://assetstore.unity.com/packages/tools/integration/opencv-for-unity-21088)（付费插件，用于 ORB 特征提取和 PnP 求解）
-- Mono.Data.Sqlite（Unity 内置）
+- Unity 6000.0+、AR Foundation 6.0+
+- 固定 OpenCV 5.0.0 + contrib 的原生定位库与 iOS framework，按[打包说明](unity_plugin/AreaTargetPlugin/BUILD_PACKAGE.md)构建
+- SQLite-net 和 ARKit 依赖由 UPM 包管理；启用 OpenUPM 的 `com.gilzoide` scope
 
 ### 3.2 导入插件
 
-1. 打开 Unity 项目
-2. 将 `unity_plugin/AreaTargetPlugin/` 目录复制到项目的 `Packages/` 目录下
-3. 或者在 Package Manager 中选择「Add package from disk」，选择 `unity_plugin/AreaTargetPlugin/package.json`
-4. 从 Unity Asset Store 安装 OpenCV for Unity
+1. 按打包说明构建并部署匹配的 OpenCV 5 原生依赖
+2. 运行 `python tools/phase0/build_upm_package.py`，生成包含原生库、framework 和许可的 `dist/com.areatarget.tracking-<version>.tgz`
+3. 打开 Unity 项目，在 Package Manager 中选择「Add package from tarball」，选择生成的包
 
 ### 3.3 运行测试
 

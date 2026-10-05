@@ -1,8 +1,47 @@
-# OpenCV 5 独立升级验收记录
+# OpenCV 5 整项目升级验收记录
 
-日期：2026-10-05。分支：`codex/opencv5-upgrade`。基线：本地已提交的 develop `0495d64`，按用户选择排除了原工作区未提交的 iOS 功能。
+日期：2026-10-05。分支：`codex/opencv5-upgrade`。初始对照基线为本地已提交的 develop `0495d64`；随后按用户确认的方案整合最新 develop，包含 `60d88bb` 和 iOS 服务登录提交 `ea7989e`。升级分支仅提交 OpenCV 相关原生接口/工具，原工作区其他 iOS 功能和私有 Immersal SDK 保留其待提交状态；当前完整 Swift App 另在隔离副本验证。
 
-升级代码和平台构建已完成。合成样本证明现有算法兼容和旧特征可继续查询，未证明真实场景识别率提升。建议保留实验分支，取得真实跨会话数据和真机结果后再决定是否合入主干。当前记录不构成全部发布门禁通过。
+项目自有默认依赖采用 OpenCV 5.0.0 + contrib，覆盖 Python、Docker/CI、Unity 原生库及 Swift iOS 的设备/模拟器私有框架。Immersal SDK 2.4.0 保留原版及其内部实现，通过私有符号隔离和实际同存链接验证兼容。合成样本证明现有算法与旧特征查询兼容，未证明真实场景识别率提升。构建/集成门禁与真机/现场发布验收分开记录。
+
+## 最新 develop 整合与 Swift iOS / Immersal
+
+| 检查 | 最新实际结果 |
+|---|---|
+| Python 全回归 | 462 通过、6 跳过：pipeline 442 + mesh 20；两份 fresh JUnit 经驱动校验完整，进程返回 0 |
+| macOS 原生 | CTest 4/4；仅 11 个原 C ABI 导出，无外部 OpenCV 动态依赖 |
+| Unity EditMode | 992/992，0 失败；独立工程使用现有 Editor 6000.6.3f1 |
+| 干净 UPM / ARKit / iOS 导出 / 通用 Xcode | 全部通过，`BUILD SUCCEEDED`；签名关闭，Xcode 27 beta |
+| Apple 依赖/夹具/签名 | 11/11 来源与篡改拒绝契约、1/1 真实夹具、1/1 双平台 strict ad-hoc 签名门禁 |
+| Swift 原生框架 | 两平台均 arm64、OpenCV 5.0.0 + contrib、minOS 16、SDK 27、TWOLEVEL、11 个 C 导出、无 OpenCV C++ 导入，含 17 份依赖许可 |
+| iOS 27 原生 Simulator | ORB TRACKING 1912 内点，位姿元素最大误差 1.19805e-5；强制 AKAZE TRACKING 600 内点、触发标志 1、误差 8.9407e-8；两条空白输入均 LOST |
+| Immersal 同存设备镜像 | 完整链接 11 个 native 和 4 个 Immersal C API；SDK 与头文件哈希未变 |
+| Swift 完整 App | 545 项：542 通过、0 失败、3 项真实线上 opt-in 测试跳过；完整 App 未签名设备构建成功，实际链接原 SDK 与 5 私有框架 |
+| CI lint / Shell / Python 语法 / Compose | 通过；CI 补充原生依赖接受与夹具生产者门禁 |
+| Docker 镜像及容器运行 | linux/arm64 实际构建与容器门禁均返回 0；单一 contrib 5.0.0.93 / 实际 OpenCV 5.0.0，ORB/AKAZE/PnP、Open3D ELF 依赖、服务认证及真实 Gunicorn 启停全部通过 |
+| 签名真机部署、持续定位及真实跨会话识别率 | 未运行；缺少 iPhone/iPad 现场同图验收和独立真实查询集 |
+
+Swift 的 3 项跳过仅为真实 Hall bundle 导入、真实 Hall 扫描云处理和生产 HTTPS 合成请求，需显式输入/授权。它们不构成线上 API 或真机定位通过。模拟器中的 Immersal 为既有 stub/契约路径；真实 SDK 由设备镜像链接验证。两项旧身份测试实际 RED（4.10 对 5.0）后 GREEN；Smoke scheme 的夹具路径需 MacroExpansion，已修复并验证真实 SQLite→5 原生定位与空白 LOST。
+
+Python 跳过的 6 项与初始实验相同：2 项缺少现场数据、3 项只在 OpenCV 4 对照输入生产环境执行、1 项可选 xatlas helper 不存在。4 条警告为既有 KMeans 重复特征。最新远端仅追加 Swift 登录源码，没有改变已验证的 Python、Unity、OpenCV 或 Docker 构建输入。
+
+首次 Docker 的 pip 安装完成，但 Open3D 0.20.0 导入失败，未执行到 OpenCV 检查。该 ARM64 构建动态依赖 Fortran runtime，与 [Open3D 0.20.0 官方构建配置](https://github.com/isl-org/Open3D/blob/v0.20.0/3rdparty/find_dependencies.cmake#L1936-L1945)一致；补 Debian `libgfortran5` 后，实际重建返回 0，Open3D 与 OpenCV 导入及 native xatlas helper 编译成功。依赖安装与导入检查拆层，避免后续验收失败丢失成功安装层的缓存。
+
+容器使用镜像 ID `sha256:3120c712d91db4c7314090f334ffcdf97b2600e18e5118c5cad0e9954fa45767`，以 appuser 在无外网、无发布端口、只读根文件系统下运行门禁。实际 ORB/AKAZE 描述子分别为 32/61 字节，已知位姿 PnP 保留 8 个内点、平移最大误差 3.67434e-8；Open3D 0.20.0 的 ELF `ldd` 返回 0 且无缺失库。服务验证健康检查、登录/session/native header、注销撤销、匿名/错密码拒绝、job capability 与 CSRF，以及 Secure/HttpOnly/SameSite cookie；真实 Gunicorn 使用镜像启动参数（仅 bind 改为容器回环），healthz 为 200/no-store，正常结束返回 0。容器凭据在内部随机生成，不调用生产服务。该 smoke 不代表真实云处理任务或现场定位通过。
+
+复现并修正了两个集成测试问题：移动端特征预算测试在 5 下 mock 不存在的根 `AKAZE_create`，现按实际命名空间 mock，RED 2 失败后 GREEN 4/4；Unity 旧测试把 iOS 枚举与 YAML 字节格式写死，Editor 重保存后 RED，现通过实际 iOS XR Manager/ARKit Loader 检查，单项和完整 992 套件 GREEN。原项目 XR 资产未修改。
+
+新增 iOS 工具默认拒绝旧/基本版/来源缺失/二进制或许可证被改的框架。夹具使用显式固定的 macOS 5 CMake 安装，保留 SQLite 和原 C ABI 布局，覆盖真实 ORB、强制 AKAZE 和 blank LOST。live/replay 身份共享一个版本来源；Immersal 仍使用原 SDK 身份。签名前验证 producer 二进制哈希，签名会改变 Mach-O 字节，随后单独验证严格签名。
+
+| 当前工件 | SHA256 |
+|---|---|
+| Unity macOS wrapper | `f6b5f35fca6276d1420b4c9ab89a2f01b85896b8554ebb0e81c4f84a1ecc2e63` |
+| Unity iOS wrapper | `bb61f57f882405b0cd3dc466bbb9fe18d3b72c267fcc31a7813be99568d01029` |
+| AreaTargetNative iPhoneOS | `84fb1851c102eb8975fcdb8a640d339c15188675cde925918e1a97234b78133f` |
+| AreaTargetNative Simulator | `ddf43808b543423f80513802b7384a21e738631352d45266c8881ce5e1789b25` |
+| 保留的 Immersal SDK | `45fad535dcbf0139feb9b15dafe74c8315436db21a138271924e10e56d2fca8f` |
+
+macOS 原生 minOS 26 与旧已提交 wrapper 一致；Swift iOS 框架 minOS 16 与当前 App 一致。未在更早系统设备实测。私有 device/simulator 框架签名前分别约 4.67/4.70 MB；最终安装 App 的体积、内存和每帧耗时仍需真机测量。
 
 ## 升级范围与依赖
 
@@ -66,7 +105,9 @@ OpenCV 5 的 AKAZE 位于 contrib 的 `xfeatures2d`，因此仅替换基本版 O
 
 提取和 PnP 没有稳定、全面的加速。原生定位 median 在两轮均较低，但 ORB 的观察降幅由约 17% 变为 3%，第二轮 P95 反而较高。AKAZE 亮度提取首轮 P95 101.77 ms，复测降至 25.17 ms，体现短测量的波动；未丢弃首轮记录。当前证据足以排查兼容问题，不足以承诺现场性能收益。
 
-## 验证门禁
+## 初始 `0495d64` 实验门禁（历史记录）
+
+以下结果保留初次实验原貌；最新整项目验收以前面的表格为准。
 
 | 检查 | 本次结果 |
 |---|---|
@@ -89,7 +130,7 @@ OpenCV 5 的 AKAZE 位于 contrib 的 `xfeatures2d`，因此仅替换基本版 O
 
 第一次未拆分的 pytest 在 Open3D Poisson 中提前退出，退出码为 0 但没有完成摘要/JUnit；同样问题也在 4 环境复现，因此该次运行没有记为通过。新增回归驱动将 mesh properties 单独串行运行，并要求每组 fresh JUnit 完整、无错误且实际执行测试。另有两个 pipeline 测试仍使用 Poisson；如它们提前退出，同样被 JUnit 校验拒绝。
 
-Unity 唯一失败：`XRGeneralSettingsPerBuildTarget_KeysContainsiOS_ValuesReferencesGeneralSettings` 断言旧 XR YAML `Keys/Values`，可用 Editor 6000.6.3f1 将配置写为 `m_SettingsPerBuildTarget`。该测试和原 XR 配置没有升级分支差异，也不调用定位库；尚未在门禁指定的 6000.4.6f1（本机未安装）复核。不能将此归为已通过，也没有为升级修改无关 Unity 行为。Unity 操作全部在独立临时工程中执行，原 develop 工程未被 Editor 迁移。
+初次 Unity 唯一失败（本轮已复现并修复）：`XRGeneralSettingsPerBuildTarget_KeysContainsiOS_ValuesReferencesGeneralSettings` 断言旧 XR YAML `Keys/Values`，可用 Editor 6000.6.3f1 将配置写为 `m_SettingsPerBuildTarget`。该测试和原 XR 配置没有升级分支差异，也不调用定位库；尚未在门禁指定的 6000.4.6f1（本机未安装）复核。初次失败未计为通过；本轮改为实际 XR 配置语义检查，并完成 992/992。Unity 操作全部在独立临时工程中执行，原 develop 工程未被 Editor 迁移。
 
 ## 工件与成本
 
@@ -97,7 +138,7 @@ Unity 唯一失败：`XRGeneralSettingsPerBuildTarget_KeysContainsiOS_ValuesRefe
 
 UPM 打包器独立校验的是 framework 版本、来源和二进制 SHA，不直接识别 wrapper 的 OpenCV producer。本次两份 wrapper 经实际重建、哈希和链接验证；后续如手动替换 wrapper，需重新执行构建/链接门禁，不能仅以打包成功证明版本一致。
 
-| 固定依赖 / 验证工件 | SHA256 |
+| 固定依赖 / 初次实验工件 | SHA256 |
 |---|---|
 | OpenCV 5.0.0 源码 | `b0528f5a1d379d59d4701cb28c36e22214cc51cf64594e5b56f2d3e6c0233095` |
 | contrib 5.0.0 源码 | `c58f6344170c39abf187c56f3843b59cab1fd3e89cf19ba2ce25dc061659b27f` |
@@ -137,11 +178,6 @@ python tools/phase0/build_upm_package.py
   --output comparison.json
 ```
 
-本次可复查的临时记录：
+本轮记录保存在升级工作树的 `build/opencv5-unification/`，包括 `python-regression.log`、`unity-editmode.xml`、`unity-workspace/phase1-results/`、`apple-validation-summary.json`、Apple 签名/同存链接/Simulator 日志、Swift 红绿结果和 `docker-build-green.log` / `docker-runtime-validation.json`。源码、框架缓存、完整 App 副本及 SDK 不提交 Git。初次 `/private/tmp/area-target-opencv5/` 已在会话延续时丢失；未完成的进程没有计为通过，受影响门禁已在持久目录重跑。初始完整数值记录保留在已提交的 `opencv5-comparison-results.json`；不得宣称旧原始临时文件仍可访问。
 
-- `/private/tmp/area-target-opencv5/comparison/`：两轮原始 JSON、日志、同一输入和特征输出。
-- `/private/tmp/area-target-opencv5/regression-runner-final.log`：最终完整 Python 回归日志。
-- `/private/tmp/area-target-opencv5/unity-checks/verification-summary.json`：Unity 门禁汇总及原始日志路径。
-- `/private/tmp/area-target-opencv5/unity-checks/phase1-results/upm-ios-xcodebuild.log`：通用设备构建证据。
-
-下一步应用主干前，需用同一批真实旧地图和新会话查询对照定位成功率、误定位、位姿误差、恢复时间、median/P95 耗时；在目标 iPhone/iPad 完成签名部署和既定持续定位验收；用指定 Unity Editor 复核余下失败，运行 Docker 镜像门禁。届时还需重新对齐最新主干及本次排除的未提交 iOS 功能。满足真实场景无退化且有明确收益后再合并。
+本地 develop 集成按用户确认的方案执行，并保留升级分支和现有待提交 iOS 功能。尚待发布验收：用真实旧地图和新会话查询对照成功率、误定位、位姿误差、恢复时间和 median/P95；在目标 iPhone/iPad 完成签名部署与持续定位验收。源码合并不更新手机上已安装的 App。本轮不推送、不推进 main/publish，也不更新线上服务。
