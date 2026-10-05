@@ -31,7 +31,7 @@ UV_UNWRAP_POLL_INTERVAL_SECONDS = 0.25
 UV_WORKER_NICE = int(os.environ.get("UV_WORKER_NICE", "10"))
 PIPELINE_MAX_WORKERS = int(os.environ.get("PIPELINE_MAX_WORKERS", "1"))
 PIPELINE_MAX_QUEUE_SIZE = int(os.environ.get("PIPELINE_MAX_QUEUE_SIZE", "3"))
-PIPELINE_CACHE_VERSION = os.environ.get("PIPELINE_CACHE_VERSION", "v2")
+PIPELINE_CACHE_VERSION = os.environ.get("PIPELINE_CACHE_VERSION", "v3")
 STATUS_DB_READ_TTL_SECONDS = float(os.environ.get("STATUS_DB_READ_TTL_SECONDS", "1"))
 JOB_RETENTION_HOURS = int(os.environ.get("JOB_RETENTION_HOURS", "24"))
 FAILED_JOB_RETENTION_HOURS = int(os.environ.get("FAILED_JOB_RETENTION_HOURS", "6"))
@@ -550,8 +550,12 @@ def _sha256_file(path):
 
 
 def _make_input_hash(zip_hash, profile, uv_unwrap):
+    import cv2
+
     digest = hashlib.sha256()
-    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{PIPELINE_CACHE_VERSION}"
+    # Feature descriptors and vocabularies belong to the OpenCV producer.
+    # Keep that identity even when an operator retains an older cache namespace.
+    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}"
     digest.update(payload.encode("utf-8"))
     return digest.hexdigest()
 

@@ -9,7 +9,7 @@ WORKDIR /app
 
 COPY web_service/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt \
-    && python -c "import open3d"
+    && python -c "import open3d, cv2; assert cv2.__version__.split('.')[0] == '5'; cv2.ORB_create(); cv2.xfeatures2d.AKAZE_create(); assert callable(cv2.solvePnPRansac)"
 
 COPY processing_pipeline/ /app/processing_pipeline/
 COPY web_service/ /app/web_service/

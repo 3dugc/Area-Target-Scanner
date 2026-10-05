@@ -317,6 +317,7 @@ class TestBuildFeatureDatabaseAKAZE:
                 assert kf.akaze_points_3d is not None
                 assert len(kf.akaze_keypoints) == len(kf.akaze_points_3d)
                 assert kf.akaze_descriptors.shape[0] == len(kf.akaze_keypoints)
+                assert kf.akaze_descriptors.shape[1] == 61
                 assert kf.akaze_descriptors.dtype == np.uint8
         assert has_akaze, "At least one keyframe should have AKAZE features"
 

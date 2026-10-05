@@ -1,6 +1,10 @@
 #include "visual_localizer_impl.h"
 #include "pose_contract.h"
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/geometry.hpp>
+#else
 #include <opencv2/calib3d.hpp>
+#endif
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
 #include <cmath>
@@ -28,7 +32,7 @@ VisualLocalizer::VisualLocalizer()
     : orb_(cv::ORB::create(kOrbNFeatures))
     , matcher_(cv::BFMatcher::create(cv::NORM_HAMMING))
     , index_built_(false)
-    , akaze_(cv::AKAZE::create())
+    , akaze_(VisualLocalizerAkaze::create())
     , akaze_matcher_(cv::BFMatcher::create(cv::NORM_HAMMING))
 {
 }

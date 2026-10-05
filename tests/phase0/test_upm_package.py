@@ -1,9 +1,12 @@
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
 import tarfile
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILDER = ROOT / "tools/phase0/build_upm_package.py"
@@ -15,6 +18,8 @@ REQUIRED = {
     "package/Runtime/GLBMeshLoader.cs",
     "package/Runtime/Plugins/iOS/libvisual_localizer.a",
     "package/Runtime/Plugins/macOS/libvisual_localizer.dylib",
+    "package/ThirdPartyLicenses/OpenCV5/OpenCV-LICENSE.txt",
+    "package/ThirdPartyLicenses/OpenCV5/OpenCV-Contrib-LICENSE.txt",
 }
 REQUIRED_IOS = {
     "package/Editor/iOSPostProcess.cs",
@@ -28,6 +33,56 @@ VALIDATE_UNITY_PACKAGES = (
     ROOT / "tools/phase0/validate_unity_package.sh",
     ROOT / "tools/phase1/validate_ios_upm_build.sh",
 )
+
+
+def load_builder():
+    spec = importlib.util.spec_from_file_location("upm_builder", BUILDER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_opencv4_framework_cannot_be_packaged_with_upgrade(tmp_path):
+    framework = tmp_path / "opencv2.framework"
+    header = framework / "Headers/core/version.hpp"
+    header.parent.mkdir(parents=True)
+    header.write_text("#define CV_VERSION_MAJOR 4\n#define CV_VERSION_MINOR 10\n#define CV_VERSION_REVISION 0\n")
+    with pytest.raises(ValueError, match="5.0.0"):
+        load_builder().validate_opencv_framework(framework)
+
+
+def test_pinned_opencv5_framework_is_accepted(tmp_path):
+    framework = tmp_path / "opencv2.framework"
+    header = framework / "Headers/core/version.hpp"
+    header.parent.mkdir(parents=True)
+    header.write_text("#define CV_VERSION_MAJOR 5\n#define CV_VERSION_MINOR 0\n#define CV_VERSION_REVISION 0\n")
+    (framework / "Headers/xfeatures2d.hpp").write_text("class AKAZE;\n")
+    (framework / "opencv2").write_bytes(b"verified fixture binary")
+    (framework / "dependency.json").write_text(json.dumps({
+        "version": "5.0.0", "architecture": "arm64", "platform": "iphoneos",
+        "sourceSHA256": "b0528f5a1d379d59d4701cb28c36e22214cc51cf64594e5b56f2d3e6c0233095",
+        "contribSHA256": "c58f6344170c39abf187c56f3843b59cab1fd3e89cf19ba2ce25dc061659b27f",
+        "modules": ["core", "imgproc", "features", "geometry", "xfeatures2d"],
+        "binarySHA256": hashlib.sha256((framework / "opencv2").read_bytes()).hexdigest(),
+    }))
+    load_builder().validate_opencv_framework(framework)
+
+
+def test_tampered_opencv_framework_binary_is_rejected(tmp_path):
+    test_pinned_opencv5_framework_is_accepted(tmp_path)
+    framework = tmp_path / "opencv2.framework"
+    (framework / "opencv2").write_bytes(b"stale binary")
+    with pytest.raises(ValueError, match="SHA256"):
+        load_builder().validate_opencv_framework(framework)
+
+
+def test_opencv5_core_only_framework_is_rejected(tmp_path):
+    framework = tmp_path / "opencv2.framework"
+    header = framework / "Headers/core/version.hpp"
+    header.parent.mkdir(parents=True)
+    header.write_text("#define CV_VERSION_MAJOR 5\n#define CV_VERSION_MINOR 0\n#define CV_VERSION_REVISION 0\n")
+    with pytest.raises(ValueError, match="AKAZE"):
+        load_builder().validate_opencv_framework(framework)
 
 
 def build():

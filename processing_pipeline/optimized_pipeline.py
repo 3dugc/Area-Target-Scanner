@@ -334,6 +334,8 @@ class OptimizedPipeline:
             features: The FeatureDatabase to serialize.
             output_dir: Directory to write the asset bundle into.
         """
+        import cv2
+
         os.makedirs(output_dir, exist_ok=True)
 
         # 1. Copy GLB
@@ -361,6 +363,7 @@ class OptimizedPipeline:
             "format": "glb",
             "optimizedWith": "3D-Model-Optimizer",
             "createdAt": datetime.now(timezone.utc).isoformat(),
+            "producer": {"opencvVersion": cv2.__version__},
         }
 
         with open(os.path.join(output_dir, "manifest.json"), "w") as f:

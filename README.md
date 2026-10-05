@@ -172,7 +172,7 @@ asset_bundle/
 └── features.db        # SQLite DB with ORB features + BoW vocabulary
 ```
 
-**Dependencies:** Python 3.11, Open3D, OpenCV 4.x, NumPy, scikit-learn, trimesh
+**Dependencies:** Python 3.11, Open3D, OpenCV 5.0.0 (contrib headless wheel 5.0.0.93), NumPy 2+, scikit-learn, trimesh. This branch is an isolated upgrade experiment; see [validation](docs/opencv5-upgrade-validation.md) before integration.
 
 ## Unity Plugin
 
@@ -201,12 +201,16 @@ Key capabilities:
 - Debug diagnostics API (`vl_get_debug_info`) for real-time pipeline introspection
 
 ```bash
-# Build on macOS
-cd native_visual_localizer && bash build_macos.sh
+# Build pinned static OpenCV + contrib, then the macOS wrapper (arm64 by default)
+bash tools/opencv5/build_dependency.sh
+OpenCV_DIR="$PWD/build/opencv5/install/lib/cmake/opencv5" \
+  bash native_visual_localizer/build_macos.sh --deploy
 
-# Build for iOS (produces libvisual_localizer.a)
-cd native_visual_localizer && bash build_ios.sh
+# Build for iOS, including the source-built AKAZE contrib framework
+bash native_visual_localizer/build_ios.sh --deploy
 ```
+
+Without `--deploy`, both wrappers stay in version-isolated build directories. The basic OpenCV 5 iOS release framework does not include AKAZE. Rebuild both wrappers and the contrib framework before packaging; OpenCV 4 wrappers cannot be mixed with the new framework. The macOS wrapper links OpenCV statically so it does not require a Homebrew or temporary-directory installation at runtime.
 
 ## Web UI
 
@@ -237,7 +241,7 @@ tools/phase1/verify.sh device
 
 # Python pipeline tests
 pip install -r requirements-dev.txt
-python -m pytest tests/ -v --tb=short
+python tools/opencv5/run_regression.py --import-mode=importlib
 
 # Reproducible UPM package
 python3 tools/phase0/build_upm_package.py
