@@ -24,11 +24,20 @@ from unittest.mock import MagicMock, patch
 import cv2
 import numpy as np
 import open3d as o3d
+import pytest
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def authenticated_web_clients(monkeypatch, tmp_path):
+    from web_service.app import app
+    from tests.service_auth_helpers import authenticate_test_clients
+
+    authenticate_test_clients(monkeypatch, tmp_path, app)
 
 
 def _create_sphere_glb(output_path: str) -> o3d.geometry.TriangleMesh:
@@ -408,6 +417,7 @@ class TestPipelineE2E:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("authenticated_web_clients")
 class TestWebServiceE2E:
     """Full web service e2e: HTTP upload → background processing → download.
 
@@ -536,6 +546,7 @@ class TestWebServiceE2E:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("authenticated_web_clients")
 class TestSecurityE2E:
     """Verify security fixes work in the full pipeline context."""
 
@@ -615,6 +626,7 @@ class TestSecurityE2E:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("authenticated_web_clients")
 class TestProgressTrackingE2E:
     """Verify that progress updates reflect actual pipeline step completion."""
 

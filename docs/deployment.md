@@ -1,6 +1,6 @@
 # Processing pipeline deployment
 
-The production entry point is https://area-target.p.01xr.com. The Portainer stack in [`docker-compose.portainer.yml`](../docker-compose.portainer.yml) serves the Flask processing pipeline through Traefik and runs its compatible model optimizer on a private backend network.
+The current production entry point is https://at.3dugc.com. `area-target.p.01xr.com` is the legacy deployment hostname. The Portainer stack in [`docker-compose.portainer.yml`](../docker-compose.portainer.yml) serves the Flask processing pipeline through Traefik and runs its compatible model optimizer on a private backend network. Pages and APIs require service login; `/login`, the login endpoint, and minimal `/healthz` remain public. Configure credentials before deploying an image with login support; see [service login](service-login.md).
 
 ## Images and branches
 
@@ -32,23 +32,23 @@ The registry account needs push access to both image repositories under `plugins
 
 [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs on pushes to `develop`, `main` and `publish`, and supports manual runs on those branches. It fails immediately if credentials are missing or Tencent registry login fails. Organization secrets can be inherited when this repository is included in their access policy. It checks out only the pinned optimizer submodule using public HTTPS; nested submodules are not needed.
 
-Before publishing, the workflow runs Python pipeline/web tests and the optimizer's locked npm install, TypeScript build and tests. It then builds and loads both images with separate GitHub Actions cache scopes, starts them together, and runs a synthetic scan through upload, processing and asset download. Only these verified images are tagged and pushed. Pull requests do not publish images. The existing `CI` workflow continues to cover the wider native, Unity and iOS checks separately.
+Before publishing, the workflow runs Python pipeline/web/authentication tests and the optimizer's locked npm install, TypeScript build and tests. It then builds and loads both images with separate GitHub Actions cache scopes, starts them together with a newly generated random test password, and runs a synthetic scan through login, upload, processing and asset download. Smoke verifies that unauthenticated upload is rejected and that service sessions do not bypass per-job Bearer tokens. Temporary credentials are passed through private files and removed during cleanup. Only these verified images are tagged and pushed. Pull requests do not publish images. The existing `CI` workflow continues to cover the wider native, Unity and iOS checks separately.
 
 ## Portainer stack
 
-1. Confirm the target Docker host has the external `proxy` network, and Traefik uses the `websecure` entry point and `letsencrypt` certificate resolver. Point `area-target.p.01xr.com` DNS at that host.
+1. Confirm the target Docker host has the external `proxy` network, and Traefik uses the `websecure` entry point and `letsencrypt` certificate resolver. Point `at.3dugc.com` DNS at that host.
 2. Add Tencent Container Registry to Portainer using a credential that can pull both images.
-3. Create or update an `area-target` stack from `docker-compose.portainer.yml`. Set `AREA_TARGET_IMAGE_TAG=publish`; set `AREA_TARGET_HOST=area-target.p.01xr.com` if overriding the default. The same tag is used for both services.
+3. Generate a password hash as described in [service login](service-login.md). Create or update an `area-target` stack from `docker-compose.portainer.yml`. Set `AREA_TARGET_USERNAME` and `AREA_TARGET_PASSWORD_HASH`; Compose rejects empty credentials. Set `AREA_TARGET_IMAGE_TAG=publish`; the host defaults to `at.3dugc.com`. The same tag is used for both services. For an existing live stack, preserve its configured routes, resource limits, image digests and volumes when adding authentication variables.
 4. Pull the published images and deploy the stack. The optimizer health check gates pipeline startup. The pipeline listens internally on port `5000`; the optimizer listens on backend port `3000`.
-5. Open https://area-target.p.01xr.com and verify a scan upload completes. The same repeatable HTTP check can be run locally:
+5. Open https://at.3dugc.com, log in, and verify a scan upload completes. Export `AREA_TARGET_USERNAME` and `AREA_TARGET_PASSWORD` from a secure prompt as described in [service login](service-login.md), then run the repeatable HTTP check:
 
    ```bash
-   python tools/deployment/smoke.py --url https://area-target.p.01xr.com --timeout 180
+   python tools/deployment/smoke.py --url https://at.3dugc.com --timeout 180
    ```
 
-The pipeline runs as `appuser` under Gunicorn with one worker and four threads; the optimizer runs as `node`. The stack limits the pipeline to 1.5 CPUs / 2 GiB and the optimizer to 0.75 CPU / 768 MiB. Pipeline job execution is limited to one worker with three queued jobs. Traefik reaches the pipeline through `proxy`; the optimizer stays on the internal `backend` network.
+The pipeline runs as `appuser` under Gunicorn with one worker and four threads; the optimizer runs as `node`. The stack limits the pipeline to 3 CPUs / 5 GiB and the optimizer to 1 CPU / 768 MiB, matching the current server allocation. Pipeline job execution is limited to one worker with three queued jobs. Traefik reaches the pipeline through `proxy`; the optimizer stays on the internal `backend` network. Docker checks the public `/healthz` endpoint for liveness.
 
-The stack opts both services into an existing Watchtower installation through its labels. If Watchtower is present and configured for these containers, it can refresh published tags. Otherwise, update the stack with image repull after each release. GitHub Actions publishes images; it does not call Portainer.
+Watchtower is disabled for both services. Update the stack deliberately with the verified image pair after each release; the live deployment may pin digests instead of mutable tags. GitHub Actions publishes images; it does not call Portainer.
 
 ## Persistent data and release flow
 
@@ -57,7 +57,7 @@ Keep the three named volumes when updating or recreating the stack:
 | Volume | Container path | Contents |
 |---|---|---|
 | `pipeline_uploads` | `/tmp/pipeline_uploads` | Uploaded scan ZIPs and temporary scan data |
-| `pipeline_outputs` | `/tmp/pipeline_outputs` | Asset bundles and durable `jobs.sqlite` job history |
+| `pipeline_outputs` | `/tmp/pipeline_outputs` | Asset bundles, durable `jobs.sqlite` job history and `service_auth.sqlite` sessions/login limits |
 | `model_optimizer_temp` | `/app/temp` | Optimizer uploads and results |
 
 Docker normally prefixes volume names with the stack name. Keep that name stable, and back up these volumes before moving hosts. Restored volumes must be writable by each image's runtime user. Pipeline retention defaults are 24 hours for completed jobs and 6 hours for failed jobs; job history survives container restarts, while interrupted queued or processing jobs are marked failed and must be submitted again. Let active jobs finish before an update. Scheduled cleanup still applies.

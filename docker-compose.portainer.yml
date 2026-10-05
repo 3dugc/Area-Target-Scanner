@@ -4,9 +4,12 @@ services:
     pull_policy: always
     restart: unless-stopped
     init: true
-    cpus: 1.5
-    mem_limit: 2g
+    cpus: 3
+    mem_limit: 5g
     environment:
+      AREA_TARGET_USERNAME: ${AREA_TARGET_USERNAME:?Set AREA_TARGET_USERNAME}
+      AREA_TARGET_PASSWORD_HASH: ${AREA_TARGET_PASSWORD_HASH:?Set AREA_TARGET_PASSWORD_HASH using python -m web_service.auth hash-password}
+      AREA_TARGET_COOKIE_SECURE: "1"
       UPLOAD_DIR: /tmp/pipeline_uploads
       OUTPUT_DIR: /tmp/pipeline_outputs
       MODEL_OPTIMIZER_URL: http://model_optimizer:3000
@@ -37,13 +40,13 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: proxy
-      traefik.http.routers.area-target.rule: Host(`${AREA_TARGET_HOST:-area-target.p.01xr.com}`)
+      traefik.http.routers.area-target.rule: Host(`${AREA_TARGET_HOST:-at.3dugc.com}`)
       traefik.http.routers.area-target.entrypoints: websecure
       traefik.http.routers.area-target.tls: "true"
       traefik.http.routers.area-target.tls.certresolver: letsencrypt
       traefik.http.routers.area-target.service: area-target
       traefik.http.services.area-target.loadbalancer.server.port: "5000"
-      com.centurylinklabs.watchtower.enable: "true"
+      com.centurylinklabs.watchtower.enable: "false"
     logging:
       driver: json-file
       options:
@@ -55,7 +58,7 @@ services:
     pull_policy: always
     restart: unless-stopped
     init: true
-    cpus: 0.75
+    cpus: 1
     mem_limit: 768m
     environment:
       NODE_ENV: production
@@ -66,7 +69,7 @@ services:
       - backend
     labels:
       traefik.enable: "false"
-      com.centurylinklabs.watchtower.enable: "true"
+      com.centurylinklabs.watchtower.enable: "false"
     logging:
       driver: json-file
       options:

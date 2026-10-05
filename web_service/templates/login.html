@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · Area Target 处理管线</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.container { max-width: 440px; width: 100%; padding: 2rem; }
+h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #f8fafc; }
+.subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; }
+form { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.5rem; }
+label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; }
+input { width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; padding: 0.75rem; margin-bottom: 1.25rem; font: inherit; }
+input:focus { outline: 2px solid #3b82f6; outline-offset: 2px; }
+button { width: 100%; border: 0; border-radius: 8px; background: #3b82f6; color: #fff; padding: 0.75rem; font: inherit; font-weight: 500; cursor: pointer; }
+button:disabled { opacity: 0.6; cursor: wait; }
+#loginError { color: #f87171; font-size: 0.85rem; min-height: 1.25rem; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+<main class="container">
+  <h1>📐 Area Target 处理管线</h1>
+  <p class="subtitle">登录后上传扫描文件并下载资产包</p>
+  <form id="loginForm">
+    <label for="username">用户名</label>
+    <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+    <label for="password">密码</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <p id="loginError" role="alert" aria-live="polite"></p>
+    <button id="loginBtn" type="submit">登录</button>
+  </form>
+</main>
+<script>
+const loginForm = document.getElementById('loginForm');
+const loginBtn = document.getElementById('loginBtn');
+const loginError = document.getElementById('loginError');
+loginForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  loginBtn.disabled = true;
+  loginError.textContent = '';
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: document.getElementById('username').value, password: document.getElementById('password').value })
+    });
+    const data = await response.json();
+    if(response.ok) { document.getElementById('password').value = ''; location.assign('/'); return; }
+    loginError.textContent = typeof data.error === 'string' ? data.error : data.error?.message || '登录失败，请重试';
+  } catch(e) { loginError.textContent = '无法连接服务，请重试'; }
+  loginBtn.disabled = false;
+});
+</script>
+</body>
+</html>
