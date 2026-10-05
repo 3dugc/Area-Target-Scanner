@@ -2,12 +2,16 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Area Target mobile API",
-    "version": "1.1.0",
-    "description": "Capability-protected idempotent ARKit scan processing. Save the UUID and random token before the first request."
+    "version": "1.2.0",
+    "description": "Service login plus capability-protected idempotent ARKit scan processing. Sign in first, retain X-Area-Target-Session, and save the UUID and random task token before the first submission."
   },
   "servers": [
     {
-      "url": "https://area-target.p.01xr.com"
+      "url": "https://at.3dugc.com"
+    },
+    {
+      "url": "https://area-target.p.01xr.com",
+      "description": "Legacy server; use credentials configured for that server."
     }
   ],
   "paths": {
@@ -16,6 +20,7 @@
         "summary": "Create or reconcile one immutable scan submission",
         "security": [
           {
+            "ServiceSession": [],
             "TaskToken": []
           }
         ],
@@ -176,6 +181,7 @@
         "summary": "Get a protected task snapshot",
         "security": [
           {
+            "ServiceSession": [],
             "TaskToken": []
           }
         ],
@@ -240,6 +246,7 @@
         "summary": "Download the exact ZIP described by the task result",
         "security": [
           {
+            "ServiceSession": [],
             "TaskToken": []
           }
         ],
@@ -355,6 +362,106 @@
           }
         }
       }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Sign in to the service",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Service session; browser also receives HttpOnly Secure SameSite=Strict cookie.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "username",
+                    "session_token",
+                    "csrf_token",
+                    "expires_at"
+                  ],
+                  "properties": {
+                    "username": {
+                      "type": "string"
+                    },
+                    "session_token": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "csrf_token": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid username or password."
+          },
+          "429": {
+            "description": "Login rate limit; obey Retry-After."
+          },
+          "503": {
+            "description": "Service credentials have not been configured."
+          }
+        }
+      }
+    },
+    "/api/auth/session": {
+      "get": {
+        "summary": "Validate a saved service session",
+        "responses": {
+          "200": {
+            "description": "username, csrf_token, expires_at; does not repeat session_token."
+          },
+          "401": {
+            "description": "Session missing, expired or revoked."
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Revoke the current service session",
+        "responses": {
+          "200": {
+            "description": "Session revoked; browser cookie cleared."
+          },
+          "401": {
+            "description": "Session missing, expired or revoked."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -364,6 +471,12 @@
         "scheme": "bearer",
         "bearerFormat": "64 lowercase hex characters",
         "description": "Independent random task token; never a shared app secret."
+      },
+      "ServiceSession": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Area-Target-Session",
+        "description": "Opaque 12-hour service session from POST /api/auth/login. Keep the task Bearer token in Authorization."
       }
     },
     "schemas": {
@@ -674,5 +787,10 @@
         }
       }
     }
-  }
+  },
+  "security": [
+    {
+      "ServiceSession": []
+    }
+  ]
 }

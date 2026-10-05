@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
+from web_service.auth import register_auth
 from web_service.mobile_api import register_mobile_api
 
 app = Flask(__name__, static_folder="static")
@@ -30,6 +31,7 @@ UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/tmp/pipeline_uploads")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/tmp/pipeline_outputs")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+register_auth(app, os.path.join(OUTPUT_DIR, "service_auth.sqlite"))
 
 UV_UNWRAP_TIMEOUT_SECONDS = int(os.environ.get("UV_UNWRAP_TIMEOUT_SECONDS", "900"))
 UV_UNWRAP_POLL_INTERVAL_SECONDS = 0.25
