@@ -12,6 +12,7 @@ import hashlib
 import secrets
 import json
 import math
+import os
 from pathlib import Path
 import random
 import sqlite3
@@ -144,7 +145,7 @@ def expect_status(url: str, deadline: float, expected: int, headers: dict | None
 def wait_ready(url: str, deadline: float) -> None:
     while time.monotonic() < deadline:
         try:
-            fetch(url + "/", deadline)
+            fetch(url + "/healthz", deadline)
             return
         except (urllib.error.URLError, OSError, RuntimeError):
             time.sleep(min(1, max(0, deadline - time.monotonic())))
@@ -238,19 +239,38 @@ def verify_large_preparation(metadata: dict | None) -> None:
 
 
 def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool = False) -> dict:
+    username = os.environ.get("AREA_TARGET_USERNAME", "")
+    password = os.environ.get("AREA_TARGET_PASSWORD", "")
+    require(bool(username and password), "Set AREA_TARGET_USERNAME and AREA_TARGET_PASSWORD for authenticated smoke checks")
     deadline = time.monotonic() + timeout
     with tempfile.TemporaryDirectory(prefix="area-target-smoke-") as temporary:
         directory = Path(temporary)
         fixture = create_fixture(directory / "synthetic-scan.zip", large_scan=large_scan)
         wait_ready(url, deadline)
-        if large_scan:
-            requirements = json.loads(fetch(url + "/api/v1/processing-requirements", deadline))
-            require(requirements.get("policy") == "mobile-scan-preparation-v1", "Processing requirements are unavailable")
         body, content_type = multipart_fixture(fixture, skip_uv=skip_uv)
         job_id = str(uuid.uuid4())
         # Persist identity in this synthetic run before the first network request.
         token = secrets.token_hex(32)
-        auth = {"Authorization": "Bearer " + token}
+        job_auth = {"Authorization": "Bearer " + token}
+        # Authentication rejects before reading uploads; keep probes tiny so early close cannot break a large send.
+        status, _ = fetch_response(url + "/api/upload", deadline, b"", {"Content-Type": content_type})
+        require(status == 401, f"Unauthenticated legacy upload returned HTTP {status}")
+        status, _ = fetch_response(url + "/api/v1/jobs", deadline, b"",
+                                   {**job_auth, "Idempotency-Key": job_id, "Content-Type": content_type})
+        require(status == 401, f"Job token bypassed service login: HTTP {status}")
+        login_status, login_body = fetch_response(url + "/api/auth/login", deadline,
+                                                  json.dumps({"username": username, "password": password}).encode(),
+                                                  {"Content-Type": "application/json"})
+        require(login_status == 200, f"Service login returned HTTP {login_status}")
+        session = json.loads(login_body)
+        require(isinstance(session.get("session_token"), str) and bool(session["session_token"])
+                and isinstance(session.get("csrf_token"), str) and bool(session["csrf_token"]),
+                "Service login returned an invalid session")
+        service_auth = {"X-Area-Target-Session": session["session_token"], "X-CSRF-Token": session["csrf_token"]}
+        if large_scan:
+            requirements = json.loads(fetch(url + "/api/v1/processing-requirements", deadline, headers=service_auth))
+            require(requirements.get("policy") == "mobile-scan-preparation-v1", "Processing requirements are unavailable")
+        auth = {**service_auth, **job_auth}
         submit_headers = {**auth, "Idempotency-Key": job_id, "Content-Type": content_type}
         status, response = fetch_response(url + "/api/v1/jobs", deadline, body, submit_headers)
         require(status == 202, f"New protected upload returned HTTP {status}: {response[:4096]!r}")
@@ -262,13 +282,15 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool 
         job_path = urllib.parse.quote(job_id, safe="")
         status_url = f"{url}/api/v1/jobs/{job_path}"
         result_url = status_url + "/result"
-        wrong_auth = {"Authorization": "Bearer " + secrets.token_hex(32)}
+        wrong_auth = {**service_auth, "Authorization": "Bearer " + secrets.token_hex(32)}
         expect_status(status_url, deadline, 401)
+        expect_status(status_url, deadline, 401, service_auth)
         expect_status(status_url, deadline, 404, wrong_auth)
         expect_status(result_url, deadline, 401)
+        expect_status(result_url, deadline, 401, service_auth)
         expect_status(result_url, deadline, 404, wrong_auth)
-        expect_status(f"{url}/api/status/{job_path}", deadline, 404)
-        expect_status(f"{url}/api/download/{job_path}", deadline, 404)
+        expect_status(f"{url}/api/status/{job_path}", deadline, 404, service_auth)
+        expect_status(f"{url}/api/download/{job_path}", deadline, 404, service_auth)
         previous = None
         while True:
             job = json.loads(fetch(status_url, deadline, headers=auth))
@@ -288,14 +310,14 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool 
         bundle = fetch(result_url, deadline, headers=auth)
         require(len(bundle) == metadata.get("size_bytes"), "Downloaded ZIP byte count does not match result metadata")
         require(hashlib.sha256(bundle).hexdigest() == metadata.get("sha256"), "Downloaded ZIP SHA256 does not match result metadata")
-        expect_status(f"{url}/api/download/{job_path}", deadline, 404)
+        expect_status(f"{url}/api/download/{job_path}", deadline, 404, service_auth)
         verified = verify_bundle(bundle, directory)
         if large_scan:
             verify_large_preparation(verified.get("scan_preparation"))
             require(verified["keyframes"] <= 80 and verified["features"] <= 80_000
                     and verified["vocabulary"] <= 500, "Large fast scan exceeds iOS feature database budgets")
         return {"job_id": job_id, "size_bytes": len(bundle), "sha256": metadata["sha256"],
-                "protected_api": True, **verified}
+                "protected_api": True, "service_login": True, **verified}
 
 
 def main() -> int:

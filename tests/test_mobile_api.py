@@ -40,6 +40,8 @@ def scan_zip(*, manifest=True, textured=True, image_ref='images/f.png', extra=No
 @pytest.fixture
 def api(monkeypatch, tmp_path):
     import web_service.app as server
+    from tests.service_auth_helpers import authenticate_test_clients
+    authenticate_test_clients(monkeypatch, tmp_path, server.app)
     uploads, outputs = tmp_path / 'uploads', tmp_path / 'outputs'
     uploads.mkdir(); outputs.mkdir()
     monkeypatch.setattr(server, 'UPLOAD_DIR', str(uploads))
@@ -246,12 +248,16 @@ def test_request_size_error_has_structured_envelope(api, monkeypatch):
     assert response.status_code == 413 and response.json['error']['code'] == 'payload_too_large'
 
 
-def test_openapi_is_public_and_describes_capability_header(api):
+def test_openapi_requires_service_login_and_describes_both_credentials(api):
     _, client, _ = api
     response = client.get('/api/v1/openapi.json')
     assert response.status_code == 200
     assert '/api/v1/jobs' in response.json['paths']
     assert response.json['components']['securitySchemes']['TaskToken']['scheme'] == 'bearer'
+    assert response.json['components']['securitySchemes']['ServiceSession']['name'] == 'X-Area-Target-Session'
+    assert response.json['paths']['/api/v1/jobs']['post']['security'] == [{'ServiceSession': [], 'TaskToken': []}]
+    unauthenticated = client.get('/api/v1/openapi.json', headers={'X-Area-Target-Session': ''})
+    assert unauthenticated.status_code == 401
 
 
 def test_legacy_admission_shares_atomic_capacity(api, monkeypatch):

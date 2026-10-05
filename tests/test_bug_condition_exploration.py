@@ -310,7 +310,7 @@ class TestBug8UploadNoZipValidation:
     validate that the file content is actually a valid ZIP.
     """
 
-    def test_upload_invalid_zip_content_returns_400(self):
+    def test_upload_invalid_zip_content_returns_400(self, monkeypatch, tmp_path):
         """Upload a file with .zip extension but plain text content,
         assert returns 400.
 
@@ -319,6 +319,8 @@ class TestBug8UploadNoZipValidation:
         isBugCondition: response.status_code != 400 for invalid ZIP content
         """
         from web_service.app import app
+        from tests.service_auth_helpers import authenticate_test_clients
+        authenticate_test_clients(monkeypatch, tmp_path, app)
 
         with app.test_client() as client:
             # Create a fake .zip file with plain text content

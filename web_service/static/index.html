@@ -15,12 +15,19 @@ h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #f8fafc; }
 .upload-area p { color: #94a3b8; margin-top: 0.5rem; font-size: 0.85rem; }
 .upload-icon { font-size: 2.5rem; }
 input[type="file"] { display: none; }
+.account-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; color: #94a3b8; font-size: 0.85rem; }
+.account-row button { border: 1px solid #334155; border-radius: 6px; background: #1e293b; color: #e2e8f0; padding: 0.4rem 0.75rem; cursor: pointer; }
+.account-row button:disabled { opacity: 0.5; cursor: wait; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>📐 Area Target 处理管线</h1>
   <p class="subtitle">上传扫描 ZIP 文件，自动执行点云→网格→纹理→特征→资产导出</p>
+  <div class="account-row">
+    <span id="sessionUser" role="status">正在验证登录...</span>
+    <button id="logoutBtn" type="button" disabled>退出登录</button>
+  </div>
 
   <div class="option-row" style="margin-bottom:1rem;">
     <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.9rem;color:#cbd5e1;">
@@ -32,11 +39,11 @@ input[type="file"] { display: none; }
     </p>
   </div>
 
-  <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
+  <div class="upload-area" id="dropZone" style="pointer-events:none;" onclick="document.getElementById('fileInput').click()">
     <div class="upload-icon">📁</div>
     <p>点击或拖拽 ZIP 文件到此处</p>
   </div>
-  <input type="file" id="fileInput" accept=".zip">
+  <input type="file" id="fileInput" accept=".zip" disabled>
 
   <div id="jobPanel" style="display:none;">
     <div style="background:#1e293b;border-radius:12px;padding:1.5rem;margin-bottom:1rem;">
@@ -64,6 +71,52 @@ const progressPct = document.getElementById('progressPct');
 const progressBar = document.getElementById('progressBar');
 const statusMsg = document.getElementById('statusMsg');
 const downloadBtn = document.getElementById('downloadBtn');
+const sessionUser = document.getElementById('sessionUser');
+const logoutBtn = document.getElementById('logoutBtn');
+let csrfToken = '';
+
+function needsLogin(response, data) {
+  return response.status === 401 || ['auth_required', 'authentication_required'].includes(data.code || data.error?.code);
+}
+
+function errorMessage(data) {
+  return typeof data.error === 'string' ? data.error : data.error?.message || '请求失败';
+}
+
+async function loadSession() {
+  try {
+    const response = await fetch('/api/auth/session', { credentials: 'same-origin' });
+    if(response.status === 401) { location.assign('/login'); return false; }
+    const data = await response.json();
+    if(needsLogin(response, data)) { location.assign('/login'); return false; }
+    if(!response.ok || !data.csrf_token) throw new Error(errorMessage(data));
+    csrfToken = data.csrf_token;
+    sessionUser.textContent = '已登录: ' + data.username;
+    logoutBtn.disabled = false;
+    fileInput.disabled = false;
+    dropZone.style.pointerEvents = 'auto';
+    return true;
+  } catch(e) {
+    sessionUser.textContent = '无法确认登录状态，请刷新页面';
+    return false;
+  }
+}
+
+const sessionReady = loadSession();
+logoutBtn.addEventListener('click', async () => {
+  if(!await sessionReady) return;
+  logoutBtn.disabled = true;
+  try {
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken }
+    });
+    if(response.status === 401) { location.assign('/login'); return; }
+    const data = await response.json();
+    if(response.ok || needsLogin(response, data)) { location.assign('/login'); return; }
+    sessionUser.textContent = '退出失败: ' + errorMessage(data);
+  } catch(e) { sessionUser.textContent = '退出失败，请重试'; }
+  logoutBtn.disabled = false;
+});
 
 ['dragenter','dragover'].forEach(e => dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.add('dragover'); }));
 ['dragleave','drop'].forEach(e => dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.remove('dragover'); }));
@@ -71,6 +124,7 @@ dropZone.addEventListener('drop', ev => { if(ev.dataTransfer.files.length) uploa
 fileInput.addEventListener('change', () => { if(fileInput.files.length) uploadFile(fileInput.files[0]); });
 
 async function uploadFile(file) {
+  if(!await sessionReady) return;
   if(!file.name.endsWith('.zip')) { alert('请上传 ZIP 文件'); return; }
   dropZone.style.display = 'none';
   document.querySelector('.option-row').style.display = 'none';
@@ -82,9 +136,13 @@ async function uploadFile(file) {
   fd.append('file', file);
   fd.append('uv_unwrap', uvUnwrap ? '1' : '0');
   try {
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const res = await fetch('/api/upload', {
+      method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken }
+    });
+    if(res.status === 401) { location.assign('/login'); return; }
     const data = await res.json();
-    if(data.error) { statusMsg.textContent = '错误: ' + data.error; return; }
+    if(needsLogin(res, data)) { location.assign('/login'); return; }
+    if(!res.ok || data.error) { statusMsg.textContent = '错误: ' + errorMessage(data); return; }
     pollStatus(data.job_id);
   } catch(e) { statusMsg.textContent = '上传失败: ' + e.message; }
 }
@@ -92,8 +150,10 @@ async function uploadFile(file) {
 function pollStatus(jobId) {
   const iv = setInterval(async () => {
     try {
-      const res = await fetch('/api/status/' + jobId);
+      const res = await fetch('/api/status/' + jobId, { credentials: 'same-origin' });
+      if(res.status === 401) { clearInterval(iv); location.assign('/login'); return; }
       const job = await res.json();
+      if(needsLogin(res, job)) { clearInterval(iv); location.assign('/login'); return; }
       stepLabel.textContent = job.step || '';
       progressPct.textContent = job.progress + '%';
       progressBar.style.width = job.progress + '%';
