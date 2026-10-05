@@ -1,4 +1,4 @@
-flask>=3.0.0
+flask>=3.1.0
 open3d>=0.17.0
 opencv-contrib-python-headless==5.0.0.93
 numpy>=2.0.0
@@ -8,3 +8,4 @@ requests>=2.31.0
 trimesh>=3.23.0
 xatlas>=0.0.9
 scipy>=1.11.0
+gunicorn==23.0.0

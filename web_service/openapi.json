@@ -1,0 +1,796 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Area Target mobile API",
+    "version": "1.2.0",
+    "description": "Service login plus capability-protected idempotent ARKit scan processing. Sign in first, retain X-Area-Target-Session, and save the UUID and random task token before the first submission."
+  },
+  "servers": [
+    {
+      "url": "https://at.3dugc.com"
+    },
+    {
+      "url": "https://area-target.p.01xr.com",
+      "description": "Legacy server; use credentials configured for that server."
+    }
+  ],
+  "paths": {
+    "/api/v1/jobs": {
+      "post": {
+        "summary": "Create or reconcile one immutable scan submission",
+        "security": [
+          {
+            "ServiceSession": [],
+            "TaskToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Scan ZIP with OBJ, camera metadata and keyframe images; may be a client-prepared derivative following processing-requirements. Original raw scans are also supported."
+                  },
+                  "profile": {
+                    "type": "string",
+                    "enum": [
+                      "fast",
+                      "quality"
+                    ],
+                    "default": "fast"
+                  },
+                  "uv_unwrap": {
+                    "type": "string",
+                    "enum": [
+                      "0",
+                      "1"
+                    ],
+                    "default": "1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "New task accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Identical prior submission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request, invalid_archive, or invalid_scan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing_or_invalid_token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found, including wrong capability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "submission_conflict or result_not_ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload_too_large (512 MiB request limit)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "queue_full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retry",
+                "schema": {
+                  "type": "integer",
+                  "example": 10
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}": {
+      "get": {
+        "summary": "Get a protected task snapshot",
+        "security": [
+          {
+            "ServiceSession": [],
+            "TaskToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sanitized task snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing_or_invalid_token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found, including wrong capability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/result": {
+      "get": {
+        "summary": "Download the exact ZIP described by the task result",
+        "security": [
+          {
+            "ServiceSession": [],
+            "TaskToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment ZIP; verify size_bytes and SHA256 from status",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing_or_invalid_token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found, including wrong capability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "submission_conflict or result_not_ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "result_expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "summary": "Read this public OpenAPI description",
+        "responses": {
+          "200": {
+            "description": "OpenAPI JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing-requirements": {
+      "get": {
+        "summary": "Read versioned client scan preparation requirements",
+        "description": "Public configuration, no task token required. Preserve the original scan and prepare a derivative ZIP. If this known policy is unavailable, raw uploads remain supported; the server independently validates and prepares inputs.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Current server-authoritative preparation and safety budgets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingRequirements"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Sign in to the service",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Service session; browser also receives HttpOnly Secure SameSite=Strict cookie.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "username",
+                    "session_token",
+                    "csrf_token",
+                    "expires_at"
+                  ],
+                  "properties": {
+                    "username": {
+                      "type": "string"
+                    },
+                    "session_token": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "csrf_token": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid username or password."
+          },
+          "429": {
+            "description": "Login rate limit; obey Retry-After."
+          },
+          "503": {
+            "description": "Service credentials have not been configured."
+          }
+        }
+      }
+    },
+    "/api/auth/session": {
+      "get": {
+        "summary": "Validate a saved service session",
+        "responses": {
+          "200": {
+            "description": "username, csrf_token, expires_at; does not repeat session_token."
+          },
+          "401": {
+            "description": "Session missing, expired or revoked."
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Revoke the current service session",
+        "responses": {
+          "200": {
+            "description": "Session revoked; browser cookie cleared."
+          },
+          "401": {
+            "description": "Session missing, expired or revoked."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "TaskToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "64 lowercase hex characters",
+        "description": "Independent random task token; never a shared app secret."
+      },
+      "ServiceSession": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Area-Target-Session",
+        "description": "Opaque 12-hour service session from POST /api/auth/login. Keep the task Bearer token in Authorization."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        }
+      },
+      "Result": {
+        "type": "object",
+        "required": [
+          "format",
+          "filename",
+          "size_bytes",
+          "sha256",
+          "url",
+          "expires_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "area-target-bundle"
+            ]
+          },
+          "filename": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "url": {
+            "type": "string",
+            "example": "/api/v1/jobs/4f619a9c-19cd-45d2-bfd7-c2f82ba5cfa1/result"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "progress",
+          "stage",
+          "message",
+          "profile",
+          "uv_unwrap",
+          "created_at",
+          "finished_at",
+          "expires_at",
+          "error",
+          "result"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "extracting",
+              "processing",
+              "completed",
+              "failed"
+            ]
+          },
+          "progress": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "extracting",
+              "uv_unwrap",
+              "model_optimization",
+              "feature_extraction",
+              "packaging",
+              "completed",
+              "failed"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "quality"
+            ]
+          },
+          "uv_unwrap": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "error": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              }
+            ],
+            "nullable": true
+          },
+          "result": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Result"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "ProcessingRequirements": {
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "policy",
+          "policyVersion",
+          "profiles",
+          "safety"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "example": 1
+          },
+          "policy": {
+            "type": "string",
+            "example": "mobile-scan-preparation-v1"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "example": 1
+          },
+          "profiles": {
+            "type": "object",
+            "required": [
+              "fast",
+              "quality"
+            ],
+            "properties": {
+              "fast": {
+                "type": "object",
+                "required": [
+                  "maxFrames",
+                  "maximumLongEdge",
+                  "maximumTotalPixels"
+                ],
+                "properties": {
+                  "maxFrames": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 80
+                  },
+                  "maximumLongEdge": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1600
+                  },
+                  "maximumTotalPixels": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 200000000
+                  }
+                }
+              },
+              "quality": {
+                "type": "object",
+                "required": [
+                  "maxFrames",
+                  "maximumLongEdge",
+                  "maximumTotalPixels"
+                ],
+                "properties": {
+                  "maxFrames": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 80
+                  },
+                  "maximumLongEdge": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1600
+                  },
+                  "maximumTotalPixels": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 200000000
+                  }
+                }
+              }
+            }
+          },
+          "safety": {
+            "type": "object",
+            "required": [
+              "maximumRequestBytes",
+              "maximumExpandedBytes",
+              "maximumArchiveEntries",
+              "maximumSourceFrameCount",
+              "maximumImagePixels",
+              "maximumImageDimension",
+              "maximumMetadataBytes"
+            ],
+            "properties": {
+              "maximumRequestBytes": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 536870912
+              },
+              "maximumExpandedBytes": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 524288000
+              },
+              "maximumArchiveEntries": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 10000
+              },
+              "maximumSourceFrameCount": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 10000
+              },
+              "maximumImagePixels": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 32000000
+              },
+              "maximumImageDimension": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 8192
+              },
+              "maximumMetadataBytes": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "example": 8388608
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ServiceSession": []
+    }
+  ]
+}

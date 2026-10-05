@@ -117,44 +117,47 @@ class TestBug2TempDirLeak:
 
 
 class TestBug3SafeExtractTOCTOU:
-    """Validates: Requirements 1.4
+    """Keep every streamed destination contained even after archive preflight."""
 
-    Bug condition: safe_extract() checks path with os.path.realpath() BEFORE
-    extraction but does NOT verify the actual path AFTER extraction.
-    """
-
-    def test_safe_extract_has_post_extraction_path_check(self):
-        """Verify safe_extract() does post-extraction path validation on
-        each file.
-
-        **Validates: Requirements 1.4**
-
-        isBugCondition: source code lacks post-extraction path check
-        """
+    def test_safe_extract_rechecks_each_streamed_target(self, tmp_path, monkeypatch):
+        """A directory changed after the first member cannot redirect the next write."""
+        import zipfile
+        import pytest
         from web_service.app import safe_extract
 
-        source = inspect.getsource(safe_extract)
+        destination = tmp_path / 'extracted'
+        outside = tmp_path / 'outside'
+        destination.mkdir()
+        outside.mkdir()
+        archive_path = tmp_path / 'scan.zip'
+        with zipfile.ZipFile(archive_path, 'w') as archive:
+            archive.writestr('first.txt', b'first regular file')
+            archive.writestr('nested/escape.txt', b'must remain contained')
 
-        # The source should have TWO realpath checks:
-        # 1. Pre-extraction check (already exists)
-        # 2. Post-extraction check (the fix)
-        #
-        # We look for a realpath call AFTER the zf.extract() call
-        extract_pos = source.find("zf.extract(")
-        assert extract_pos != -1, "safe_extract does not call zf.extract()"
+        with zipfile.ZipFile(archive_path) as archive:
+            original_open = archive.open
 
-        # Check for post-extraction path validation after zf.extract()
-        post_extract_source = source[extract_pos:]
-        has_post_check = (
-            "realpath" in post_extract_source
-            or "Post" in post_extract_source
-            or "post" in post_extract_source
-        )
+            def open_member(member, *args, **kwargs):
+                source = original_open(member, *args, **kwargs)
+                if member.filename == 'first.txt':
+                    original_read = source.read
 
-        assert has_post_check, (
-            "safe_extract() lacks post-extraction path validation after zf.extract(). "
-            "Bug confirmed: TOCTOU vulnerability — path is only checked before extraction."
-        )
+                    def read_and_replace_directory(*args, **kwargs):
+                        block = original_read(*args, **kwargs)
+                        if not block:
+                            (destination / 'nested').symlink_to(outside, target_is_directory=True)
+                        return block
+
+                    monkeypatch.setattr(source, 'read', read_and_replace_directory)
+                return source
+
+            monkeypatch.setattr(archive, 'open', open_member)
+            with pytest.raises(ValueError):
+                safe_extract(archive, str(destination))
+
+        assert (destination / 'first.txt').read_bytes() == b'first regular file'
+        assert not (outside / 'escape.txt').exists()
+        assert list(outside.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +310,7 @@ class TestBug8UploadNoZipValidation:
     validate that the file content is actually a valid ZIP.
     """
 
-    def test_upload_invalid_zip_content_returns_400(self):
+    def test_upload_invalid_zip_content_returns_400(self, monkeypatch, tmp_path):
         """Upload a file with .zip extension but plain text content,
         assert returns 400.
 
@@ -316,6 +319,8 @@ class TestBug8UploadNoZipValidation:
         isBugCondition: response.status_code != 400 for invalid ZIP content
         """
         from web_service.app import app
+        from tests.service_auth_helpers import authenticate_test_clients
+        authenticate_test_clients(monkeypatch, tmp_path, app)
 
         with app.test_client() as client:
             # Create a fake .zip file with plain text content

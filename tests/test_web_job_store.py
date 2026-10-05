@@ -40,6 +40,8 @@ def _zip_bytes():
 
 def _isolate_app_store(monkeypatch, tmp_path):
     import web_service.app as app_module
+    from tests.service_auth_helpers import authenticate_test_clients
+    authenticate_test_clients(monkeypatch, tmp_path, app_module.app)
 
     upload_dir = tmp_path / "uploads"
     output_dir = tmp_path / "outputs"

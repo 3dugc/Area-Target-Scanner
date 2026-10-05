@@ -89,6 +89,14 @@ def _limit_keyframes_evenly(images: List[dict], max_keyframes: int | None):
     return [indexed_images[i] for i in selected[:max_keyframes]]
 
 
+def _limit_detected_features(keypoints, descriptors, maximum):
+    """Retain strongest responses without breaking keypoint/descriptor alignment."""
+    if descriptors is None or maximum is None or len(keypoints) <= maximum:
+        return keypoints, descriptors
+    selected = sorted(range(len(keypoints)), key=lambda index: -keypoints[index].response)[:maximum]
+    return [keypoints[index] for index in selected], descriptors[selected]
+
+
 def build_feature_database(
     images: List[dict],
     mesh: o3d.geometry.TriangleMesh,
@@ -102,6 +110,7 @@ def build_feature_database(
     kmeans_n_init: int = 3,
     kmeans_max_iter: int = 300,
     assignment_batch_size: int = 2048,
+    max_akaze_features: int | None = None,
 ) -> FeatureDatabase:
     """Extract ORB features from keyframes and build a visual feature database.
 
@@ -128,6 +137,8 @@ def build_feature_database(
             If *None*, intrinsics are estimated from image dimensions.
         extract_akaze: If True (default), additionally extract AKAZE features
             for each keyframe and store in akaze_* fields.
+        max_akaze_features: Optional per-keyframe response-ranked AKAZE limit.
+            None preserves legacy extraction; the explicit mobile producer uses 500.
 
     Returns:
         Populated feature database with keyframes, vocabulary (uint8 medoids),
@@ -146,6 +157,9 @@ def build_feature_database(
     except Exception:
         pass
 
+    if max_akaze_features is not None and (not isinstance(max_akaze_features, int)
+                                         or isinstance(max_akaze_features, bool) or max_akaze_features <= 0):
+        raise ValueError("max_akaze_features must be a positive integer or None")
     selected_images = _limit_keyframes_evenly(images, max_keyframes)
 
     # --- Step 1: Create ORB detector (+ AKAZE if requested) ---
@@ -180,6 +194,8 @@ def build_feature_database(
 
         # --- Step 2a: Extract ORB features ---
         kps, descriptors = orb.detectAndCompute(img_gray, None)
+        # OpenCV may retain extra tied responses: enforce the declared producer cap.
+        kps, descriptors = _limit_detected_features(kps, descriptors, orb_nfeatures)
 
         if descriptors is None or len(kps) == 0:
             logger.info(
@@ -265,6 +281,7 @@ def build_feature_database(
         # --- Step 2e: Extract AKAZE features (if requested) ---
         if akaze is not None:
             akaze_kps, akaze_descs = akaze.detectAndCompute(img_gray, None)
+            akaze_kps, akaze_descs = _limit_detected_features(akaze_kps, akaze_descs, max_akaze_features)
 
             if akaze_descs is not None and len(akaze_kps) > 0:
                 # 构建 AKAZE 关键点的射线，复用相同的 intrinsics 和 pose

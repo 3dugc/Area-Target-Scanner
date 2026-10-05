@@ -231,9 +231,11 @@ class TestFeatureDbNativeLocalizerCompat:
 class TestWebServiceConcurrency:
     """Verify the web service handles multiple simultaneous uploads correctly."""
 
-    def test_concurrent_uploads_get_unique_job_ids(self, tmp_path):
+    def test_concurrent_uploads_get_unique_job_ids(self, tmp_path, monkeypatch):
         """Two simultaneous uploads should get different job IDs."""
         from web_service.app import app, jobs
+        from tests.service_auth_helpers import authenticate_test_clients
+        authenticate_test_clients(monkeypatch, tmp_path, app)
 
         zip1 = str(tmp_path / "scan1.zip")
         zip2 = str(tmp_path / "scan2.zip")
@@ -565,8 +567,10 @@ class TestSafeExtractEdgeCases:
         extract_dir = str(tmp_path / "extracted")
         os.makedirs(extract_dir)
         with zipfile.ZipFile(zip_path, "r") as zf:
-            with pytest.raises(ValueError, match="[Tt]raversal"):
+            with pytest.raises(ValueError):
                 safe_extract(zf, extract_dir)
+        assert not (tmp_path / 'escape.txt').exists()
+        assert list((tmp_path / 'extracted').iterdir()) == []
 
 
 # ===========================================================================

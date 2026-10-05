@@ -4,11 +4,14 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:5000"
+      - "127.0.0.1:8080:5000"
     volumes:
       - pipeline_uploads:/tmp/pipeline_uploads
       - pipeline_outputs:/tmp/pipeline_outputs
     environment:
+      - AREA_TARGET_USERNAME=${AREA_TARGET_USERNAME:?Set AREA_TARGET_USERNAME}
+      - AREA_TARGET_PASSWORD_HASH=${AREA_TARGET_PASSWORD_HASH:?Set AREA_TARGET_PASSWORD_HASH using python -m web_service.auth hash-password}
+      - AREA_TARGET_COOKIE_SECURE=${AREA_TARGET_COOKIE_SECURE:-0}
       - UPLOAD_DIR=/tmp/pipeline_uploads
       - OUTPUT_DIR=/tmp/pipeline_outputs
       - MODEL_OPTIMIZER_URL=http://model_optimizer:3000
@@ -36,8 +39,6 @@ services:
       context: ./model_optimizer
       dockerfile: Dockerfile
     platform: linux/amd64
-    ports:
-      - "3000:3000"
     volumes:
       - model_optimizer_temp:/app/temp
     environment:

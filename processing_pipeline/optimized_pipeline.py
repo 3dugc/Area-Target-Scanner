@@ -22,6 +22,7 @@ import numpy as np
 from processing_pipeline.feature_db import save_feature_database
 from processing_pipeline.models import FeatureDatabase, ScanInput
 from processing_pipeline.optimizer_client import ModelOptimizerClient
+from processing_pipeline.scan_security import contained_path, load_metadata, MAX_FRAMES, MAX_IMAGE_PIXELS, MAX_IMAGE_DIMENSION
 
 FEATURE_PROFILE_OPTIONS = {
     "fast": {
@@ -91,8 +92,7 @@ def _finite_intrinsic(value: object, name: str) -> float:
 
 def _read_scan_manifest(manifest_path: str) -> list[dict]:
     """Read schema-v1 scanner metadata into normalized processing frames."""
-    with open(manifest_path, encoding="utf-8") as manifest_file:
-        manifest = json.load(manifest_file)
+    manifest = load_metadata(manifest_path)
 
     if not isinstance(manifest, dict):
         raise ValueError("scan manifest must be an object")
@@ -106,7 +106,7 @@ def _read_scan_manifest(manifest_path: str) -> list[dict]:
         raise ValueError(f"units must be {_SCAN_UNITS}")
 
     frames = manifest.get("frames")
-    if not isinstance(frames, list) or not frames:
+    if not isinstance(frames, list) or not frames or len(frames) > MAX_FRAMES:
         raise ValueError("scan manifest must contain at least one frame")
 
     images: list[dict] = []
@@ -131,6 +131,9 @@ def _read_scan_manifest(manifest_path: str) -> list[dict]:
         height = _positive_image_dimension(
             image.get("height"), f"frames[{index}].image.height"
         )
+
+        if width * height > MAX_IMAGE_PIXELS or max(width, height) > MAX_IMAGE_DIMENSION:
+            raise ValueError("Scan image exceeds the pixel limit")
 
         raw_intrinsics = frame.get("intrinsics")
         if not isinstance(raw_intrinsics, dict):
@@ -172,6 +175,9 @@ class OptimizedPipeline:
         optimizer_url: Base URL of the 3D-Model-Optimizer service.
         optimizer_preset: Optimization preset passed to the optimizer
             (e.g. ``"balanced"``).
+        mobile_feature_limits: Explicitly bound native mobile databases to 80
+            keyframes and (for quality) 500 AKAZE features per frame. Legacy CLI
+            defaults remain unchanged; mobile workers opt in.
     """
 
     def __init__(
@@ -179,9 +185,11 @@ class OptimizedPipeline:
         optimizer_url: str = "http://model_optimizer:3000",
         optimizer_preset: str = "balanced",
         processing_profile: str = "quality",
+        mobile_feature_limits: bool = False,
     ) -> None:
         self.optimizer_url = optimizer_url
         self.optimizer_preset = optimizer_preset
+        self.mobile_feature_limits = mobile_feature_limits
         self.processing_profile = (
             processing_profile
             if processing_profile in FEATURE_PROFILE_OPTIONS
@@ -205,10 +213,14 @@ class OptimizedPipeline:
             if not os.path.isfile(p):
                 raise FileNotFoundError(f"必需文件缺失: {p}")
 
+        obj_path = contained_path(scan_dir, 'model.obj', require_file=True)
+        texture_path = contained_path(scan_dir, 'texture.jpg', require_file=True)
+        mtl_path = contained_path(scan_dir, 'model.mtl', require_file=True)
         if os.path.isfile(scan_manifest_path):
+            scan_manifest_path = contained_path(scan_dir, 'manifest.json', require_file=True)
             images = _read_scan_manifest(scan_manifest_path)
             for image in images:
-                image["path"] = os.path.join(scan_dir, image["path"])
+                image["path"] = contained_path(scan_dir, image["path"], require_file=True)
             return ScanInput(
                 obj_path=obj_path,
                 texture_path=texture_path,
@@ -220,23 +232,23 @@ class OptimizedPipeline:
         if not os.path.isfile(poses_path):
             raise FileNotFoundError(f"必需文件缺失: {poses_path}")
 
-        with open(poses_path) as f:
-            poses_data = json.load(f)
+        poses_path = contained_path(scan_dir, 'poses.json', require_file=True)
+        poses_data = load_metadata(poses_path)
         frames = poses_data.get("frames", [])
-        if not frames:
+        if not isinstance(frames, list) or not frames or len(frames) > MAX_FRAMES:
             raise ValueError("poses.json 不包含任何帧")
 
         images = []
         for frame in frames:
-            image_path = os.path.join(scan_dir, frame["imageFile"])
+            image_path = contained_path(scan_dir, frame["imageFile"], require_file=True)
             transform = arkit_column_major_to_matrix(frame["transform"])
             images.append({"path": image_path, "pose": transform})
 
         intrinsics = None
         intrinsics_path = os.path.join(scan_dir, "intrinsics.json")
         if os.path.isfile(intrinsics_path):
-            with open(intrinsics_path) as f:
-                intrinsics = json.load(f)
+            intrinsics_path = contained_path(scan_dir, 'intrinsics.json', require_file=True)
+            intrinsics = load_metadata(intrinsics_path)
 
         return ScanInput(
             obj_path=obj_path,
@@ -311,7 +323,12 @@ class OptimizedPipeline:
         o3d_mesh = self._trimesh_to_o3d(mesh_tri)
 
         # Reuse existing ORB + ray-casting + BoW logic
-        feature_options = FEATURE_PROFILE_OPTIONS[self.processing_profile]
+        feature_options = dict(FEATURE_PROFILE_OPTIONS[self.processing_profile])
+        if self.mobile_feature_limits:
+            feature_options["max_keyframes"] = 80
+            if feature_options["extract_akaze"]:
+                feature_options["max_akaze_features"] = 500
+        # quality: 80 * (2000 ORB + 500 AKAZE) <= the native reader's 200k cap.
         return build_feature_database(
             images,
             o3d_mesh,
