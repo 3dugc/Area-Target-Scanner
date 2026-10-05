@@ -63,10 +63,10 @@
 ## Task 5: Review, commit and local develop integration
 
 - [x] Independently review spec compliance and implementation quality, including project runtime version inventory and Area Target/Immersal private-symbol separation.
-- [ ] Update the validation report with latest baseline, whole-project coverage, actual runtime versions, commands, test totals, binary hashes, limitations and pending device/field gates.
-- [ ] Commit only OpenCV-specific branch changes. Preserve the original Swift functionality and model_optimizer changes, including file contents and pending Git state as applicable.
-- [ ] Prepare a safe three-way integration of the original pending README changes. Merge the validated branch into local develop while preserving all other pending files; update the original Python environment to a single contrib headless 5 package and verify imports and native/SDK contracts in the actual workspace.
-- [ ] Confirm develop's final commit, the branch's ancestry, runtime versions and that every pre-existing unrelated pending file remains intact. Do not push or publish.
+- [x] Update the validation report with latest baseline, whole-project coverage, actual runtime versions, commands, test totals, binary hashes, limitations and pending device/field gates.
+- [x] Commit only OpenCV-specific branch changes. Preserve the original Swift functionality and model_optimizer changes, including file contents and pending Git state as applicable.
+- [x] Prepare a reviewed integration of the original pending README changes. Fast-forward the validated branch into local develop while preserving other pending files; switch the original Python environment offline to a single contrib headless 5 package and verify native/SDK contracts in the actual workspace. Merge and activation returned 0; post-cutover smoke 16/16, dependency 11/11 and real fixture 1/1 passed.
+- [x] Confirm develop and the upgrade branch have the same commit, contain latest origin/develop, and use the validated runtimes. The actual 303-check audit passed all 179 file policies (168 strict preservation, 170 byte-identical, 9 reviewed changes), fixed artifact/resource hashes, dirty model_optimizer preservation and an empty index. No push or publication. Keep the upgrade worktree and cached proof artifacts.
 
 ## Acceptance boundary
 

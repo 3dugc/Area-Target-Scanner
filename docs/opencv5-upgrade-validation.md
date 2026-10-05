@@ -19,6 +19,7 @@
 | Swift 完整 App | 545 项：542 通过、0 失败、3 项真实线上 opt-in 测试跳过；完整 App 未签名设备构建成功，实际链接原 SDK 与 5 私有框架 |
 | CI lint / Shell / Python 语法 / Compose | 通过；CI 补充原生依赖接受与夹具生产者门禁 |
 | Docker 镜像及容器运行 | linux/arm64 实际构建与容器门禁均返回 0；单一 contrib 5.0.0.93 / 实际 OpenCV 5.0.0，ORB/AKAZE/PnP、Open3D ELF 依赖、服务认证及真实 Gunicorn 启停全部通过 |
+| 本地 develop 合并与原工作区 | 实际快进合并、离线 Python 切换及两平台 native cache 验证均返回 0；合并后 Python smoke 16/16、Apple 依赖 11/11、真实夹具 1/1，保全审计 303 项通过、0 失败 |
 | 签名真机部署、持续定位及真实跨会话识别率 | 未运行；缺少 iPhone/iPad 现场同图验收和独立真实查询集 |
 
 Swift 的 3 项跳过仅为真实 Hall bundle 导入、真实 Hall 扫描云处理和生产 HTTPS 合成请求，需显式输入/授权。它们不构成线上 API 或真机定位通过。模拟器中的 Immersal 为既有 stub/契约路径；真实 SDK 由设备镜像链接验证。两项旧身份测试实际 RED（4.10 对 5.0）后 GREEN；Smoke scheme 的夹具路径需 MacroExpansion，已修复并验证真实 SQLite→5 原生定位与空白 LOST。
@@ -180,4 +181,8 @@ python tools/phase0/build_upm_package.py
 
 本轮记录保存在升级工作树的 `build/opencv5-unification/`，包括 `python-regression.log`、`unity-editmode.xml`、`unity-workspace/phase1-results/`、`apple-validation-summary.json`、Apple 签名/同存链接/Simulator 日志、Swift 红绿结果和 `docker-build-green.log` / `docker-runtime-validation.json`。源码、框架缓存、完整 App 副本及 SDK 不提交 Git。初次 `/private/tmp/area-target-opencv5/` 已在会话延续时丢失；未完成的进程没有计为通过，受影响门禁已在持久目录重跑。初始完整数值记录保留在已提交的 `opencv5-comparison-results.json`；不得宣称旧原始临时文件仍可访问。
 
-本地 develop 集成按用户确认的方案执行，并保留升级分支和现有待提交 iOS 功能。尚待发布验收：用真实旧地图和新会话查询对照成功率、误定位、位姿误差、恢复时间和 median/P95；在目标 iPhone/iPad 完成签名部署与持续定位验收。源码合并不更新手机上已安装的 App。本轮不推送、不推进 main/publish，也不更新线上服务。
+本地 develop 已按用户确认的方案快进合并，运行时切换提交为 `465705a`，其后仅追加本记录与计划的完成状态。升级分支和工作树保留。原工作区 `venv` 仅安装 contrib headless 5.0.0.93，实际 cv2 为 5.0.0；旧 4 安装先以哈希清单和 COW 文件备份保存，再离线安装已验收 wheel。两平台原生缓存实际调用构建器并核验匹配 device/simulator 的固定二进制哈希。pending Xcode 工程仅移除旧 `/private/tmp` cache 参数，改用构建器持久缓存默认值，仍保留环境变量覆盖及原有全部功能配置。
+
+对合并前的 179 文件保全快照执行实际只读审计：168 项严格保留要求全部满足，170 文件逐字节相同，9 个预期变化仅为已审查的 README、Xcode cache 参数和 OpenCV 工具/许可；无非预期变化。9 个受控 OpenCV 文件均匹配 HEAD；Immersal SDK/头文件、两平台 native 和依赖二进制、完整附属资源与许可证匹配固定哈希。model_optimizer 原有 dirty 状态及补丁未变，原工作区暂存区为空。最终审计为 303 项通过、0 失败；`workspace-cutover.json`、`workspace-preservation-final.json`、合并后的 16 项 Python smoke JUnit 和 Apple 11+1 项测试日志存放在原工作区 `build/opencv5-unification/`。
+
+尚待发布验收：用真实旧地图和新会话查询对照成功率、误定位、位姿误差、恢复时间和 median/P95；在目标 iPhone/iPad 完成签名部署与持续定位验收。源码合并不更新手机上已安装的 App。本轮未推送、未推进 main/publish，也未更新线上服务。
