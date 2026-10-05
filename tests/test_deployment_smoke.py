@@ -11,6 +11,8 @@ from tools.deployment import smoke
 
 @pytest.mark.parametrize('corruption', [None, 'size', 'sha256'])
 def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corruption):
+    monkeypatch.setenv('AREA_TARGET_USERNAME', 'test-user')
+    monkeypatch.setenv('AREA_TARGET_PASSWORD', 'test-only-password')
     calls = []
     result_bytes = b'exact ZIP bytes'
     job_id = None
@@ -25,11 +27,22 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
         nonlocal job_id, owner, submitted
         path = __import__('urllib.parse', fromlist=['urlsplit']).urlsplit(request.full_url).path
         auth = request.get_header('Authorization')
+        headers = {name.lower(): value for name, value in request.header_items()}
+        session = headers.get('x-area-target-session')
         calls.append((path, request.get_method(), auth))
-        if path == '/':
-            return Response(b'page')
+        if path == '/healthz':
+            return Response(b'{"status":"ok"}')
+        if path == '/api/auth/login':
+            assert request.get_method() == 'POST'
+            assert json.loads(request.data) == {'username': 'test-user', 'password': 'test-only-password'}
+            return Response(json.dumps({'username': 'test-user', 'session_token': 'service-session',
+                                        'csrf_token': 'service-csrf', 'expires_at': 2_000_000_000}).encode())
+        if session != 'service-session':
+            raise urllib.error.HTTPError(request.full_url, 401, 'login required', {},
+                                         io.BytesIO(b'{"error":{"code":"auth_required","message":"Login required","retryable":false}}'))
         assert path.startswith('/api/v1/') or path.startswith('/api/status/') or path.startswith('/api/download/')
         if path == '/api/v1/jobs':
+            assert headers.get('x-csrf-token') == 'service-csrf'
             submitted += 1
             job_id = request.get_header('Idempotency-key')
             owner = auth
@@ -47,6 +60,7 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
                   'sha256': '0' * 64 if corruption == 'sha256' else hashlib.sha256(result_bytes).hexdigest()}
         return Response(json.dumps({'job_id': job_id, 'status': 'completed', 'stage': 'completed', 'result': result}).encode())
     monkeypatch.setattr(smoke.urllib.request, 'urlopen', urlopen)
+    monkeypatch.setattr(smoke, 'wait_ready', lambda *_: None)
     monkeypatch.setattr(smoke, 'verify_bundle', lambda *_: {'verified': True})
     if corruption:
         with pytest.raises(ValueError, match='byte|SHA256'):
@@ -54,8 +68,28 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
     else:
         assert smoke.run_smoke('https://example.test', 30)['verified'] is True
         assert submitted == 2
+        assert ('/api/upload', 'POST', None) in calls
+        assert any(path == '/api/auth/login' for path, _, _ in calls)
         assert any(path.startswith('/api/status/') for path, _, _ in calls)
         assert any(path.endswith('/result') and token == owner for path, _, token in calls)
+
+
+def test_readiness_uses_public_health_endpoint(monkeypatch):
+    paths = []
+    monkeypatch.setattr(smoke, 'fetch', lambda url, *_: paths.append(url) or b'{"status":"ok"}')
+    smoke.wait_ready('https://example.test', smoke.time.monotonic() + 5)
+    assert paths == ['https://example.test/healthz']
+
+
+@pytest.mark.parametrize('missing', ['AREA_TARGET_USERNAME', 'AREA_TARGET_PASSWORD'])
+def test_smoke_requires_environment_credentials_before_network(monkeypatch, missing):
+    monkeypatch.setenv('AREA_TARGET_USERNAME', 'test-user')
+    monkeypatch.setenv('AREA_TARGET_PASSWORD', 'test-only-password')
+    monkeypatch.delenv(missing)
+    monkeypatch.setattr(smoke, 'wait_ready', lambda *_: pytest.fail('Network readiness must not run without credentials'))
+    monkeypatch.setattr(smoke, 'fetch_response', lambda *_: pytest.fail('HTTP requests must not run without credentials'))
+    with pytest.raises(ValueError, match='AREA_TARGET_USERNAME.*AREA_TARGET_PASSWORD'):
+        smoke.run_smoke('https://example.test', 5)
 
 
 def test_large_fixture_reproduces_original_total_pixel_failure(tmp_path):

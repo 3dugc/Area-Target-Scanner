@@ -91,6 +91,7 @@ jobs:
             tests/test_feature_extraction.py \
             tests/test_feature_db.py \
             tests/test_web_job_store.py \
+            tests/test_service_auth.py \
             tests/test_mobile_api.py \
             tests/test_scan_security.py \
             tests/test_scan_preparation.py \
@@ -215,6 +216,30 @@ jobs:
 
       - name: Start isolated runtime services
         run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import secrets
+          import subprocess
+
+          password = secrets.token_urlsafe(48)
+          hashed = subprocess.run(
+              ["docker", "run", "--rm", "-i", "--entrypoint", "python",
+               "area-target-scanner-ci:smoke", "-m", "web_service.auth", "hash-password", "--stdin"],
+              input=password + "\n", text=True, capture_output=True, check=True,
+          ).stdout.strip()
+          if not hashed.startswith("scrypt:") or "\n" in hashed:
+              raise RuntimeError("Password hash generator returned an invalid hash")
+          directory = Path(os.environ["RUNNER_TEMP"])
+          files = {
+              "area-target-runtime.env": "AREA_TARGET_USERNAME=smoke-ci\nAREA_TARGET_PASSWORD_HASH=" + hashed + "\nAREA_TARGET_COOKIE_SECURE=0\n",
+              "area-target-smoke.env": "AREA_TARGET_USERNAME=smoke-ci\nAREA_TARGET_PASSWORD=" + password + "\n",
+          }
+          for name, content in files.items():
+              path = directory / name
+              path.touch(mode=0o600, exist_ok=False)
+              path.write_text(content)
+          PY
           docker network create area-target-ci
           docker run -d --name area-target-optimizer-ci \
             --network area-target-ci --network-alias model_optimizer \
@@ -229,6 +254,7 @@ jobs:
           test "$(docker inspect --format '{{.State.Health.Status}}' area-target-optimizer-ci)" = healthy
           docker run -d --name area-target-scanner-ci \
             --network area-target-ci -p 127.0.0.1:15000:5000 \
+            --env-file "$RUNNER_TEMP/area-target-runtime.env" \
             -e MODEL_OPTIMIZER_URL=http://model_optimizer:3000 \
             -e PIPELINE_MAX_WORKERS=1 -e UV_XATLAS_NATIVE=1 \
             -e UV_XATLAS_HELPER_PATH=/app/bin/xatlas_helper \
@@ -237,10 +263,18 @@ jobs:
             area-target-scanner-ci:smoke
 
       - name: Verify upload, processing, and bundle download
-        run: python tools/deployment/smoke.py --url http://127.0.0.1:15000 --timeout 180
+        run: |
+          set -a
+          . "$RUNNER_TEMP/area-target-smoke.env"
+          set +a
+          python tools/deployment/smoke.py --url http://127.0.0.1:15000 --timeout 180
 
       - name: Verify oversized raw scan preparation
-        run: python tools/deployment/smoke.py --url http://127.0.0.1:15000 --large-scan --timeout 900
+        run: |
+          set -a
+          . "$RUNNER_TEMP/area-target-smoke.env"
+          set +a
+          python tools/deployment/smoke.py --url http://127.0.0.1:15000 --large-scan --timeout 900
 
       - name: Login to Tencent Container Registry
         uses: docker/login-action@v4
@@ -285,3 +319,4 @@ jobs:
         run: |
           docker rm -f area-target-scanner-ci area-target-optimizer-ci 2>/dev/null || true
           docker network rm area-target-ci 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/area-target-runtime.env" "$RUNNER_TEMP/area-target-smoke.env"
