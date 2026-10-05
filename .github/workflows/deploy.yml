@@ -33,12 +33,13 @@ jobs:
             refs/heads/develop|refs/heads/main|refs/heads/publish) ;;
             *) echo "::error::Deploy only supports develop, main, and publish branches."; exit 1 ;;
           esac
-          if [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; then
+          if [ "$GITHUB_REF" != refs/heads/main ] && { [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; }; then
             echo "::error::Set TENCENT_REGISTRY_USERNAME (or TENCENT_REGISTRY_USER) and TENCENT_REGISTRY_PASSWORD repository secrets."
             exit 1
           fi
 
       - name: Verify Tencent registry credentials
+        if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/publish' }}
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -172,9 +173,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=publish,enable=${{ github.ref == 'refs/heads/publish' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/publish' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/publish' }}
 
       - name: Optimizer image metadata
         id: optimizer-meta
@@ -184,9 +183,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=publish,enable=${{ github.ref == 'refs/heads/publish' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/publish' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/publish' }}
 
       - name: Build scanner image for runtime verification
         uses: docker/build-push-action@v7
@@ -277,6 +274,7 @@ jobs:
           python tools/deployment/smoke.py --url http://127.0.0.1:15000 --large-scan --timeout 900
 
       - name: Login to Tencent Container Registry
+        if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/publish' }}
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -285,6 +283,7 @@ jobs:
 
       # Retag the loaded images so the published bytes are the ones tested above.
       - name: Publish verified images
+        if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/publish' }}
         env:
           SCANNER_TAGS: ${{ steps.scanner-meta.outputs.tags }}
           OPTIMIZER_TAGS: ${{ steps.optimizer-meta.outputs.tags }}
