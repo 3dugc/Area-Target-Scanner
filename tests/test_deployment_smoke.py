@@ -18,13 +18,21 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
     job_id = None
     owner = None
     submitted = 0
+    submitted_body = None
+    anonymous_posts = []
+    multipart_bodies = []
+    original_multipart = smoke.multipart_fixture
+    def multipart_fixture(*args, **kwargs):
+        body, content_type = original_multipart(*args, **kwargs)
+        multipart_bodies.append(body)
+        return body, content_type
     class Response(io.BytesIO):
         def __init__(self, body, status=200):
             super().__init__(body)
             self.status = status
             self.headers = {}
     def urlopen(request, **kwargs):
-        nonlocal job_id, owner, submitted
+        nonlocal job_id, owner, submitted, submitted_body
         path = __import__('urllib.parse', fromlist=['urlsplit']).urlsplit(request.full_url).path
         auth = request.get_header('Authorization')
         headers = {name.lower(): value for name, value in request.header_items()}
@@ -38,11 +46,21 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
             return Response(json.dumps({'username': 'test-user', 'session_token': 'service-session',
                                         'csrf_token': 'service-csrf', 'expires_at': 2_000_000_000}).encode())
         if session != 'service-session':
+            if request.get_method() == 'POST':
+                anonymous_posts.append(path)
+                assert len(request.data or b'') <= 1024, 'Anonymous auth probes must not send a scan body'
             raise urllib.error.HTTPError(request.full_url, 401, 'login required', {},
                                          io.BytesIO(b'{"error":{"code":"auth_required","message":"Login required","retryable":false}}'))
         assert path.startswith('/api/v1/') or path.startswith('/api/status/') or path.startswith('/api/download/')
         if path == '/api/v1/jobs':
             assert headers.get('x-csrf-token') == 'service-csrf'
+            assert request.data == multipart_bodies[0]
+            assert len(request.data) > 1024
+            if submitted_body is not None:
+                assert request.data == submitted_body
+                assert auth == owner
+                assert request.get_header('Idempotency-key') == job_id
+            submitted_body = request.data
             submitted += 1
             job_id = request.get_header('Idempotency-key')
             owner = auth
@@ -60,6 +78,7 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
                   'sha256': '0' * 64 if corruption == 'sha256' else hashlib.sha256(result_bytes).hexdigest()}
         return Response(json.dumps({'job_id': job_id, 'status': 'completed', 'stage': 'completed', 'result': result}).encode())
     monkeypatch.setattr(smoke.urllib.request, 'urlopen', urlopen)
+    monkeypatch.setattr(smoke, 'multipart_fixture', multipart_fixture)
     monkeypatch.setattr(smoke, 'wait_ready', lambda *_: None)
     monkeypatch.setattr(smoke, 'verify_bundle', lambda *_: {'verified': True})
     if corruption:
@@ -68,6 +87,7 @@ def test_smoke_exercises_capability_retry_and_exact_result(monkeypatch, corrupti
     else:
         assert smoke.run_smoke('https://example.test', 30)['verified'] is True
         assert submitted == 2
+        assert anonymous_posts == ['/api/upload', '/api/v1/jobs']
         assert ('/api/upload', 'POST', None) in calls
         assert any(path == '/api/auth/login' for path, _, _ in calls)
         assert any(path.startswith('/api/status/') for path, _, _ in calls)

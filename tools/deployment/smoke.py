@@ -252,9 +252,10 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool 
         # Persist identity in this synthetic run before the first network request.
         token = secrets.token_hex(32)
         job_auth = {"Authorization": "Bearer " + token}
-        status, _ = fetch_response(url + "/api/upload", deadline, body, {"Content-Type": content_type})
+        # Authentication rejects before reading uploads; keep probes tiny so early close cannot break a large send.
+        status, _ = fetch_response(url + "/api/upload", deadline, b"", {"Content-Type": content_type})
         require(status == 401, f"Unauthenticated legacy upload returned HTTP {status}")
-        status, _ = fetch_response(url + "/api/v1/jobs", deadline, body,
+        status, _ = fetch_response(url + "/api/v1/jobs", deadline, b"",
                                    {**job_auth, "Idempotency-Key": job_id, "Content-Type": content_type})
         require(status == 401, f"Job token bypassed service login: HTTP {status}")
         login_status, login_body = fetch_response(url + "/api/auth/login", deadline,
