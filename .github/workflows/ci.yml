@@ -88,6 +88,11 @@ jobs:
       - name: Build iOS native artifact and cache OpenCV framework
         run: native_visual_localizer/build_ios.sh --deploy
 
+      - name: Verify Swift native dependency acceptance and fixture producer
+        run: |
+          python tools/ios/test_opencv5_dependency.py
+          python tools/ios/generate_native_fixture.test.py
+
       - name: Run Phase 1 non-device release gates
         run: tools/phase1/verify.sh ci
 

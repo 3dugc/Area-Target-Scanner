@@ -172,7 +172,7 @@ asset_bundle/
 └── features.db        # SQLite DB with ORB features + BoW vocabulary
 ```
 
-**Dependencies:** Python 3.11, Open3D, OpenCV 5.0.0 (contrib headless wheel 5.0.0.93), NumPy 2+, scikit-learn, trimesh. This branch is an isolated upgrade experiment; see [validation](docs/opencv5-upgrade-validation.md) before integration.
+**Dependencies:** Python 3.11, Open3D, OpenCV 5.0.0 (contrib headless wheel 5.0.0.93), NumPy 2+, scikit-learn, trimesh. See the [upgrade validation](docs/opencv5-upgrade-validation.md) for platform coverage and outstanding device/field acceptance.
 
 ## Unity Plugin
 

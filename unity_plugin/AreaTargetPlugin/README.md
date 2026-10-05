@@ -261,7 +261,7 @@ OpenCV_DIR="$PWD/build/opencv5/install/lib/cmake/opencv5" \
 bash native_visual_localizer/build_ios.sh --deploy
 ```
 
-本实验分支固定 OpenCV / contrib 5.0.0，算法参数和 C 接口保持不变。默认构建输出隔离目录；`--deploy` 将重建产物复制到当前分支的 Unity 插件目录。旧 OpenCV 4 wrapper 不能与新框架混装，合并前需完成真实场景与设备验证。
+项目固定 OpenCV / contrib 5.0.0，算法参数和 C 接口保持不变。默认构建输出隔离目录；`--deploy` 将重建产物复制到当前分支的 Unity 插件目录。旧 OpenCV 4 wrapper 不能与新框架混装。构建/集成检查和待完成的真实场景、设备验收见[升级记录](../../docs/opencv5-upgrade-validation.md)。
 
 ### 阶段 1 验证
 

@@ -55,14 +55,14 @@ After installing `com.areatarget.tracking`, run **Area Target → Configure iOS 
 
 ```bash
 cd native_visual_localizer
-bash build_ios.sh
+bash build_ios.sh --deploy
 ```
 
 Expected behavior:
-- Auto-downloads OpenCV iOS framework (~200MB first time, cached after that — go grab a coffee)
+- Builds the pinned OpenCV 5 + contrib iOS framework from verified source archives; the versioned build cache is reused on later runs. The basic release framework lacks AKAZE.
 - Compiles arm64 static library
 - Verifies the versioned native symbol contract (no WARNINGs)
-- Backs up old library as `.bak`, copies new one to `unity_project/Assets/Plugins/iOS/`
+- With `--deploy`, copies the verified library to `unity_project/Assets/Plugins/iOS/`. Without this option, the result stays in the isolated build directory.
 
 Verify:
 ```bash

@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
-# Build the minimal static iPhoneOS framework, including OpenCV 5's AKAZE.
+# Build the minimal static Apple framework, including OpenCV 5's AKAZE.
 # The basic release framework omits xfeatures2d; pin both source archives.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CACHE_DIR="${1:-$ROOT/build/opencv5-ios}"
-OPENCV_DIR="${OPENCV_DIR:-$ROOT/native_visual_localizer/opencv_ios/5.0.0}"
+PLATFORM="${PLATFORM:-iphoneos}"
+case "$PLATFORM" in
+    iphoneos) PLATFORM_LABEL="iPhoneOS"; DEFAULT_TARGET="14.0"; PLATFORM_SUFFIX="ios5" ;;
+    iphonesimulator) PLATFORM_LABEL="iPhoneSimulator"; DEFAULT_TARGET="16.0"; PLATFORM_SUFFIX="ios5-simulator" ;;
+    *) echo "ERROR: PLATFORM must be iphoneos or iphonesimulator" >&2; exit 1 ;;
+esac
+DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-$DEFAULT_TARGET}"
+if [[ "$PLATFORM" == "iphoneos" ]]; then
+    DEFAULT_OUTPUT="$ROOT/native_visual_localizer/opencv_ios/5.0.0"
+else
+    DEFAULT_OUTPUT="$CACHE_DIR/output-$PLATFORM"
+fi
+OPENCV_DIR="${OPENCV_DIR:-$DEFAULT_OUTPUT}"
 VERSION="5.0.0"
 SOURCE_SHA256="b0528f5a1d379d59d4701cb28c36e22214cc51cf64594e5b56f2d3e6c0233095"
 CONTRIB_SHA256="c58f6344170c39abf187c56f3843b59cab1fd3e89cf19ba2ce25dc061659b27f"
@@ -30,15 +42,15 @@ prepare_source opencv "$SOURCE_ARCHIVE" "$SOURCE_SHA256"
 prepare_source opencv_contrib "$CONTRIB_ARCHIVE" "$CONTRIB_SHA256"
 SOURCE="$CACHE_DIR/opencv-$VERSION"
 CONTRIB="$CACHE_DIR/opencv_contrib-$VERSION"
-BUILD_DIR="$CACHE_DIR/dependency-ios5-arm64"
-PREFIX="$CACHE_DIR/install-ios5"
-SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+BUILD_DIR="$CACHE_DIR/dependency-$PLATFORM_SUFFIX-arm64"
+PREFIX="$CACHE_DIR/install-$PLATFORM_SUFFIX"
+SDK="$(xcrun --sdk "$PLATFORM" --show-sdk-path)"
 
 run_step() {
     local name="$1"
     shift
-    local log="$CACHE_DIR/$name.log"
-    printf 'OpenCV iPhoneOS %s (log: %s)\n' "$name" "$log"
+    local log="$CACHE_DIR/$PLATFORM-$name.log"
+    printf 'OpenCV %s %s (log: %s)\n' "$PLATFORM_LABEL" "$name" "$log"
     if ! "$@" >"$log" 2>&1; then
         tail -n 80 "$log" >&2
         exit 1
@@ -47,7 +59,7 @@ run_step() {
 
 run_step configure cmake -S "$SOURCE" -B "$BUILD_DIR" \
     -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 -DCMAKE_OSX_SYSROOT="$SDK" \
-    -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+    -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DOPENCV_EXTRA_MODULES_PATH="$CONTRIB/modules" \
     -DBUILD_LIST=core,imgproc,features,geometry,xfeatures2d \
@@ -57,7 +69,7 @@ run_step configure cmake -S "$SOURCE" -B "$BUILD_DIR" \
     -DOPENCV_SKIP_FEATURES2D_DOWNLOADING=ON -DOPENCV_ENABLE_NONFREE=OFF \
     -DWITH_OPENCL=OFF -DWITH_IPP=OFF -DWITH_ITT=OFF -DWITH_LAPACK=OFF \
     -DWITH_FFMPEG=OFF -DWITH_GSTREAMER=OFF -DWITH_VTK=OFF \
-    -DWITH_OPENGL=OFF -DWITH_PROTOBUF=OFF -DWITH_ADE=OFF
+    -DWITH_OPENGL=OFF -DWITH_PROTOBUF=OFF -DWITH_ADE=OFF -DWITH_KLEIDICV=OFF
 run_step build cmake --build "$BUILD_DIR" --parallel "${JOBS:-4}"
 run_step install cmake --install "$BUILD_DIR"
 
@@ -89,7 +101,7 @@ if [[ -f "$PREFIX/lib/opencv5/3rdparty/libkleidicv.a" ]]; then
     cp "${KLEIDICV_DIRS[0]}/LICENSES/Apache-2.0.txt" "$FRAMEWORK/Licenses/KleidiCV-Apache-2.0.txt"
     cp "${KLEIDICV_DIRS[0]}/README.md" "$FRAMEWORK/Licenses/KleidiCV-README.md"
 fi
-python3 - "$FRAMEWORK" "$SOURCE_SHA256" "$CONTRIB_SHA256" <<'PY'
+python3 - "$FRAMEWORK" "$SOURCE_SHA256" "$CONTRIB_SHA256" "$PLATFORM" "$PLATFORM_LABEL" "$DEPLOYMENT_TARGET" <<'PY'
 import hashlib
 import json
 import plistlib
@@ -99,12 +111,15 @@ framework = Path(sys.argv[1])
 info = {"CFBundleExecutable": "opencv2", "CFBundleIdentifier": "org.opencv",
         "CFBundleName": "opencv2", "CFBundlePackageType": "FMWK",
         "CFBundleVersion": "5.0.0", "CFBundleShortVersionString": "5.0.0",
-        "CFBundleSupportedPlatforms": ["iPhoneOS"], "MinimumOSVersion": "14.0"}
+        "CFBundleSupportedPlatforms": [sys.argv[5]], "MinimumOSVersion": sys.argv[6]}
 (framework / "Info.plist").write_bytes(plistlib.dumps(info))
-metadata = {"version": "5.0.0", "platform": "iphoneos", "architecture": "arm64",
+metadata = {"version": "5.0.0", "platform": sys.argv[4], "architecture": "arm64",
+            "minimumOSVersion": sys.argv[6],
             "sourceSHA256": sys.argv[2], "contribSHA256": sys.argv[3],
             "modules": ["core", "imgproc", "features", "flann", "geometry", "xfeatures2d"],
-            "binarySHA256": hashlib.sha256((framework / "opencv2").read_bytes()).hexdigest()}
+            "binarySHA256": hashlib.sha256((framework / "opencv2").read_bytes()).hexdigest(),
+            "licenseSHA256s": {str(path.relative_to(framework / "Licenses")): hashlib.sha256(path.read_bytes()).hexdigest()
+                              for path in sorted((framework / "Licenses").rglob("*")) if path.is_file()}}
 (framework / "dependency.json").write_text(json.dumps(metadata, indent=2) + "\n")
 PY
-printf 'OpenCV iPhoneOS framework: %s\n' "$FRAMEWORK"
+printf 'OpenCV %s framework: %s\n' "$PLATFORM_LABEL" "$FRAMEWORK"

@@ -7,10 +7,10 @@
 ### 前置条件
 
 - Python 3.11
-- OpenCV 4.x
-- 已通过 `native_visual_localizer/build_macos.sh`
-- 已运行 `native_visual_localizer/build_ios.sh`，使 `unity_project/Assets/Plugins/iOS/libvisual_localizer.a` 通过原生符号检查，并准备 `native_visual_localizer/opencv_ios/opencv2.framework`（该下载缓存不进入 Git）。
-- Unity 6000.4.6f1（本次干净安装验证版本）
+- 固定 OpenCV + contrib 5.0.0，Python 使用 `opencv-contrib-python-headless==5.0.0.93`
+- 已使用固定依赖通过 `native_visual_localizer/build_macos.sh --deploy`
+- 已运行 `native_visual_localizer/build_ios.sh --deploy`，使 `unity_project/Assets/Plugins/iOS/libvisual_localizer.a` 通过原生符号检查，并准备 `native_visual_localizer/opencv_ios/5.0.0/opencv2.framework`（该构建缓存不进入 Git）。AKAZE 位于 contrib，不能使用基本版 release framework 替代。
+- Unity 工程登记版本 6000.4.6f1；本次可用的干净安装/导出验证使用 6000.6.3f1，具体覆盖见升级验收记录
 - Xcode（generic iOS device 链接验证）
 
 完整本地发布门禁：

@@ -12,21 +12,30 @@
 
 ## Task 1: Protect the workspace and align the integration base
 
-- [x] Snapshot modified/untracked original files, Git patches and hashes to `/private/tmp/area-target-opencv5/unification-20261005/original-state`; preserve the dirty model_optimizer submodule in place.
+- [x] Snapshot modified/untracked original files, Git patches and hashes. After temporary paths were lost during session continuation, restore a persistent snapshot at `build/opencv5-unification/original-state`; preserve the dirty model_optimizer submodule in place.
 - [x] Merge latest `origin/develop` (`60d88bb`) into `codex/opencv5-upgrade`; the merge completed without conflicts.
-- [ ] Import only the existing OpenCV-specific native iOS tooling and AreaTargetNative interface into the isolated branch. Do not import unrelated pending Swift features or the proprietary Immersal binary into the branch commit.
-- [ ] Record a full active-entry-point inventory, distinguishing historical OpenCV 4 comparisons and third-party SDK internals from project-controlled runtime dependencies.
+- [x] Import only the existing OpenCV-specific native iOS tooling and AreaTargetNative interface into the isolated branch. Do not import unrelated pending Swift features or the proprietary Immersal binary into the branch commit.
+- [x] Record a full active-entry-point inventory, distinguishing historical OpenCV 4 comparisons and third-party SDK internals from project-controlled runtime dependencies.
+
+| Active entry point | Project-controlled dependency/identity |
+| --- | --- |
+| Python pipeline and Flask service | Both requirements pin contrib headless 5.0.0.93; AKAZE factory supports the 5 contrib namespace, producer metadata records the actual version, and the actual runtime version is part of cache identity. |
+| Docker and CI/deploy jobs | Install those same requirements; Docker executes ORB/AKAZE/PnP import checks, and CI shares matched rebuilt native artifacts. |
+| Unity managed and native paths | Managed code uses NativeLocalizerBridge's unchanged 11 C APIs; native CMake/macOS/iOS defaults and UPM framework validation require 5. No active OpenCvSharp4, Emgu or OpenCVForUnity runtime dependency was found. |
+| Pending Swift iOS app | Private AreaTargetNative device/simulator build, verifier and descriptor fixture producer are upgraded together; live/replay engine identity and app integration are validated in Task 3. |
+| Retained OpenCV 4 references | Explicit comparison input preparation, old descriptor compatibility tests, optional baseline build branches, stale dependency rejection tests and historical records. They do not select the default production runtime. |
+| Immersal SDK | Preserve proprietary SDK 2.4.0 and its bundled private implementation. Do not relabel it OpenCV 5. Verify coexistence through private symbols and an actual device composite link. |
 
 ## Task 2: Private Apple native framework and fixture migration
 
 **Files:** `tools/ios/build_area_target_native.py`, `verify_area_target_native.py`, both existing `.test.py` files, `generate_native_fixture.py`, `generate_native_fixture.cpp`, `tools/opencv5/build_ios_dependency.sh`, `ios_scanner/AreaTargetScanner/ThirdParty/AreaTargetNative/`.
 
-- [ ] Write and observe failing checks that reject 4.x/basic 5 dependencies and require matching OpenCV 5 + contrib source provenance for both device and simulator artifacts.
-- [ ] Extend the pinned Apple dependency builder for the simulator platform, keeping device defaults intact and platform output/cache identities separate. Use the already verified source archive digests.
-- [ ] Build private AreaTargetNative for both Apple platforms from the shared version-aware C++ source. Keep exact 11 C exports, a two-level namespace, platform/SDK/minimum-version metadata and no imported OpenCV C++ implementation symbols.
-- [ ] Generate fixture descriptors with the pinned OpenCV 5 macOS dependency, eliminating active pkg-config/opencv4 assumptions. Test real known-pose tracking, AKAZE fallback and blank LOST behavior.
-- [ ] Include the correct OpenCV 5/contrib and linked-dependency notices; validate the included notice bytes and actual framework binary digest.
-- [ ] Run real device/simulator builds and private framework contract tests. Fully link device AreaTargetNative together with the existing Immersal SDK and verify both APIs coexist. Do not replace or relabel the proprietary SDK.
+- [x] Write and observe failing checks that reject 4.x/basic 5 dependencies and require matching OpenCV 5 + contrib source provenance for both device and simulator artifacts.
+- [x] Extend the pinned Apple dependency builder for the simulator platform, keeping device defaults intact and platform output/cache identities separate. Use the already verified source archive digests.
+- [x] Build private AreaTargetNative for both Apple platforms from the shared version-aware C++ source. Keep exact 11 C exports, a two-level namespace, platform/SDK/minimum-version metadata and no imported OpenCV C++ implementation symbols.
+- [x] Generate fixture descriptors with the pinned OpenCV 5 macOS dependency, eliminating active pkg-config/opencv4 assumptions. Test real known-pose tracking, AKAZE fallback and blank LOST behavior.
+- [x] Include the correct OpenCV 5/contrib and linked-dependency notices; validate the included notice bytes and actual framework binary digest.
+- [x] Run real device/simulator builds and private framework contract tests. Fully link device AreaTargetNative together with the existing Immersal SDK and verify both APIs coexist. Do not replace or relabel the proprietary SDK.
 
 **Commands:** `python3 tools/ios/generate_native_fixture.test.py`; `python3 tools/ios/verify_area_target_native.test.py`; configure pinned dependency caches explicitly for reproducibility. Capture all actual command arguments and outputs in the final validation record.
 
@@ -44,12 +53,12 @@
 
 **Files:** Current CI, Dockerfile, requirements, pipeline/service tests, Unity XR serialization test if its existing editor-version assumption is reproducibly wrong, upgrade documentation.
 
-- [ ] Inspect the automatic merge for dependency pins, AKAZE factory, producer metadata and cache invalidation; preserve the newly integrated service/authentication/mobile API behavior.
-- [ ] Run `VL_NATIVE_LIBRARY=... python tools/opencv5/run_regression.py --import-mode=importlib` on the latest integrated tree. Require complete fresh JUnit reports for both groups; never count a native early exit as success.
-- [ ] Rebuild/deploy matched Unity artifacts, run native CTest/ABI and UPM tests. Run the current CI lint scope and validate Docker Compose.
-- [ ] Resolve the existing Unity XR serialization assertion through a meaningful failing test and an editor-version-compatible semantic check if needed, then rerun EditMode and clean package/export/link gates in the isolated Unity project.
+- [x] Inspect the automatic merge for dependency pins, AKAZE factory, producer metadata and cache invalidation; preserve the newly integrated service/authentication/mobile API behavior.
+- [x] Run `VL_NATIVE_LIBRARY=... python tools/opencv5/run_regression.py --import-mode=importlib` on the latest integrated tree. Require complete fresh JUnit reports for both groups; never count a native early exit as success.
+- [x] Rebuild/deploy matched Unity artifacts, run native CTest/ABI and UPM tests. Run the current CI lint scope and validate Docker Compose.
+- [x] Resolve the existing Unity XR serialization assertion through a meaningful failing test and an editor-version-compatible semantic check if needed, then rerun EditMode and clean package/export/link gates in the isolated Unity project.
 - [ ] Run Docker image construction if the local daemon can be started normally; retain an explicit unavailable gate if it cannot be run. No remote publishing/deployment.
-- [ ] Inspect device visibility before attempting signed/runtime checks. Missing hardware or real cross-session inputs remains missing evidence, not a pass or a reason to claim recognition-rate improvement.
+- [x] Inspect device visibility before attempting signed/runtime checks. Missing hardware or real cross-session inputs remains missing evidence, not a pass or a reason to claim recognition-rate improvement.
 
 ## Task 5: Review, commit and local develop integration
 
