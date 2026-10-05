@@ -1,6 +1,6 @@
 services:
   processing-pipeline:
-    image: hkccr.ccs.tencentyun.com/plugins/area-target-scanner:${AREA_TARGET_IMAGE_TAG:-publish}
+    image: hkccr.ccs.tencentyun.com/plugins/area-target-scanner:latest
     pull_policy: always
     restart: unless-stopped
     init: true
@@ -54,7 +54,7 @@ services:
         max-file: "3"
 
   model_optimizer:
-    image: hkccr.ccs.tencentyun.com/plugins/area-target-optimizer:${AREA_TARGET_IMAGE_TAG:-publish}
+    image: hkccr.ccs.tencentyun.com/plugins/area-target-optimizer:latest
     pull_policy: always
     restart: unless-stopped
     init: true

@@ -14,11 +14,11 @@ The helper prompts for and confirms a password between 12 and 256 characters wit
 
 ```bash
 docker run --rm -it --entrypoint python \
-  hkccr.ccs.tencentyun.com/plugins/area-target-scanner:publish \
+  hkccr.ccs.tencentyun.com/plugins/area-target-scanner:latest \
   -m web_service.auth hash-password
 ```
 
-In Portainer, set `AREA_TARGET_USERNAME` and `AREA_TARGET_PASSWORD_HASH` as stack environment variables before updating the scanner image. Both are required by `docker-compose.portainer.yml`. Keep the existing live stack's routes, resource limits, image pins and volumes. The production stack uses `AREA_TARGET_COOKIE_SECURE=1` and requires HTTPS.
+In Portainer, set `AREA_TARGET_USERNAME` and `AREA_TARGET_PASSWORD_HASH` as stack environment variables before updating the scanner image. Both are required by `docker-compose.portainer.yml`. Both services use `latest` by default. Keep the existing live stack's routes, resource limits and volumes. The production stack uses `AREA_TARGET_COOKIE_SECURE=1` and requires HTTPS.
 
 For local development, copy [`.env.example`](../.env.example) to `.env`, fill in the username and generated hash, then run `docker compose up --build`. Keep the hash inside single quotes in `.env` so Compose preserves its `$` characters. The local stack binds to `127.0.0.1:8080` and defaults to `AREA_TARGET_COOKIE_SECURE=0` for local HTTP. The optimizer has no published host port.
 
