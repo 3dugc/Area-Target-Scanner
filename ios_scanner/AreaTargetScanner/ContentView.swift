@@ -21,11 +21,15 @@ struct IdentifiableURL: Identifiable {
     let url: URL
 }
 
+@MainActor
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingExportFormats = false
     @StateObject private var viewModel = ScanViewModel()
     @StateObject private var mappingModel = ImmersalMappingModel()
+    @StateObject private var areaTargetModel = AreaTargetProcessingModel.shared
+    @State private var showingAreaTarget = false
+    @State private var areaTargetDirectory: URL?
     @State private var showingImmersal = false
     @State private var uploadDirectory: URL?
     @State private var sharePayload: SharePayload? = nil
@@ -72,14 +76,24 @@ struct ContentView: View {
         }
         .onAppear {
             viewModel.checkCameraPermission()
-            viewModel.deletionBlocked = { [model = mappingModel] path in model.blocksDeletion(of: path) }
+            viewModel.deletionBlocked = { [mapping = mappingModel, areaTarget = areaTargetModel] path in
+                mapping.blocksDeletion(of: path) || areaTarget.deletionBlocked(scanPath: path)
+            }
         }
-        .task { await mappingModel.monitorJobs() }
+        .task {
+            areaTargetModel.setAppActive(scenePhase == .active)
+            await mappingModel.monitorJobs()
+        }
         .onChange(of: scenePhase) { phase in
             viewModel.setAppActive(phase == .active)
             // Temporary inactive states (e.g. password autofill) must not cancel login.
-            if phase == .background { mappingModel.setAppActive(false) }
-            else if phase == .active { mappingModel.setAppActive(true) }
+            if phase == .background {
+                mappingModel.setAppActive(false)
+                areaTargetModel.setAppActive(false)
+            } else if phase == .active {
+                mappingModel.setAppActive(true)
+                areaTargetModel.setAppActive(true)
+            }
         }
         .onChange(of: viewModel.exportShareURL) { url in
             if let url {
@@ -95,6 +109,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingImmersal) {
             ImmersalMappingView(model: mappingModel, scanDirectory: uploadDirectory)
+        }
+        .sheet(isPresented: $showingAreaTarget) {
+            AreaTargetProcessingView(model: areaTargetModel, scanDirectory: areaTargetDirectory,
+                displayName: areaTargetDirectory?.lastPathComponent ?? "",
+                entryPoint: areaTargetDirectory == nil ? .tasks : .preparation)
         }
         .fullScreenCover(item: $previewItem) { item in
             ModelPreviewView(fileURL: item.url)
@@ -248,6 +267,18 @@ struct ContentView: View {
                     }
 
                     Button {
+                        areaTargetDirectory = URL(fileURLWithPath: exportPath, isDirectory: true)
+                        showingAreaTarget = true
+                    } label: {
+                        Label("Area Target 云处理", systemImage: "icloud.and.arrow.up")
+                            .font(.title3.weight(.semibold))
+                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.teal)
+                    .disabled(viewModel.isExporting)
+                    .accessibilityIdentifier("area-target-open-upload")
+
+                    Button {
                         uploadDirectory = URL(fileURLWithPath: exportPath)
                         showingImmersal = true
                     } label: {
@@ -289,12 +320,24 @@ struct ContentView: View {
     }
 
     private var cloudTasksButton: some View {
-        Button {
-            uploadDirectory = nil
-            showingImmersal = true
-        } label: {
-            Label("Immersal 账号与任务", systemImage: "icloud")
-                .frame(maxWidth: .infinity).padding(.vertical, 8)
-        }.buttonStyle(.bordered).tint(.white)
+        VStack(spacing: 8) {
+            Button {
+                areaTargetDirectory = nil
+                showingAreaTarget = true
+            } label: {
+                Label("Area Target 账号与任务", systemImage: "icloud")
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+            }
+            .buttonStyle(.bordered).tint(.white)
+            .accessibilityIdentifier("area-target-open-tasks")
+
+            Button {
+                uploadDirectory = nil
+                showingImmersal = true
+            } label: {
+                Label("Immersal 账号与任务", systemImage: "icloud")
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+            }.buttonStyle(.bordered).tint(.white)
+        }
     }
 }

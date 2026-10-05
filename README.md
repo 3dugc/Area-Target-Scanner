@@ -135,7 +135,7 @@ A native Swift app that uses ARKit + LiDAR to capture:
 - RGB keyframe images
 - Camera intrinsics
 
-Exports everything as a tidy ZIP you can feed straight into the pipeline.
+Exports everything as a tidy ZIP you can feed straight into the pipeline. You can also sign in to your Area Target service from the app to upload a scan, track processing, and download the verified asset bundle. See [iOS Area Target service login](docs/ios-area-target-service-login.md).
 
 **Requirements:** iPhone 12 Pro or newer (needs LiDAR), iOS 16+, Xcode 15+
 
@@ -269,6 +269,7 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 - [Cross-Session Comparison Report](docs/cross-session-comparison-report.md) — localization accuracy across different scan sessions
 - [iOS Dual Export](docs/ios-dual-export.md) — Area Target / Immersal export formats, GPS and validation
 - [iOS Device Test Guide](docs/ios-device-test-guide.md) — step-by-step guide for on-device testing
+- [Area Target Service Login](docs/ios-area-target-service-login.md) — native service login, cloud processing tasks, and verified asset downloads
 - [Immersal Direct Upload](docs/ios-immersal-direct-upload.md) — email/password login, direct frame upload, and cloud mapping from the iOS scanner
 
 ## Project Structure
