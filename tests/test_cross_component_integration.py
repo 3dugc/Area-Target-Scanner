@@ -231,9 +231,11 @@ class TestFeatureDbNativeLocalizerCompat:
 class TestWebServiceConcurrency:
     """Verify the web service handles multiple simultaneous uploads correctly."""
 
-    def test_concurrent_uploads_get_unique_job_ids(self, tmp_path):
+    def test_concurrent_uploads_get_unique_job_ids(self, tmp_path, monkeypatch):
         """Two simultaneous uploads should get different job IDs."""
         from web_service.app import app, jobs
+        from tests.service_auth_helpers import authenticate_test_clients
+        authenticate_test_clients(monkeypatch, tmp_path, app)
 
         zip1 = str(tmp_path / "scan1.zip")
         zip2 = str(tmp_path / "scan2.zip")
