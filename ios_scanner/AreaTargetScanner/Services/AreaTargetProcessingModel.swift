@@ -141,8 +141,35 @@ final class AreaTargetProcessingModel: ObservableObject {
         jobs.first { $0.scanDirectoryPath == scanPath }
     }
 
-    func deletionBlocked(scanPath: String) -> Bool {
-        storageUnavailable || jobs.contains { $0.scanDirectoryPath == scanPath && $0.needsSource }
+    func sourceProtectionReason(scanPath: String) -> String? {
+        if storageUnavailable { return "本机 Area Target 任务记录暂不可用，请先恢复任务记录后再删除扫描。" }
+        guard let job = jobs.first(where: { $0.scanDirectoryPath == scanPath && $0.needsSource }) else { return nil }
+        return "Area Target 任务「\(job.displayName)」仍需要这条扫描。请在 Area Target 任务页继续处理，或停止本机跟踪。"
+    }
+
+    func deletionBlocked(scanPath: String) -> Bool { sourceProtectionReason(scanPath: scanPath) != nil }
+
+    /// Stops only this journal's tracking. It does not revoke the job capability,
+    /// cancel cloud processing, or remove the original scan, upload copy, or local assets.
+    func stopLocalTracking(jobID: String) {
+        guard !storageUnavailable, let job = jobs.first(where: { $0.id == jobID }), job.canStopLocalTracking else { return }
+        guard !operationInProgress else {
+            message = "请先暂停本机操作，待暂停完成后再停止跟踪。"
+            return
+        }
+        do {
+            try edit(jobID) {
+                $0.phase = .stopped
+                $0.detail = "已停止本机跟踪。原扫描和已下载资产保留；云端任务可能仍会继续。可以重新处理原扫描。"
+            }
+            message = nil
+            // An in-flight status read may finish, but its response cannot revive this task.
+            // The monitor naturally excludes stopped tasks while continuing other jobs.
+            startMonitoring()
+        } catch {
+            storageUnavailable = true
+            message = AreaTargetLocalError.diskPersistence.localizedDescription
+        }
     }
 
     func setAppActive(_ value: Bool) {
@@ -183,20 +210,25 @@ final class AreaTargetProcessingModel: ObservableObject {
         guard !operationInProgress, !storageUnavailable, let job = jobs.first(where: { $0.id == jobID }) else { return }
         selectedJobID = jobID
         message = nil
-        guard job.phase != .downloaded else { return }
+        guard ![.downloaded, .stopped].contains(job.phase) else { return }
         guard !isAuthenticating, requireSignIn(origin: job.serverOrigin) else { return }
         do {
             let token = try requiredToken(jobID)
             do {
                 let remote = try await api(for: job).status(jobID: jobID, token: token)
+                try Task.checkCancellation()
+                guard jobs.first(where: { $0.id == jobID })?.phase != .stopped else { return }
                 try accept(remote, jobID: jobID)
                 return
             } catch {
+                guard jobs.first(where: { $0.id == jobID })?.phase != .stopped else { return }
                 guard isNotFound(error), !job.accepted else { throw error }
             }
             // The ID and capability are unchanged even when the first response was lost.
+            guard !storageUnavailable, jobs.first(where: { $0.id == jobID })?.phase != .stopped else { return }
             await runTransfer(jobID: jobID) { generation in await self.prepareAndUpload(jobID: jobID, generation: generation) }
         } catch {
+            guard jobs.first(where: { $0.id == jobID })?.phase != .stopped else { return }
             markExpiredIfNeeded(error, jobID: jobID)
             message = safeMessage(error)
         }
@@ -205,14 +237,15 @@ final class AreaTargetProcessingModel: ObservableObject {
     func refresh(jobID: String) async {
         await restoration?.value
         guard !storageUnavailable, transferID != jobID,
-              let job = jobs.first(where: { $0.id == jobID }), job.phase != .downloaded else { return }
+              let job = jobs.first(where: { $0.id == jobID }), ![.downloaded, .stopped].contains(job.phase) else { return }
         guard !isAuthenticating, requireSignIn(origin: job.serverOrigin) else { return }
         do {
             let remote = try await api(for: job).status(jobID: jobID, token: requiredToken(jobID))
             try Task.checkCancellation()
+            guard jobs.first(where: { $0.id == jobID })?.phase != .stopped else { return }
             try accept(remote, jobID: jobID)
         } catch {
-            if Self.isCancellation(error) { return }
+            if Self.isCancellation(error) || jobs.first(where: { $0.id == jobID })?.phase == .stopped { return }
             if var stored = jobs.first(where: { $0.id == jobID }) {
                 stored.detail = safeMessage(error)
                 if stored.accepted && (isNotFound(error) || isExpired(error)) {
@@ -228,7 +261,7 @@ final class AreaTargetProcessingModel: ObservableObject {
     func download(jobID: String) async {
         await restoration?.value
         guard !operationInProgress, !storageUnavailable,
-              let job = jobs.first(where: { $0.id == jobID }) else { return }
+              let job = jobs.first(where: { $0.id == jobID }), job.phase != .stopped else { return }
         selectedJobID = jobID
         // An already verified local artifact does not depend on cloud retention.
         if job.phase == .downloaded, job.savedAsset != nil { return }
@@ -443,6 +476,7 @@ final class AreaTargetProcessingModel: ObservableObject {
     }
 
     private func accept(_ remote: AreaTargetRemoteJob, jobID: String) throws {
+        guard let stored = jobs.first(where: { $0.id == jobID }), stored.phase != .stopped else { return }
         let archive = jobs.first { $0.id == jobID }?.archiveURL
         guard remote.jobID == jobID else { throw AreaTargetAPIError.invalidResponse }
         try edit(jobID) {
@@ -480,10 +514,16 @@ final class AreaTargetProcessingModel: ObservableObject {
         for (id, asset, invalid) in restored {
             guard var job = jobs.first(where: { $0.id == id }) else { continue }
             if let asset {
-                job.savedAsset = asset; job.phase = .downloaded; job.detail = "资产包已保存到本机"
+                job.savedAsset = asset
+                if job.phase != .stopped { job.phase = .downloaded; job.detail = "资产包已保存到本机" }
             } else if job.savedAsset != nil || job.phase == .downloaded {
-                job.savedAsset = nil; job.phase = .ready
-                job.detail = invalid ? "本机资产校验未通过，可以重新下载" : "本机资产文件不存在，可以重新下载"
+                job.savedAsset = nil
+                if job.phase != .stopped {
+                    job.phase = .ready
+                    job.detail = invalid ? "本机资产校验未通过，可以重新下载" : "本机资产文件不存在，可以重新下载"
+                } else {
+                    job.detail = "已停止本机跟踪。本机资产无法恢复；可以重新处理仍保留的原扫描。"
+                }
             }
             guard job != jobs.first(where: { $0.id == id }) else { continue }
             do { try replace(job) }
@@ -493,7 +533,7 @@ final class AreaTargetProcessingModel: ObservableObject {
     }
 
     private func markExpiredIfNeeded(_ error: Error, jobID: String) {
-        guard isExpired(error) || isNotFound(error), let job = jobs.first(where: { $0.id == jobID }), job.accepted else { return }
+        guard isExpired(error) || isNotFound(error), let job = jobs.first(where: { $0.id == jobID }), job.accepted, job.phase != .stopped else { return }
         try? edit(jobID) {
             $0.phase = $0.savedAsset == nil ? .failed : .downloaded
             $0.detail = "云端任务或结果已过期。已下载的资产仍保存在本机；需要新的结果时请重新上传。"

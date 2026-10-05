@@ -3,10 +3,12 @@ import SwiftUI
 struct ImmersalMappingView: View {
     @ObservedObject var model: ImmersalMappingModel
     let scanDirectory: URL?
+    var selectScan: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
-    @State private var mapName = "MyScan"
+    @State private var mapName = ""
+    @State private var mapNameSourceID: String?
     @State private var selectedJobID: UUID?
     @State private var showHistory = false
     @State private var sheet: Sheet?
@@ -94,7 +96,7 @@ struct ImmersalMappingView: View {
             .navigationTitle("Immersal 建图")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("历史") { showHistory = true }.disabled(model.isBusy) }
+                ToolbarItem(placement: .navigationBarLeading) { Button("任务") { showHistory = true }.disabled(model.isBusy) }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     moreMenu.disabled(model.isBusy)
                     Button("完成") { dismiss() }
@@ -227,6 +229,8 @@ struct ImmersalMappingView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeading("本次扫描")
             VStack(spacing: 0) {
+                summaryRow("场景名称", symbol: "cube", value: ScanHistoryItem.displayName(for: currentJob?.scanName ?? scanDirectory?.lastPathComponent ?? ""))
+                Divider().padding(.horizontal, 16)
                 summaryRow("扫描时间", symbol: "clock", value: scanDate)
                 Divider().padding(.horizontal, 16)
                 summaryRow("图片数量", symbol: "photo", value: frameCount.map { "\($0) 帧" } ?? (summaryLoading ? "读取中…" : "无法读取"))
@@ -238,7 +242,7 @@ struct ImmersalMappingView: View {
                     if let job = currentJob, job.phase != .abandoned {
                         Text(job.displayName).multilineTextAlignment(.trailing)
                     } else {
-                        TextField("MyScan", text: $mapName)
+                        TextField("地图名称", text: $mapName)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .multilineTextAlignment(.trailing).frame(minWidth: 80)
                             .disabled(model.isBusy)
@@ -328,7 +332,7 @@ struct ImmersalMappingView: View {
 
     private var emptyScanNotice: some View {
         notice(symbol: "viewfinder", color: .accentColor, title: "尚未选择扫描",
-               message: "可在历史中继续已有任务，或从扫描预览页创建新地图。")
+               message: "请从扫描历史选择已保存的扫描。已有云端任务可在本页任务列表中查看。")
     }
 
     private var actionFooter: some View {
@@ -347,7 +351,12 @@ struct ImmersalMappingView: View {
     }
 
     @ViewBuilder private var primaryAction: some View {
-        if !model.isLoggedIn {
+        if sourceDirectory == nil && currentJob == nil {
+            fullWidthButton("选择扫描", symbol: "clock.arrow.circlepath") {
+                dismiss()
+                selectScan?()
+            }.disabled(model.isBusy)
+        } else if !model.isLoggedIn {
             fullWidthButton("登录并继续", symbol: "person.crop.circle") { sheet = .account }
                 .disabled(model.isBusy)
         } else if model.isBusy {
@@ -510,6 +519,13 @@ struct ImmersalMappingView: View {
     }
 
     private func readScanSummary() async {
+        let sourceID = sourceDirectory?.standardizedFileURL.path
+        if sourceID != mapNameSourceID {
+            mapNameSourceID = sourceID
+            mapName = currentJob?.displayName ?? sourceDirectory.map {
+                ScanHistoryItem.defaultImmersalMapName(for: $0.lastPathComponent)
+            } ?? ""
+        }
         summaryFrameCount = nil
         summaryLoading = true
         guard let directory = sourceDirectory else { summaryLoading = false; return }

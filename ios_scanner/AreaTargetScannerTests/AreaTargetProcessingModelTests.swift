@@ -105,6 +105,238 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertEqual(model.message, "服务登录已失效，请重新登录。")
     }
 
+    func testPauseKeepsOriginalScanProtectedUntilAnExplicitLocalStop() throws {
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "暂停后保留原扫描", createdAt: Date(), serverOrigin: .current)
+        job.phase = .paused
+        journal.jobs = [job]
+        let model = model()
+        model.pause()
+        XCTAssertTrue(model.deletionBlocked(scanPath: scan.path), "Pausing must preserve the original data needed for a safe retry")
+        XCTAssertEqual(model.jobs.first?.phase, .paused)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+    }
+
+    func testStoppedLocalTaskRestoresWithoutProtectingSourceOrSendingRequests() async throws {
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "已停止本机跟踪", createdAt: Date(), serverOrigin: .current)
+        job.phase = .paused
+        let data = try JSONEncoder().encode([job])
+        var documents = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        documents[0]["phase"] = "stopped"
+        documents[0]["detail"] = "已停止本机跟踪。原扫描和已下载资产保留，可以重新处理。云端任务可能仍会继续。"
+        let store = AreaTargetJobStore(url: root.appendingPathComponent("stopped-jobs.json"))
+        try JSONSerialization.data(withJSONObject: documents).write(to: store.url)
+        try tokens.save(String(repeating: "a", count: 64), jobID: job.id)
+        let model = AreaTargetProcessingModel(api: api, archiver: archive, jobStore: store,
+            tokenStore: tokens, assetStore: assets, pollInterval: 0.02, uploadDirectory: root.appendingPathComponent("uploads"))
+        XCTAssertEqual(model.jobs.first?.phase.rawValue, "stopped", "A stopped local task must remain readable in history instead of invalidating the journal")
+        XCTAssertFalse(model.deletionBlocked(scanPath: scan.path), "Stopping local tracking must release the scan's deletion guard")
+        model.setAppActive(true)
+        defer { model.setAppActive(false) }
+        await model.resume(jobID: job.id)
+        await model.refresh(jobID: job.id)
+        await model.download(jobID: job.id)
+        try await Task.sleep(nanoseconds: 60_000_000)
+        let events = await api.events
+        XCTAssertTrue(events.isEmpty, "A restored stopped task must not resume, query, download, or submit automatically")
+        XCTAssertEqual(model.jobs.first?.phase.rawValue, "stopped")
+        XCTAssertEqual(tokens.values[job.id], String(repeating: "a", count: 64))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+    }
+
+    func testSignInPreservesTheOriginallySelectedScanAndTask() async throws {
+        let otherScan = root.appendingPathComponent("scan_other")
+        try FileManager.default.createDirectory(at: otherScan, withIntermediateDirectories: true)
+        var original = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "原选场景", createdAt: Date(timeIntervalSince1970: 100), serverOrigin: .current)
+        original.phase = .paused
+        var other = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: otherScan.path,
+            displayName: "另一场景", createdAt: Date(timeIntervalSince1970: 200), serverOrigin: .current)
+        other.phase = .paused
+        journal.jobs = [original, other]
+        let authenticatedAPI = AreaFlowServiceAPI(base: api)
+        let model = AreaTargetProcessingModel(api: authenticatedAPI, archiver: archive, jobStore: journal,
+            tokenStore: tokens, assetStore: assets, uploadDirectory: root.appendingPathComponent("uploads"))
+        model.selectJob(original.id)
+        await model.signIn(username: "scanner", password: "temporary password", origin: .current)
+        XCTAssertEqual(model.selectedJobID, original.id)
+        XCTAssertEqual(model.selectedJob?.scanDirectoryPath, scan.path)
+        XCTAssertEqual(model.job(for: scan.path)?.displayName, "原选场景")
+        XCTAssertEqual(Set(model.jobs.map(\.id)), Set([original.id, other.id]))
+        let events = await api.events
+        XCTAssertTrue(events.isEmpty, "Signing in must not silently upload or switch the selected scan")
+    }
+
+    func testStoppingPausedTaskReleasesGuardAndKeepsSourceIdentityAndArchive() async throws {
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "待处理场景", createdAt: Date(), serverOrigin: .current)
+        job.phase = .paused
+        job.archivePath = archive.url.path
+        try Data("immutable upload copy".utf8).write(to: archive.url)
+        journal.jobs = [job]
+        try tokens.save(String(repeating: "a", count: 64), jobID: job.id)
+        let model = model()
+        XCTAssertTrue(try XCTUnwrap(model.sourceProtectionReason(scanPath: scan.path)).contains("待处理场景"))
+        model.stopLocalTracking(jobID: job.id)
+        XCTAssertEqual(model.jobs.first?.phase.rawValue, "stopped")
+        XCTAssertEqual(journal.jobs.first?.phase.rawValue, "stopped")
+        XCTAssertFalse(model.deletionBlocked(scanPath: scan.path))
+        XCTAssertNil(model.sourceProtectionReason(scanPath: scan.path))
+        XCTAssertEqual(model.jobs.first?.id, job.id)
+        XCTAssertEqual(tokens.values[job.id], String(repeating: "a", count: 64))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archive.url.path))
+        let events = await api.events
+        XCTAssertTrue(events.isEmpty, "Stopping local tracking must not send remote cancellation or other mutations")
+    }
+
+    func testStoppedTaskCanCreateANewTaskForTheSameOriginalScan() async throws {
+        await api.setRejectBeforeAccepting(true)
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "同一场景")
+        let oldID = try XCTUnwrap(model.selectedJobID)
+        let oldToken = try XCTUnwrap(tokens.values[oldID])
+        XCTAssertTrue(model.deletionBlocked(scanPath: scan.path))
+        model.stopLocalTracking(jobID: oldID)
+        await api.setRejectBeforeAccepting(false)
+        await model.start(scanDirectory: scan, displayName: "同一场景")
+        let newID = try XCTUnwrap(model.selectedJobID)
+        XCTAssertNotEqual(newID, oldID, "Explicitly processing again must create a new submission identity")
+        XCTAssertEqual(model.jobs.first(where: { $0.id == oldID })?.phase.rawValue, "stopped")
+        XCTAssertEqual(model.jobs.first(where: { $0.id == newID })?.phase, .processing)
+        XCTAssertEqual(model.jobs.count, 2)
+        XCTAssertEqual(tokens.values[oldID], oldToken)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+        let events = await api.events
+        XCTAssertEqual(events.filter { $0.0 == "submit" }.map { $0.1 }, [oldID, newID])
+    }
+
+    func testStopDuringTransferIsRejectedUntilLocalPauseHasFinished() async throws {
+        await api.setHoldUpload(true)
+        let model = model()
+        let upload = Task { await model.start(scanDirectory: scan, displayName: "正在上传") }
+        defer { model.pause(); upload.cancel() }
+        for _ in 0..<100 {
+            if await api.events.contains(where: { $0.0 == "submit" }) { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let id = try XCTUnwrap(model.selectedJobID)
+        XCTAssertTrue(model.operationInProgress)
+        model.stopLocalTracking(jobID: id)
+        XCTAssertEqual(model.jobs.first?.phase, .uploading)
+        XCTAssertTrue(model.deletionBlocked(scanPath: scan.path))
+        model.pause()
+        await upload.value
+        XCTAssertFalse(model.operationInProgress)
+        model.stopLocalTracking(jobID: id)
+        XCTAssertEqual(model.jobs.first?.phase.rawValue, "stopped")
+        XCTAssertFalse(model.deletionBlocked(scanPath: scan.path))
+    }
+
+    func testStopPersistenceFailureKeepsTaskAndSourceProtected() async throws {
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "不能丢失进度", createdAt: Date(), serverOrigin: .current)
+        job.phase = .paused
+        journal.jobs = [job]
+        let model = model()
+        journal.failWrites = true
+        model.stopLocalTracking(jobID: job.id)
+        XCTAssertEqual(model.jobs.first?.phase, .paused)
+        XCTAssertEqual(journal.jobs.first?.phase, .paused)
+        XCTAssertTrue(model.deletionBlocked(scanPath: scan.path))
+        XCTAssertNotNil(model.sourceProtectionReason(scanPath: scan.path))
+        XCTAssertEqual(model.message, AreaTargetLocalError.diskPersistence.localizedDescription)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+        let events = await api.events
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func testLateStatusResponseCannotReviveAStoppedLocalTask() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "停止后迟到的状态")
+        let id = try XCTUnwrap(model.selectedJobID)
+        await api.setHoldStatus(true)
+        let refresh = Task { await model.refresh(jobID: id) }
+        for _ in 0..<100 {
+            if await api.events.contains(where: { $0.0 == "status" }) { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        model.stopLocalTracking(jobID: id)
+        await api.setRemoteStatus(.completed)
+        await api.setHoldStatus(false)
+        await refresh.value
+        XCTAssertEqual(model.jobs.first?.phase.rawValue, "stopped")
+        XCTAssertEqual(journal.jobs.first?.phase.rawValue, "stopped")
+        XCTAssertFalse(model.deletionBlocked(scanPath: scan.path))
+        XCTAssertNil(model.jobs.first?.savedAsset)
+    }
+
+    func testLateMissingStatusCannotResubmitAfterLocalStop() async throws {
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "停止后不重传旧任务", createdAt: Date(), serverOrigin: .current)
+        job.phase = .paused
+        journal.jobs = [job]
+        try tokens.save(String(repeating: "a", count: 64), jobID: job.id)
+        let model = model()
+        await api.setHoldStatus(true)
+        let resume = Task { await model.resume(jobID: job.id) }
+        for _ in 0..<100 {
+            if await api.events.contains(where: { $0.0 == "status" }) { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        model.stopLocalTracking(jobID: job.id)
+        await api.setHoldStatus(false)
+        await resume.value
+        XCTAssertEqual(model.jobs.first?.phase, .stopped)
+        XCTAssertEqual(journal.jobs.first?.phase, .stopped)
+        XCTAssertFalse(model.deletionBlocked(scanPath: scan.path))
+        let events = await api.events
+        XCTAssertEqual(events.map { $0.0 }, ["status"], "A late 404 must not resubmit a stopped local task")
+        XCTAssertEqual(archive.calls, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+    }
+
+    func testStoppingDoesNotChangeAnAlreadyDownloadedAsset() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "已下载结果")
+        let id = try XCTUnwrap(model.selectedJobID)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: id)
+        await model.download(jobID: id)
+        let saved = try XCTUnwrap(model.jobs.first?.savedAsset)
+        let record = try XCTUnwrap(model.jobs.first)
+        model.stopLocalTracking(jobID: id)
+        XCTAssertEqual(model.jobs.first, record)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: saved.bundleURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+    }
+
+    func testRestoringAssetsDoesNotRestartStoppedLocalTracking() async throws {
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "保留已下载资产", createdAt: Date(), serverOrigin: .current)
+        job.phase = .stopped
+        let bundle = root.appendingPathComponent("saved-result.zip")
+        try Data("previously verified asset".utf8).write(to: bundle)
+        let saved = AreaTargetSavedAsset(jobID: job.id, bundleURL: bundle, directoryURL: root,
+            modelURL: root.appendingPathComponent("model.glb"), featuresURL: root.appendingPathComponent("features.db"),
+            manifestURL: root.appendingPathComponent("manifest.json"), savedAt: Date())
+        job.savedAsset = saved
+        journal.jobs = [job]
+        assets.values[job.id] = saved
+        let model = model()
+        for _ in 0..<100 {
+            if !model.isRestoringAssets { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertEqual(model.jobs.first?.phase, .stopped)
+        XCTAssertEqual(model.jobs.first?.savedAsset, saved)
+        XCTAssertFalse(model.deletionBlocked(scanPath: scan.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: bundle.path))
+        let events = await api.events
+        XCTAssertTrue(events.isEmpty)
+    }
+
     func testProductionUIAndPersistentQAResolveTheSameOwner() {
         let ui = AreaTargetProcessingModel.shared
         let persistentQA = AreaTargetProcessingModel.shared
@@ -758,6 +990,12 @@ actor AreaFlowAPI: AreaTargetAPI {
     var rejectBeforeAccepting = false
     var holdUpload = false
     var expired = false
+    private var holdStatus = false
+    private var statusContinuation: CheckedContinuation<Void, Never>?
+    func setHoldStatus(_ value: Bool) {
+        holdStatus = value
+        if !value { statusContinuation?.resume(); statusContinuation = nil }
+    }
     init(root: URL) { self.root = root }
     func setRemoteStatus(_ value: AreaTargetRemoteStatus) { remoteStatus = value }
     func setRemoteProblem(_ value: AreaTargetAPIProblem) { remoteProblem = value }
@@ -780,6 +1018,7 @@ actor AreaFlowAPI: AreaTargetAPI {
     }
     func status(jobID: String, token: String) async throws -> AreaTargetRemoteJob {
         events.append(("status", jobID, token))
+        if holdStatus { await withCheckedContinuation { statusContinuation = $0 } }
         if !accepted.contains(jobID) {
             throw AreaTargetAPIError.server(statusCode: 404,
                 problem: .init(code: "job_not_found", message: "任务不存在", retryable: false), retryAfter: nil)

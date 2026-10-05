@@ -1,7 +1,7 @@
 import Foundation
 
 enum AreaTargetTaskPhase: String, Codable {
-    case preparing, uploading, submissionUnknown, processing, ready, downloading, downloaded, paused, failed
+    case preparing, uploading, submissionUnknown, processing, ready, downloading, downloaded, paused, failed, stopped
 
     var title: String {
         switch self {
@@ -14,6 +14,7 @@ enum AreaTargetTaskPhase: String, Codable {
         case .downloaded: return "已保存到本机"
         case .paused: return "本机上传已暂停"
         case .failed: return "任务未完成"
+        case .stopped: return "已停止本机跟踪"
         }
     }
 }
@@ -58,8 +59,9 @@ struct AreaTargetProcessingJob: Identifiable, Codable, Equatable {
         return "profile=\(profile);uv_unwrap=\(uvUnwrap ? 1 : 0);\(preparation)"
     }
 
-    var needsSource: Bool { !accepted && phase != .failed && phase != .downloaded }
-    var isPending: Bool { phase != .downloaded && phase != .failed }
+    var needsSource: Bool { !accepted && ![.failed, .downloaded, .stopped].contains(phase) }
+    var isPending: Bool { ![.downloaded, .failed, .stopped].contains(phase) }
+    var canStopLocalTracking: Bool { isPending }
     var canResume: Bool { [.paused, .submissionUnknown].contains(phase) }
     var scanDirectory: URL { URL(fileURLWithPath: scanDirectoryPath, isDirectory: true) }
     var archiveURL: URL? { archivePath.map { URL(fileURLWithPath: $0) } }

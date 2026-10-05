@@ -7,9 +7,11 @@ struct AreaTargetProcessingView: View {
     let scanDirectory: URL?
     let displayName: String
     var entryPoint: EntryPoint = .preparation
+    var selectScan: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var showingTasks = false
     @State private var sharePayload: SharePayload?
+    @State private var stoppingJob: AreaTargetProcessingJob?
     @State private var username = ""
     @State private var password = ""
 
@@ -27,20 +29,19 @@ struct AreaTargetProcessingView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if let scanDirectory, entryPoint == .preparation, !showingTasks {
+                        if currentJob == nil {
+                            preparationSummary(scanDirectory)
+                        } else {
+                            Label(displayName.isEmpty ? ScanHistoryItem.displayName(for: scanDirectory.lastPathComponent) : displayName,
+                                  systemImage: "cube")
+                                .font(.headline).accessibilityIdentifier("area-target-scene")
+                        }
+                    }
                     if model.requiresServiceAuthentication(for: serviceOrigin) { serviceLogin }
                     if entryPoint == .tasks || showingTasks { taskHistory }
                     if let job = currentJob { taskDetails(job) }
-                    else if let scanDirectory, entryPoint == .preparation {
-                        AreaTargetSectionHeading(title: "准备上传", subtitle: "上传扫描数据，云端处理完成后下载资产到本机。")
-                        Label(displayName.isEmpty ? scanDirectory.lastPathComponent : displayName, systemImage: "cube")
-                            .font(.headline).accessibilityIdentifier("area-target-scene")
-                        Text("上传和下载时请保持 App 在前台。云端处理开始后，可以稍后回来查看。")
-                            .foregroundStyle(.secondary)
-                        Text("App 会按服务要求为上传准备扫描副本，保留原始扫描。上传扫描包上限 512 MB。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                        Text("结果包含模型、纹理和空间定位数据。请在任务显示的保存期限内下载；下载后会保存在本机。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } else if model.jobs.isEmpty {
+                    else if model.jobs.isEmpty && (scanDirectory == nil || entryPoint == .tasks || showingTasks) {
                         AreaTargetEmptyState(title: "暂无处理任务", message: "从扫描记录选择场景，然后上传处理。", symbol: "icloud")
                     }
                     if model.isRestoringAssets {
@@ -72,9 +73,35 @@ struct AreaTargetProcessingView: View {
         }
         .interactiveDismissDisabled(model.operationInProgress)
         .sheet(item: $sharePayload) { ActivityView(activityItems: $0.activityItems) }
+        .confirmationDialog("停止本机跟踪？", isPresented: Binding(
+            get: { stoppingJob != nil }, set: { if !$0 { stoppingJob = nil } }),
+            titleVisibility: .visible, presenting: stoppingJob) { job in
+                Button("停止本机跟踪", role: .destructive) {
+                    model.stopLocalTracking(jobID: job.id)
+                    stoppingJob = nil
+                }
+                Button("继续保留任务", role: .cancel) { stoppingJob = nil }
+            } message: { _ in
+                Text("只停止这项任务的本机跟踪，原扫描和已下载资产会保留。此操作不会取消云端处理；云端任务可能仍会继续。之后重新处理会创建新任务。")
+            }
         .task(id: serviceOrigin) { await model.restoreServiceLogin(origin: serviceOrigin) }
         .onChange(of: serviceOrigin) { _ in password = "" }
         .onDisappear { password = "" }
+    }
+
+    private func preparationSummary(_ directory: URL) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            AreaTargetSectionHeading(title: "准备处理扫描", subtitle: "先确认这条扫描，登录后上传云端处理，再下载资产到本机。")
+            Label(displayName.isEmpty ? directory.lastPathComponent : displayName, systemImage: "cube")
+                .font(.headline).accessibilityIdentifier("area-target-scene")
+            Text("上传和下载时请保持 App 在前台。云端处理开始后，可以稍后回来查看。")
+                .foregroundStyle(Color(uiColor: .secondaryLabel))
+            Text("App 会按服务要求为上传准备扫描副本，保留原始扫描。上传扫描包上限 512 MB。")
+                .font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
+            Text("结果包含模型、纹理和空间定位数据。请在任务显示的保存期限内下载；下载后会保存在本机。")
+                .font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var serviceLogin: some View {
@@ -82,7 +109,7 @@ struct AreaTargetProcessingView: View {
             if let session = model.serviceSession(for: serviceOrigin) {
                 Label("已登录 · \(session.username)", systemImage: "person.crop.circle.badge.checkmark")
                     .font(.headline).accessibilityIdentifier("area-target-signed-in")
-                Text(serviceOrigin.baseURL.host ?? "Area Target").font(.caption).foregroundStyle(.secondary)
+                Text(serviceOrigin.baseURL.host ?? "Area Target").font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                 Button("退出登录") {
                     password = ""
                     Task { await model.signOut(origin: serviceOrigin) }
@@ -90,13 +117,20 @@ struct AreaTargetProcessingView: View {
             } else {
                 Text("登录 Area Target 服务").font(.headline)
                 Text("使用服务管理员提供的账号登录后，即可上传、查询和下载云端任务。")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                TextField("用户名", text: $username)
-                    .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder).accessibilityIdentifier("area-target-login-username")
-                SecureField("密码", text: $password)
-                    .textContentType(.password).textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("area-target-login-password")
+                    .font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("服务用户名").font(.subheadline.weight(.semibold))
+                    TextField("输入用户名", text: $username)
+                        .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder).accessibilityIdentifier("area-target-login-username")
+                        .accessibilityLabel("服务用户名")
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("服务密码").font(.subheadline.weight(.semibold))
+                    SecureField("输入密码", text: $password)
+                        .textContentType(.password).textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("area-target-login-password").accessibilityLabel("服务密码")
+                }
                 AreaTargetActionButton(title: "登录", symbol: "person.crop.circle") {
                     let origin = serviceOrigin
                     Task {
@@ -129,9 +163,9 @@ struct AreaTargetProcessingView: View {
                             .foregroundStyle(job.phase == .downloaded ? Color.green : Color.accentColor)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(job.displayName).font(.headline).foregroundStyle(.primary)
-                            Text(job.phase.title).font(.subheadline).foregroundStyle(.secondary)
+                            Text(job.phase.title).font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel))
                             Text(job.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                         }
                         Spacer()
                         if model.selectedJobID == job.id { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
@@ -154,10 +188,10 @@ struct AreaTargetProcessingView: View {
                 ProgressView(value: Double(remote.progress), total: 100)
                 Text("\(remote.progress)%").font(.caption.monospacedDigit())
             }
-            Text(job.detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let result = job.remote?.result, job.savedAsset == nil {
+            Text(job.detail).foregroundStyle(Color(uiColor: .secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+            if let result = job.remote?.result, job.savedAsset == nil, job.phase != .stopped {
                 Text("请在 \(result.expiresAt.formatted(date: .abbreviated, time: .shortened)) 前下载。")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
             }
             if job.phase == .downloaded {
                 Label("模型和定位数据已保存，可导出资产包。", systemImage: "checkmark.shield")
@@ -165,7 +199,7 @@ struct AreaTargetProcessingView: View {
             }
             if job.phase == .submissionUnknown {
                 Text("继续时会先确认云端是否已接收本次上传。")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
             }
         }.accessibilityIdentifier("area-target-task-detail")
     }
@@ -176,10 +210,15 @@ struct AreaTargetProcessingView: View {
                 AreaTargetActionButton(title: "暂停本机操作", symbol: "pause.circle") { model.pause() }
                     .accessibilityIdentifier("area-target-pause")
                 Text("暂停本机传输后，已经开始的云端处理会继续。")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if needsServiceLogin && currentJob?.phase != .downloaded {
+                    .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
+            } else if currentJob == nil, scanDirectory == nil, let selectScan {
+                AreaTargetActionButton(title: "选择扫描", symbol: "square.stack.3d.up") {
+                    dismiss()
+                    selectScan()
+                }.accessibilityIdentifier("area-target-select-scan")
+            } else if needsServiceLogin && ![.downloaded, .stopped].contains(currentJob?.phase ?? .preparing) {
                 Text("请先登录服务，再继续云端任务。")
-                    .font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("area-target-login-required")
+                    .font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel)).accessibilityIdentifier("area-target-login-required")
             } else if let job = currentJob {
                 switch job.phase {
                 case .ready, .downloading:
@@ -200,6 +239,23 @@ struct AreaTargetProcessingView: View {
                     AreaTargetActionButton(title: "刷新处理进度", symbol: "arrow.clockwise") {
                         Task { await model.refresh(jobID: job.id) }
                     }.accessibilityIdentifier("area-target-refresh")
+                case .stopped:
+                    if let asset = job.savedAsset {
+                        AreaTargetActionButton(title: "导出资产包", symbol: "square.and.arrow.up") {
+                            sharePayload = SharePayload(activityItems: [asset.bundleURL])
+                        }.accessibilityIdentifier("area-target-share-result")
+                    }
+                    if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
+                        if needsServiceLogin {
+                            Text("请先登录服务，再重新处理这条扫描。")
+                                .font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel))
+                                .accessibilityIdentifier("area-target-login-required")
+                        } else {
+                            AreaTargetActionButton(title: "重新处理此扫描", symbol: "icloud.and.arrow.up") {
+                                Task { await model.start(scanDirectory: job.scanDirectory, displayName: job.displayName) }
+                            }.accessibilityIdentifier("area-target-process-again")
+                        }
+                    }
                 case .failed:
                     if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
                         AreaTargetActionButton(title: "重新上传处理", symbol: "icloud.and.arrow.up") {
@@ -211,6 +267,10 @@ struct AreaTargetProcessingView: View {
                 AreaTargetActionButton(title: "上传并处理", symbol: "icloud.and.arrow.up") {
                     Task { await model.start(scanDirectory: scanDirectory, displayName: displayName) }
                 }.accessibilityIdentifier("area-target-submit")
+            }
+            if !model.operationInProgress, let job = currentJob, job.canStopLocalTracking {
+                Button("停止本机跟踪…", role: .destructive) { stoppingJob = job }
+                    .frame(minHeight: 44).accessibilityIdentifier("area-target-stop-local-tracking")
             }
         }
         .disabled(model.isRestoringAssets || model.isAuthenticating)
@@ -227,7 +287,7 @@ private struct AreaTargetSectionHeading: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
-            Text(subtitle).foregroundStyle(.secondary)
+            Text(subtitle).foregroundStyle(Color(uiColor: .secondaryLabel))
         }
     }
 }
@@ -255,10 +315,10 @@ private struct AreaTargetEmptyState: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 32)).foregroundStyle(.secondary)
+            Image(systemName: symbol).font(.system(size: 32)).foregroundStyle(Color(uiColor: .secondaryLabel))
                 .accessibilityHidden(true)
             Text(title).font(.headline)
-            Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(message).foregroundStyle(Color(uiColor: .secondaryLabel)).multilineTextAlignment(.center)
         }
         .padding(24).frame(maxWidth: .infinity)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))

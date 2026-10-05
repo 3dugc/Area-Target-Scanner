@@ -24,7 +24,6 @@ struct IdentifiableURL: Identifiable {
 @MainActor
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showingExportFormats = false
     @StateObject private var viewModel = ScanViewModel()
     @StateObject private var mappingModel = ImmersalMappingModel()
     @StateObject private var areaTargetModel = AreaTargetProcessingModel.shared
@@ -34,6 +33,26 @@ struct ContentView: View {
     @State private var uploadDirectory: URL?
     @State private var sharePayload: SharePayload? = nil
     @State private var previewItem: IdentifiableURL? = nil
+    @State private var scanStartPending = false
+    @AppStorage("scanner.selectedPlatform") private var platformID = "areaTarget"
+
+    private enum CloudPlatform: String, CaseIterable, Identifiable {
+        case areaTarget, immersal
+        var id: String { rawValue }
+        var title: String { self == .areaTarget ? "Area Target" : "Immersal" }
+        var symbol: String { self == .areaTarget ? "scope" : "globe" }
+        var exportFormat: ScanExportFormat { self == .areaTarget ? .areaTarget : .immersal }
+    }
+
+    private var platform: CloudPlatform { CloudPlatform(rawValue: platformID) ?? .areaTarget }
+
+    private var platformSwitchingDisabled: Bool {
+        if scanStartPending || viewModel.isExporting { return true }
+        switch viewModel.state {
+        case .scanning, .processing: return true
+        default: return false
+        }
+    }
 
     #if DEBUG
     private var isDebugDiagnosticsEnabled: Bool {
@@ -47,7 +66,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            // ★ 深蓝色渐变背景 — v6 (sampleBilinear Y-flip fix)
+            // Shared scanning background.
             LinearGradient(
                 colors: [Color(red: 0.0, green: 0.05, blue: 0.3),
                          Color(red: 0.0, green: 0.02, blue: 0.12)],
@@ -55,34 +74,47 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
-            switch viewModel.state {
-            case .requestingPermission:
-                permissionView
-            case .permissionDenied:
-                permissionDeniedView
-            case .ready:
-                readyView
-            case .scanning:
-                scanningView
-            case .processing(let status):
-                processingView(status: status)
-            case .preview(let path):
-                previewView(exportPath: path)
-            case .error(let message):
-                errorView(message: message)
-            case .history:
-                ScanHistoryView(viewModel: viewModel)
+            VStack(spacing: 0) {
+                platformHeader.zIndex(1)
+                switch viewModel.state {
+                case .requestingPermission:
+                    permissionView
+                case .permissionDenied:
+                    permissionDeniedView
+                case .ready:
+                    readyView
+                case .scanning:
+                    scanningView
+                case .processing(let status):
+                    processingView(status: status)
+                case .preview(let path):
+                    previewView(exportPath: path)
+                case .error(let message):
+                    errorView(message: message)
+                case .history:
+                    ScanHistoryView(viewModel: viewModel)
+                }
             }
         }
         .onAppear {
-            viewModel.checkCameraPermission()
+            viewModel.setAppActive(scenePhase == .active)
             viewModel.deletionBlocked = { [mapping = mappingModel, areaTarget = areaTargetModel] path in
                 mapping.blocksDeletion(of: path) || areaTarget.deletionBlocked(scanPath: path)
+            }
+            viewModel.deletionBlockReason = { [mapping = mappingModel, areaTarget = areaTargetModel] path in
+                let reasons = [
+                    areaTarget.sourceProtectionReason(scanPath: path),
+                    mapping.blocksDeletion(of: path) ? "Immersal 本机任务仍需保留这条扫描，或任务记录暂不可用。请到 Immersal 任务页检查记录；确认不再需要的任务可停止本机跟踪。" : nil
+                ].compactMap { $0 }
+                return reasons.isEmpty ? nil : reasons.joined(separator: "\n\n")
             }
         }
         .task {
             areaTargetModel.setAppActive(scenePhase == .active)
             await mappingModel.monitorJobs()
+        }
+        .onChange(of: viewModel.state) { state in
+            if state != .ready { scanStartPending = false }
         }
         .onChange(of: scenePhase) { phase in
             viewModel.setAppActive(phase == .active)
@@ -108,16 +140,65 @@ struct ContentView: View {
             ActivityView(activityItems: payload.activityItems)
         }
         .sheet(isPresented: $showingImmersal) {
-            ImmersalMappingView(model: mappingModel, scanDirectory: uploadDirectory)
+            ImmersalMappingView(model: mappingModel, scanDirectory: uploadDirectory, selectScan: {
+                showingImmersal = false
+                viewModel.showHistory()
+            })
         }
         .sheet(isPresented: $showingAreaTarget) {
             AreaTargetProcessingView(model: areaTargetModel, scanDirectory: areaTargetDirectory,
-                displayName: areaTargetDirectory?.lastPathComponent ?? "",
-                entryPoint: areaTargetDirectory == nil ? .tasks : .preparation)
+                displayName: areaTargetDirectory.map { ScanHistoryItem.displayName(for: $0.lastPathComponent) } ?? "",
+                entryPoint: areaTargetDirectory == nil ? .tasks : .preparation,
+                selectScan: {
+                    showingAreaTarget = false
+                    viewModel.showHistory()
+                })
         }
         .fullScreenCover(item: $previewItem) { item in
             ModelPreviewView(fileURL: item.url)
         }
+    }
+
+    private var platformHeader: some View {
+        HStack {
+            Menu {
+                ForEach(CloudPlatform.allCases) { candidate in
+                    Button {
+                        guard !platformSwitchingDisabled else { return }
+                        platformID = candidate.rawValue
+                    } label: {
+                        if candidate == platform { Label(candidate.title, systemImage: "checkmark") }
+                        else { Text(candidate.title) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: platform.symbol)
+                    Text(platform.title).font(.headline).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(.white.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain).foregroundStyle(.white)
+            .disabled(platformSwitchingDisabled)
+            .accessibilityLabel("当前平台：\(platform.title)，切换平台")
+            .accessibilityHint(platformSwitchingDisabled ? "请先完成当前扫描或导出" : "切换平台后继续使用同一扫描")
+            .accessibilityIdentifier("platform-switcher")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 8)
+    }
+
+    private var scanHistoryButton: some View {
+        Button(action: { viewModel.showHistory() }) {
+            Label("扫描历史", systemImage: "clock.arrow.circlepath")
+                .font(.title3.weight(.semibold))
+                .frame(maxWidth: .infinity).padding(.vertical, 14)
+        }
+        .buttonStyle(.bordered).tint(.white)
+        .disabled(platformSwitchingDisabled)
+        .accessibilityIdentifier("scan-history")
     }
 
     private var permissionView: some View {
@@ -129,7 +210,8 @@ struct ContentView: View {
                 .multilineTextAlignment(.center).padding(.horizontal, 40)
             Button("授权摄像头") { viewModel.requestCameraPermission() }
                 .buttonStyle(.borderedProminent).tint(.red)
-            cloudTasksButton
+            scanHistoryButton.padding(.horizontal, 40)
+            cloudTasksButton.padding(.horizontal, 40)
         }
     }
 
@@ -143,7 +225,8 @@ struct ContentView: View {
                     UIApplication.shared.open(url)
                 }
             }.buttonStyle(.borderedProminent).tint(.orange)
-            cloudTasksButton
+            scanHistoryButton.padding(.horizontal, 40)
+            cloudTasksButton.padding(.horizontal, 40)
         }
     }
 
@@ -152,20 +235,18 @@ struct ContentView: View {
             Spacer()
             Image(systemName: "arkit").font(.system(size: 64)).foregroundStyle(.red)
             Text("Area Target Scanner").font(.largeTitle.weight(.semibold)).foregroundStyle(.white)
-            Text("v6 — 纹理采样修复版").font(.body).foregroundStyle(.white.opacity(0.6))
+            Text("一次扫描，可用于当前平台的云处理。")
+                .font(.body).foregroundStyle(.white.opacity(0.8))
             Spacer()
             VStack(spacing: 12) {
-                Button(action: { viewModel.startScanning() }) {
+                Button(action: { scanStartPending = true; viewModel.startScanning() }) {
                     Label("开始扫描", systemImage: "record.circle")
                         .font(.title3.weight(.semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }.buttonStyle(.borderedProminent).tint(.red)
+                .disabled(scanStartPending)
 
-                Button(action: { viewModel.showHistory() }) {
-                    Label("扫描历史", systemImage: "clock.arrow.circlepath")
-                        .font(.title3.weight(.semibold))
-                        .frame(maxWidth: .infinity).padding(.vertical, 14)
-                }.buttonStyle(.bordered).tint(.white)
+                scanHistoryButton
                 cloudTasksButton
             }
             .padding(.horizontal, 40).padding(.bottom, 40)
@@ -211,7 +292,9 @@ struct ContentView: View {
                     .font(.system(size: 48)).foregroundStyle(.green)
                     .padding(.top, 60)
 
-                Text("处理完成").font(.title2.weight(.semibold)).foregroundStyle(.white)
+                Text("扫描已保存").font(.title2.weight(.semibold)).foregroundStyle(.white)
+                Text(ScanHistoryItem.displayName(for: URL(fileURLWithPath: exportPath).lastPathComponent))
+                    .font(.subheadline).foregroundStyle(.white.opacity(0.8))
 
                 #if DEBUG
                 if isDebugDiagnosticsEnabled {
@@ -244,21 +327,15 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent).tint(.green)
                     .disabled(foundModel == nil || viewModel.isExporting)
 
-                    Button(action: { showingExportFormats = true }) {
-                        Label("导出", systemImage: "square.and.arrow.up")
-                            .font(.title3.weight(.semibold))
-                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    Button {
+                        viewModel.beginExport(format: platform.exportFormat, from: exportPath)
+                    } label: {
+                        Label(platform == .areaTarget ? "导出 Area Target 原始扫描" : "导出 Immersal 扫描包", systemImage: "square.and.arrow.up")
+                            .font(.callout.weight(.semibold))
+                            .frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
-                    .buttonStyle(.borderedProminent).tint(.blue)
-                    .disabled(viewModel.isExporting)
-                    .confirmationDialog("选择导出格式", isPresented: $showingExportFormats, titleVisibility: .visible) {
-                        Button("Area Target 原格式") { viewModel.beginExport(format: .areaTarget, from: exportPath) }
-                        Button("Immersal 格式") { viewModel.beginExport(format: .immersal, from: exportPath) }
-                            .disabled(immersalReason != nil)
-                        Button("取消", role: .cancel) {}
-                    } message: {
-                        Text(immersalReason.map { "Immersal 暂不可用：\($0)" } ?? "同一次扫描可分别导出两种格式。")
-                    }
+                    .buttonStyle(.bordered).tint(.white)
+                    .disabled(viewModel.isExporting || (platform == .immersal && immersalReason != nil))
                     if let status = viewModel.exportStatus {
                         ProgressView().tint(.white)
                         Text(status).font(.callout).foregroundStyle(.white)
@@ -266,31 +343,33 @@ struct ContentView: View {
                             .buttonStyle(.bordered).tint(.white)
                     }
 
-                    Button {
-                        areaTargetDirectory = URL(fileURLWithPath: exportPath, isDirectory: true)
-                        showingAreaTarget = true
-                    } label: {
-                        Label("Area Target 云处理", systemImage: "icloud.and.arrow.up")
-                            .font(.title3.weight(.semibold))
-                            .frame(maxWidth: .infinity).padding(.vertical, 14)
-                    }
-                    .buttonStyle(.borderedProminent).tint(.teal)
-                    .disabled(viewModel.isExporting)
-                    .accessibilityIdentifier("area-target-open-upload")
-
-                    Button {
-                        uploadDirectory = URL(fileURLWithPath: exportPath)
-                        showingImmersal = true
-                    } label: {
-                        Label("上传到 Immersal 并建图", systemImage: "icloud.and.arrow.up")
-                            .font(.title3.weight(.semibold))
-                            .frame(maxWidth: .infinity).padding(.vertical, 14)
-                    }
-                    .buttonStyle(.borderedProminent).tint(.indigo)
-                    .disabled(viewModel.isExporting || immersalReason != nil)
-                    if let immersalReason {
-                        Text("Immersal 暂不可用：\(immersalReason)")
-                            .font(.caption).foregroundStyle(.white.opacity(0.7))
+                    if platform == .areaTarget {
+                        Button {
+                            areaTargetDirectory = URL(fileURLWithPath: exportPath, isDirectory: true)
+                            showingAreaTarget = true
+                        } label: {
+                            Label("Area Target 云处理", systemImage: "icloud.and.arrow.up")
+                                .font(.title3.weight(.semibold))
+                                .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        }
+                        .buttonStyle(.borderedProminent).tint(.teal)
+                        .disabled(viewModel.isExporting)
+                        .accessibilityIdentifier("area-target-open-upload")
+                    } else {
+                        Button {
+                            uploadDirectory = URL(fileURLWithPath: exportPath)
+                            showingImmersal = true
+                        } label: {
+                            Label("上传到 Immersal 并建图", systemImage: "icloud.and.arrow.up")
+                                .font(.title3.weight(.semibold))
+                                .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        }
+                        .buttonStyle(.borderedProminent).tint(.indigo)
+                        .disabled(viewModel.isExporting || immersalReason != nil)
+                        if let immersalReason {
+                            Text("Immersal 暂不可用：\(immersalReason)")
+                                .font(.caption).foregroundStyle(.white.opacity(0.7))
+                        }
                     }
 
                     Button(action: { viewModel.resetToReady() }) {
@@ -320,24 +399,28 @@ struct ContentView: View {
     }
 
     private var cloudTasksButton: some View {
-        VStack(spacing: 8) {
-            Button {
-                areaTargetDirectory = nil
-                showingAreaTarget = true
-            } label: {
-                Label("Area Target 账号与任务", systemImage: "icloud")
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+        Group {
+            if platform == .areaTarget {
+                Button {
+                    areaTargetDirectory = nil
+                    showingAreaTarget = true
+                } label: {
+                    Label("Area Target 账号与任务", systemImage: "icloud")
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                }
+                .accessibilityIdentifier("area-target-open-tasks")
+            } else {
+                Button {
+                    uploadDirectory = nil
+                    showingImmersal = true
+                } label: {
+                    Label("Immersal 账号与任务", systemImage: "icloud")
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                }
+                .accessibilityIdentifier("immersal-open-tasks")
             }
-            .buttonStyle(.bordered).tint(.white)
-            .accessibilityIdentifier("area-target-open-tasks")
-
-            Button {
-                uploadDirectory = nil
-                showingImmersal = true
-            } label: {
-                Label("Immersal 账号与任务", systemImage: "icloud")
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-            }.buttonStyle(.bordered).tint(.white)
         }
+        .buttonStyle(.bordered).tint(.white)
+        .disabled(platformSwitchingDisabled)
     }
 }
