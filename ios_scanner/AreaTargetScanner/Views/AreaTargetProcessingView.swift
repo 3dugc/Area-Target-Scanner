@@ -9,11 +9,22 @@ struct AreaTargetProcessingView: View {
     var entryPoint: EntryPoint = .preparation
     var selectScan: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var cloudActions: AreaTargetCloudActionCoordinator
     @State private var showingTasks = false
     @State private var sharePayload: SharePayload?
     @State private var stoppingJob: AreaTargetProcessingJob?
-    @State private var username = ""
-    @State private var password = ""
+
+    init(model: AreaTargetProcessingModel, scanDirectory: URL?, displayName: String,
+         entryPoint: EntryPoint = .preparation, selectScan: (() -> Void)? = nil,
+         cloudActions: AreaTargetCloudActionCoordinator? = nil) {
+        self.model = model
+        self.scanDirectory = scanDirectory
+        self.displayName = displayName
+        self.entryPoint = entryPoint
+        self.selectScan = selectScan
+        _cloudActions = StateObject(wrappedValue: cloudActions ?? AreaTargetCloudActionCoordinator(model: model))
+    }
 
     private var currentJob: AreaTargetProcessingJob? {
         if entryPoint == .tasks || showingTasks { return model.selectedJob }
@@ -21,9 +32,6 @@ struct AreaTargetProcessingView: View {
     }
 
     private var serviceOrigin: AreaTargetServerOrigin { currentJob?.serverOrigin ?? .current }
-    private var needsServiceLogin: Bool {
-        model.requiresServiceAuthentication(for: serviceOrigin) && model.serviceSession(for: serviceOrigin) == nil
-    }
 
     var body: some View {
         NavigationStack {
@@ -38,7 +46,7 @@ struct AreaTargetProcessingView: View {
                                 .font(.headline).accessibilityIdentifier("area-target-scene")
                         }
                     }
-                    if model.requiresServiceAuthentication(for: serviceOrigin) { serviceLogin }
+                    if let session = model.serviceSession(for: serviceOrigin) { signedInAccount(session) }
                     if entryPoint == .tasks || showingTasks { taskHistory }
                     if let job = currentJob { taskDetails(job) }
                     else if model.jobs.isEmpty && (scanDirectory == nil || entryPoint == .tasks || showingTasks) {
@@ -84,14 +92,25 @@ struct AreaTargetProcessingView: View {
             } message: { _ in
                 Text("只停止这项任务的本机跟踪，原扫描和已下载资产会保留。此操作不会取消云端处理；云端任务可能仍会继续。之后重新处理会创建新任务。")
             }
-        .task(id: serviceOrigin) { await model.restoreServiceLogin(origin: serviceOrigin) }
-        .onChange(of: serviceOrigin) { _ in password = "" }
-        .onDisappear { password = "" }
+        .sheet(item: Binding(get: { cloudActions.loginRequest }, set: { request in
+            if request == nil, cloudActions.loginRequest != nil { cloudActions.cancelLogin() }
+        }), onDismiss: { Task { await cloudActions.continueAfterLogin() } }) { request in
+            AreaTargetServiceLoginView(model: model, request: request,
+                cancel: { cloudActions.cancelLogin() }, authenticate: { username, password in
+                    await cloudActions.authenticate(requestID: request.id, username: username, password: password)
+                })
+        }
+        .onAppear { cloudActions.setScenePhase(scenePhase) }
+        .onChange(of: scenePhase) { phase in
+            cloudActions.setScenePhase(phase)
+            if phase == .active { Task { await cloudActions.continueAfterLogin() } }
+        }
+        .onDisappear { cloudActions.cancelLogin() }
     }
 
     private func preparationSummary(_ directory: URL) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            AreaTargetSectionHeading(title: "准备处理扫描", subtitle: "先确认这条扫描，登录后上传云端处理，再下载资产到本机。")
+            AreaTargetSectionHeading(title: "准备处理扫描", subtitle: "确认这条扫描，上传云端处理，再下载资产到本机。")
             Label(displayName.isEmpty ? directory.lastPathComponent : displayName, systemImage: "cube")
                 .font(.headline).accessibilityIdentifier("area-target-scene")
             Text("上传和下载时请保持 App 在前台。云端处理开始后，可以稍后回来查看。")
@@ -104,54 +123,20 @@ struct AreaTargetProcessingView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var serviceLogin: some View {
+    private func signedInAccount(_ session: AreaTargetServiceSession) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let session = model.serviceSession(for: serviceOrigin) {
-                Label("已登录 · \(session.username)", systemImage: "person.crop.circle.badge.checkmark")
-                    .font(.headline).accessibilityIdentifier("area-target-signed-in")
-                Text(serviceOrigin.baseURL.host ?? "Area Target").font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
-                Button("退出登录") {
-                    password = ""
-                    Task { await model.signOut(origin: serviceOrigin) }
-                }.frame(minHeight: 44).accessibilityIdentifier("area-target-sign-out")
-            } else {
-                Text("登录 Area Target 服务").font(.headline)
-                Text("使用服务管理员提供的账号登录后，即可上传、查询和下载云端任务。")
-                    .font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel))
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("服务用户名").font(.subheadline.weight(.semibold))
-                    TextField("输入用户名", text: $username)
-                        .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder).accessibilityIdentifier("area-target-login-username")
-                        .accessibilityLabel("服务用户名")
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("服务密码").font(.subheadline.weight(.semibold))
-                    SecureField("输入密码", text: $password)
-                        .textContentType(.password).textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("area-target-login-password").accessibilityLabel("服务密码")
-                }
-                AreaTargetActionButton(title: "登录", symbol: "person.crop.circle") {
-                    let origin = serviceOrigin
-                    Task {
-                        await model.signIn(username: username, password: password, origin: origin)
-                        password = ""
-                    }
-                }
-                .disabled(username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-                .accessibilityIdentifier("area-target-sign-in")
-            }
-            if model.isAuthenticating {
-                HStack { ProgressView(); Text("正在验证服务登录…") }.font(.subheadline)
-            }
+            Label("已登录 · \(session.username)", systemImage: "person.crop.circle.badge.checkmark")
+                .font(.headline).accessibilityIdentifier("area-target-signed-in")
+            Button("退出登录") {
+                let origin = serviceOrigin
+                cloudActions.cancelLogin()
+                Task { await model.signOut(origin: origin) }
+            }.frame(minHeight: 44).accessibilityIdentifier("area-target-sign-out")
             if let message = model.authenticationMessage {
                 Text(message).font(.subheadline).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("area-target-login-message")
             }
         }
-        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-        .disabled(model.operationInProgress || model.isAuthenticating)
+        .disabled(model.operationInProgress || model.isAuthenticating || cloudActions.isExecuting)
     }
 
     private var taskHistory: some View {
@@ -216,14 +201,11 @@ struct AreaTargetProcessingView: View {
                     dismiss()
                     selectScan()
                 }.accessibilityIdentifier("area-target-select-scan")
-            } else if needsServiceLogin && ![.downloaded, .stopped].contains(currentJob?.phase ?? .preparing) {
-                Text("请先登录服务，再继续云端任务。")
-                    .font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel)).accessibilityIdentifier("area-target-login-required")
             } else if let job = currentJob {
                 switch job.phase {
                 case .ready, .downloading:
                     AreaTargetActionButton(title: "下载到本机", symbol: "icloud.and.arrow.down") {
-                        Task { await model.download(jobID: job.id) }
+                        Task { await cloudActions.perform(.download(jobID: job.id, origin: job.serverOrigin, displayName: job.displayName)) }
                     }.accessibilityIdentifier("area-target-download")
                 case .downloaded:
                     if let asset = job.savedAsset {
@@ -233,11 +215,11 @@ struct AreaTargetProcessingView: View {
                     }
                 case .paused, .submissionUnknown, .preparing, .uploading:
                     AreaTargetActionButton(title: "检查并继续上传", symbol: "icloud.and.arrow.up") {
-                        Task { await model.resume(jobID: job.id) }
+                        Task { await cloudActions.perform(.resume(jobID: job.id, origin: job.serverOrigin, displayName: job.displayName)) }
                     }.accessibilityIdentifier("area-target-resume")
                 case .processing:
                     AreaTargetActionButton(title: "刷新处理进度", symbol: "arrow.clockwise") {
-                        Task { await model.refresh(jobID: job.id) }
+                        Task { await cloudActions.perform(.refresh(jobID: job.id, origin: job.serverOrigin, displayName: job.displayName)) }
                     }.accessibilityIdentifier("area-target-refresh")
                 case .stopped:
                     if let asset = job.savedAsset {
@@ -246,26 +228,20 @@ struct AreaTargetProcessingView: View {
                         }.accessibilityIdentifier("area-target-share-result")
                     }
                     if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
-                        if needsServiceLogin {
-                            Text("请先登录服务，再重新处理这条扫描。")
-                                .font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel))
-                                .accessibilityIdentifier("area-target-login-required")
-                        } else {
-                            AreaTargetActionButton(title: "重新处理此扫描", symbol: "icloud.and.arrow.up") {
-                                Task { await model.start(scanDirectory: job.scanDirectory, displayName: job.displayName) }
-                            }.accessibilityIdentifier("area-target-process-again")
-                        }
+                        AreaTargetActionButton(title: "重新处理此扫描", symbol: "icloud.and.arrow.up") {
+                            Task { await cloudActions.perform(.upload(scanDirectory: job.scanDirectory, displayName: job.displayName)) }
+                        }.accessibilityIdentifier("area-target-process-again")
                     }
                 case .failed:
                     if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
                         AreaTargetActionButton(title: "重新上传处理", symbol: "icloud.and.arrow.up") {
-                            Task { await model.start(scanDirectory: job.scanDirectory, displayName: job.displayName) }
+                            Task { await cloudActions.perform(.upload(scanDirectory: job.scanDirectory, displayName: job.displayName)) }
                         }.accessibilityIdentifier("area-target-restart")
                     }
                 }
             } else if let scanDirectory, entryPoint == .preparation, !showingTasks {
                 AreaTargetActionButton(title: "上传并处理", symbol: "icloud.and.arrow.up") {
-                    Task { await model.start(scanDirectory: scanDirectory, displayName: displayName) }
+                    Task { await cloudActions.perform(.upload(scanDirectory: scanDirectory, displayName: displayName)) }
                 }.accessibilityIdentifier("area-target-submit")
             }
             if !model.operationInProgress, let job = currentJob, job.canStopLocalTracking {
@@ -273,10 +249,196 @@ struct AreaTargetProcessingView: View {
                     .frame(minHeight: 44).accessibilityIdentifier("area-target-stop-local-tracking")
             }
         }
-        .disabled(model.isRestoringAssets || model.isAuthenticating)
+        .disabled(model.isRestoringAssets || model.isAuthenticating || (cloudActions.isExecuting && !model.operationInProgress))
         .padding(.horizontal, 24).padding(.vertical, 12)
         .frame(maxWidth: 640).frame(maxWidth: .infinity)
         .background(Color(uiColor: .systemGroupedBackground))
+    }
+}
+
+enum AreaTargetCloudIntent: Equatable {
+    case upload(scanDirectory: URL, displayName: String)
+    case resume(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
+    case refresh(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
+    case download(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
+
+    var origin: AreaTargetServerOrigin {
+        switch self {
+        case .upload: return .current
+        case .resume(_, let origin, _), .refresh(_, let origin, _), .download(_, let origin, _): return origin
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .upload(let directory, let name): return name.isEmpty ? ScanHistoryItem.displayName(for: directory.lastPathComponent) : name
+        case .resume(_, _, let name), .refresh(_, _, let name), .download(_, _, let name): return name
+        }
+    }
+
+    var actionTitle: String {
+        switch self {
+        case .upload, .resume: return "继续上传"
+        case .refresh: return "查询任务"
+        case .download: return "下载资产"
+        }
+    }
+
+    @MainActor
+    func isValid(in model: AreaTargetProcessingModel) -> Bool {
+        switch self {
+        case .upload(let directory, _):
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
+                && !model.jobs.contains { $0.scanDirectoryPath == directory.path && $0.isPending }
+        case .resume(let id, let origin, _), .refresh(let id, let origin, _):
+            return model.jobs.contains { $0.id == id && $0.serverOrigin == origin && $0.isPending }
+        case .download(let id, let origin, _):
+            return model.jobs.contains { $0.id == id && $0.serverOrigin == origin && [.ready, .downloading].contains($0.phase) }
+        }
+    }
+}
+
+struct AreaTargetServiceLoginRequest: Identifiable, Equatable {
+    let id: UUID
+    let intent: AreaTargetCloudIntent
+}
+
+/// Keeps an explicit cloud action independent of later UI selection and login responses.
+@MainActor
+final class AreaTargetCloudActionCoordinator: ObservableObject {
+    @Published private(set) var loginRequest: AreaTargetServiceLoginRequest?
+    @Published private(set) var isExecuting = false
+    private let model: AreaTargetProcessingModel
+    private var generation = UUID()
+    private var continuation: AreaTargetServiceLoginRequest?
+    private var isActive = true
+
+    init(model: AreaTargetProcessingModel) { self.model = model }
+
+    func setScenePhase(_ phase: ScenePhase) {
+        isActive = phase == .active
+        if phase == .background { cancelLogin() }
+    }
+
+    func cancelLogin() {
+        generation = UUID()
+        loginRequest = nil
+        continuation = nil
+    }
+
+    func perform(_ intent: AreaTargetCloudIntent) async {
+        guard isActive, !isExecuting, !model.operationInProgress, !model.isAuthenticating,
+              loginRequest == nil, continuation == nil else { return }
+        guard intent.isValid(in: model) else { model.message = "任务或扫描已变化，请重新选择操作。"; return }
+        generation = UUID()
+        let request = AreaTargetServiceLoginRequest(id: generation, intent: intent)
+        if needsLogin(for: intent) { loginRequest = request; return }
+        await execute(request)
+    }
+
+    func authenticate(requestID: UUID, username: String, password: String) async {
+        guard let request = loginRequest, request.id == requestID, generation == requestID else { return }
+        await model.signIn(username: username, password: password, origin: request.intent.origin)
+        guard generation == requestID, loginRequest?.id == requestID,
+              model.serviceSession(for: request.intent.origin) != nil else { return }
+        continuation = request
+        loginRequest = nil
+    }
+
+    /// Called after the login sheet closes, or when a temporary inactive scene becomes active.
+    func continueAfterLogin() async {
+        guard isActive, let request = continuation, generation == request.id else { return }
+        continuation = nil
+        guard !model.operationInProgress, !model.isAuthenticating else {
+            model.message = "另一项本机操作正在进行，请完成后重新操作。"
+            return
+        }
+        await execute(request)
+    }
+
+    private func needsLogin(for intent: AreaTargetCloudIntent) -> Bool {
+        model.requiresServiceAuthentication(for: intent.origin) && model.serviceSession(for: intent.origin) == nil
+    }
+
+    private func execute(_ request: AreaTargetServiceLoginRequest) async {
+        guard isActive, generation == request.id, request.intent.isValid(in: model) else {
+            if generation == request.id { model.message = "任务或扫描已变化，请重新选择操作。" }
+            return
+        }
+        isExecuting = true
+        defer { isExecuting = false }
+        switch request.intent {
+        case .upload(let directory, let name): await model.start(scanDirectory: directory, displayName: name)
+        case .resume(let id, _, _): await model.resume(jobID: id)
+        case .refresh(let id, _, _): await model.refresh(jobID: id)
+        case .download(let id, _, _): await model.download(jobID: id)
+        }
+        guard isActive, generation == request.id,
+              model.message == AreaTargetAPIError.authenticationRequired.localizedDescription,
+              needsLogin(for: request.intent) else { return }
+        var retry = request.intent
+        // A rejected upload may already own a durable job ID and capability. Resume
+        // that identity after login rather than starting another submission.
+        if case .upload(let directory, _) = retry,
+           let job = model.jobs.first(where: { $0.scanDirectoryPath == directory.path && $0.isPending }) {
+            retry = .resume(jobID: job.id, origin: job.serverOrigin, displayName: job.displayName)
+        }
+        if retry.isValid(in: model) { loginRequest = AreaTargetServiceLoginRequest(id: request.id, intent: retry) }
+    }
+}
+
+@MainActor
+struct AreaTargetServiceLoginView: View {
+    @ObservedObject var model: AreaTargetProcessingModel
+    let request: AreaTargetServiceLoginRequest
+    let cancel: () -> Void
+    let authenticate: (String, String) async -> Void
+    @State private var username = ""
+    @State private var password = ""
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    AreaTargetSectionHeading(title: "登录 Area Target 服务", subtitle: "登录后\(request.intent.actionTitle)。扫描和本机资料无需登录。")
+                    Label(request.intent.displayName, systemImage: "cube").font(.headline)
+                    Text(request.intent.origin.baseURL.host ?? "Area Target").font(.caption)
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("服务用户名").font(.subheadline.weight(.semibold))
+                        TextField("输入用户名", text: $username)
+                            .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder).accessibilityIdentifier("area-target-login-username")
+                            .accessibilityLabel("服务用户名")
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("服务密码").font(.subheadline.weight(.semibold))
+                        SecureField("输入密码", text: $password).textContentType(.password).textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("area-target-login-password").accessibilityLabel("服务密码")
+                    }
+                    AreaTargetActionButton(title: "登录并\(request.intent.actionTitle)", symbol: "person.crop.circle") {
+                        let enteredUsername = username
+                        let enteredPassword = password
+                        password = ""
+                        Task { await authenticate(enteredUsername, enteredPassword) }
+                    }
+                    .disabled(username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty || model.isAuthenticating)
+                    .accessibilityIdentifier("area-target-sign-in")
+                    if model.isAuthenticating { HStack { ProgressView(); Text("正在验证服务登录…") } }
+                    if let message = model.authenticationMessage {
+                        Text(message).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("area-target-login-message")
+                    }
+                }.padding(24).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("服务登录").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { password = ""; cancel() } }
+            }
+        }
+        .onDisappear { password = "" }
     }
 }
 
