@@ -28,6 +28,7 @@ QUALITY_ATLAS_SIZE = int(os.environ.get("UV_QUALITY_ATLAS_SIZE", "4096"))
 ATLAS_SIZE = QUALITY_ATLAS_SIZE
 DECODED_IMAGE_CACHE_BYTES = 64 * 1024 * 1024
 _ATLAS_FILL_CHUNK_ROWS = 128
+_FRAME_ASSIGNMENT_CHUNK_FACES = 4096
 UV_XATLAS_NATIVE = os.environ.get("UV_XATLAS_NATIVE", "1") == "1"
 UV_XATLAS_HELPER_PATH = os.environ.get("UV_XATLAS_HELPER_PATH", "/app/bin/xatlas_helper")
 UV_FAST_TARGET_FACES = int(os.environ.get("UV_FAST_TARGET_FACES", "50000"))
@@ -441,7 +442,7 @@ def _decimate_mesh(vertices, normals, faces, target_faces, on_progress=None):
 
 
 def _vectorized_assign_frames(centers, normals, pose_matrices, intr):
-    """Vectorized best-frame assignment for all faces at once.
+    """Assign the best frame with one bounded face chunk and one camera at a time.
 
     For each face, find the camera with highest score = dot(normal, viewDir) / dist^2,
     where the face center must project into the image bounds.
@@ -462,47 +463,42 @@ def _vectorized_assign_frames(centers, normals, pose_matrices, intr):
     if len(calibrations) != n_frames:
         raise ValueError("Camera calibration count does not match frame count")
 
-    # to_cam: (n_faces, n_frames, 3)
-    to_cam = cam_positions[np.newaxis, :, :] - centers[:, np.newaxis, :]
+    assignments = np.full(n_faces, -1, dtype=np.int32)
+    for start in range(0, n_faces, _FRAME_ASSIGNMENT_CHUNK_FACES):
+        stop = min(start + _FRAME_ASSIGNMENT_CHUNK_FACES, n_faces)
+        chunk_centers = centers[start:stop]
+        chunk_normals = normals[start:stop]
+        centers_h = np.hstack([chunk_centers, np.ones((stop - start, 1), dtype=np.float64)])
+        best_scores = np.full(stop - start, -1.0, dtype=np.float64)
+        chunk_assignments = assignments[start:stop]
 
-    # dist: (n_faces, n_frames)
-    dist_sq = np.sum(to_cam ** 2, axis=2)
-    dist = np.sqrt(dist_sq)
-    dist_safe = np.where(dist > 1e-10, dist, 1.0)
+        for i in range(n_frames):
+            to_cam = cam_positions[i] - chunk_centers
+            dist_sq = np.sum(to_cam ** 2, axis=1)
+            dist = np.sqrt(dist_sq)
+            dist_safe = np.where(dist > 1e-10, dist, 1.0)
+            view_dir = to_cam / dist_safe[:, np.newaxis]
+            dot = np.sum(chunk_normals * view_dir, axis=1)
+            score = np.where(dot > 0, dot / np.maximum(dist_sq, 1e-20), -1.0)
 
-    # view_dir: (n_faces, n_frames, 3)
-    view_dir = to_cam / dist_safe[:, :, np.newaxis]
+            calibration = calibrations[i]
+            fx, fy, cx, cy = (calibration[name] for name in ("fx", "fy", "cx", "cy"))
+            img_w, img_h = calibration["width"], calibration["height"]
+            p_cam = (view_matrices[i] @ centers_h.T).T
+            # Camera looks along -Z; right and bottom image bounds are exclusive.
+            behind = p_cam[:, 2] >= 0
+            neg_z = np.where(behind, 1.0, -p_cam[:, 2])
+            px = fx * (p_cam[:, 0] / neg_z) + cx
+            py = fy * (-p_cam[:, 1] / neg_z) + cy
+            out_of_bounds = behind | (px < 0) | (px >= img_w) | (py < 0) | (py >= img_h)
+            score[out_of_bounds] = -1.0
 
-    # dot product with face normals: (n_faces, n_frames)
-    dot = np.sum(normals[:, np.newaxis, :] * view_dir, axis=2)
+            # Strict improvement preserves np.argmax's first-frame tie behavior.
+            improved = score > best_scores
+            best_scores[improved] = score[improved]
+            chunk_assignments[improved] = i
 
-    # score = dot / dist^2, only where dot > 0
-    score = np.where(dot > 0, dot / np.maximum(dist_sq, 1e-20), -1.0)
-
-    # Projection check: transform centers to camera space for each frame
-    # centers_h: (n_faces, 4) homogeneous
-    centers_h = np.hstack([centers, np.ones((n_faces, 1), dtype=np.float64)])
-
-    # For each frame, project all centers
-    for i in range(n_frames):
-        calibration = calibrations[i]
-        fx, fy, cx, cy = (calibration[name] for name in ("fx", "fy", "cx", "cy"))
-        img_w, img_h = calibration["width"], calibration["height"]
-        # p_cam: (n_faces, 4)
-        p_cam = (view_matrices[i] @ centers_h.T).T
-        # Must have negative Z (camera looks along -Z)
-        behind = p_cam[:, 2] >= 0
-        neg_z = np.where(behind, 1.0, -p_cam[:, 2])
-        px = fx * (p_cam[:, 0] / neg_z) + cx
-        py = fy * (-p_cam[:, 1] / neg_z) + cy
-        out_of_bounds = behind | (px < 0) | (px >= img_w) | (py < 0) | (py >= img_h)
-        score[out_of_bounds, i] = -1.0
-
-    # Best frame per face
-    assignments = np.argmax(score, axis=1).astype(np.int32)
-    # Mark faces with no valid frame
-    best_scores = score[np.arange(n_faces), assignments]
-    assignments[best_scores <= 0] = -1
+        chunk_assignments[best_scores <= 0] = -1
 
     return assignments
 

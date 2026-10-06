@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 from pathlib import Path
 import re
@@ -16,7 +17,8 @@ from flask import jsonify, request, send_file
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from processing_pipeline.scan_security import validate_scan, image_dimensions, load_metadata, contained_path
-from processing_pipeline.scan_preparation import processing_requirements, validate_client_preparation
+from processing_pipeline.scan_preparation import (POLICY, POLICY_V2, PreparationError,
+    processing_requirements, validate_client_preparation)
 
 TOKEN_PATTERN = re.compile(r'Bearer ([0-9a-f]{64})\Z')
 STAGES = {'queued', 'extracting', 'uv_unwrap', 'model_optimization', 'feature_extraction', 'packaging', 'completed', 'failed'}
@@ -26,6 +28,7 @@ MESSAGES = {'queued': 'Waiting for processing.', 'extracting': 'Extracting scan 
             'completed': 'Result is ready to download.', 'failed': 'Processing did not complete.'}
 ERRORS = {'processing_interrupted': ('The service restarted before processing finished. Submit a new task.', False),
           'processing_failed': ('Processing failed. Submit a new task to retry.', True),
+          'coverage_budget_exceeded': ('Distinct views exceed this service\'s coverage budget. Split the scan or use an enabled higher capacity tier.', False),
           'invalid_scan': ('The scan is missing valid model or camera data.', False)}
 
 
@@ -80,6 +83,18 @@ def dto(server, job):
             code = 'processing_failed'
         message, retryable = ERRORS[code]
         error = {'code': code, 'message': message, 'retryable': retryable}
+        if code == 'coverage_budget_exceeded':
+            try:
+                details = json.loads(job.get('error') or '{}').get('details', {})
+                # Publish numeric resource diagnostics only, never server paths.
+                details = {key: value for key, value in details.items() if key in {
+                    'originalFrameCount', 'receivedFrameCount', 'duplicateFrameCount', 'selectedFrameCount',
+                    'maximumFrames', 'maximumTotalPixels', 'minimumLongEdge', 'minimumRequiredPixels'}
+                    and isinstance(value, int) and not isinstance(value, bool) and value >= 0}
+                if details:
+                    error['details'] = details
+            except (ValueError, TypeError, AttributeError):
+                pass
     elif status == 'completed' and job.get('result_sha256') and job.get('result_size') is not None:
         result = {'format': 'area-target-bundle', 'filename': f"asset_bundle_{job['id']}.zip",
                   'size_bytes': int(job['result_size']), 'sha256': job['result_sha256'],
@@ -135,7 +150,13 @@ def register_mobile_api(app, server):
 
     @app.get('/api/v1/processing-requirements')
     def requirements():
-        return jsonify(processing_requirements(maximum_request_bytes=app.config['MAX_CONTENT_LENGTH']))
+        if set(request.args) - {'policy'} or len(request.args.getlist('policy')) > 1:
+            raise APIError(400, 'invalid_request', 'Use a single supported preparation policy.')
+        try:
+            return jsonify(processing_requirements(maximum_request_bytes=app.config['MAX_CONTENT_LENGTH'],
+                                                  policy=request.args.get('policy', POLICY)))
+        except PreparationError as error:
+            raise APIError(400, error.code, str(error)) from error
 
     @app.post('/api/v1/jobs')
     def submit():
@@ -183,9 +204,14 @@ def register_mobile_api(app, server):
                     manifest = load_metadata(manifest_path)
                     if manifest.get('clientPreparation') is not None:
                         dimensions = [image_dimensions(contained_path(scan_root, frame['path'], require_file=True)) for frame in frames]
-                        validate_client_preparation(manifest['clientPreparation'], frame_count=len(frames),
+                        client_metadata = validate_client_preparation(manifest['clientPreparation'], frame_count=len(frames),
                                                     actual_pixels=sum(w * h for w, h in dimensions),
-                                                    maximum_long_edge=max(max(size) for size in dimensions))
+                                                    maximum_long_edge=max(max(size) for size in dimensions),
+                                                    dimensions=dimensions)
+                        if client_metadata['policy'] == POLICY_V2 and client_metadata['profile'] != profile:
+                            raise ValueError('Client preparation profile does not match submission')
+            except PreparationError as error:
+                raise APIError(400, error.code, ERRORS.get(error.code, (str(error), False))[0]) from error
             except (ValueError, OSError, TypeError, KeyError, RecursionError) as error:
                 raise APIError(400, 'invalid_scan', 'The scan must contain a valid model, keyframe images, and camera data.') from error
             shutil.rmtree(extract_dir)

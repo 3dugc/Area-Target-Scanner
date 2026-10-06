@@ -104,7 +104,7 @@ def validate_model_references(scan_root, *, textured):
 
 def validate_scan(scan_root, uv_unwrap=False, *, prepare_uv=False, max_total_frame_pixels=MAX_TOTAL_FRAME_PIXELS):
     """Validate camera data and all actual resources before admitting mobile work."""
-    from processing_pipeline.optimized_pipeline import _read_scan_manifest, arkit_column_major_to_matrix
+    from processing_pipeline.optimized_pipeline import _read_scan_manifest, _source_image_id, arkit_column_major_to_matrix
 
     validate_model_references(scan_root, textured=not uv_unwrap)
     manifest_path = Path(scan_root) / 'manifest.json'
@@ -124,10 +124,12 @@ def validate_scan(scan_root, uv_unwrap=False, *, prepare_uv=False, max_total_fra
         if intrinsics_path.is_file():
             intrinsics = load_metadata(contained_path(scan_root, 'intrinsics.json', require_file=True))
         normalized = []
-        for frame in source_frames:
+        source_ids = set()
+        for ordinal, frame in enumerate(source_frames):
             if not isinstance(frame, dict):
                 raise ValueError('Camera frames must be objects')
-            normalized.append({'path': frame.get('imageFile'), 'pose': arkit_column_major_to_matrix(frame.get('transform')),
+            normalized.append({'path': frame.get('imageFile'), 'source_image_id': _source_image_id(frame, ordinal, source_ids),
+                               'pose': arkit_column_major_to_matrix(frame.get('transform')),
                                'intrinsics': frame.get('intrinsics') or intrinsics})
     if len(normalized) > MAX_FRAMES:
         raise ValueError('Scan exceeds the frame limit')

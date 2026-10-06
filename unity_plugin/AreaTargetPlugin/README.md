@@ -254,11 +254,14 @@ public class ARAreaTarget : MonoBehaviour
 
 ```bash
 # macOS (arm64)
-cd native_visual_localizer
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/path/to/opencv
-make -j$(sysctl -n hw.ncpu)
+bash tools/opencv5/build_dependency.sh
+OpenCV_DIR="$PWD/build/opencv5/install/lib/cmake/opencv5" \
+  bash native_visual_localizer/build_macos.sh --deploy
+# iPhoneOS arm64：包含 OpenCV 5 移入 contrib 的 AKAZE
+bash native_visual_localizer/build_ios.sh --deploy
 ```
+
+项目固定 OpenCV / contrib 5.0.0，算法参数和 C 接口保持不变。默认构建输出隔离目录；`--deploy` 将重建产物复制到当前分支的 Unity 插件目录。旧 OpenCV 4 wrapper 不能与新框架混装。构建/集成检查和待完成的真实场景、设备验收见[升级记录](../../docs/opencv5-upgrade-validation.md)。
 
 ### 阶段 1 验证
 

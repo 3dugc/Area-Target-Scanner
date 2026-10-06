@@ -128,3 +128,32 @@ private final class ControlledExporter: ScanExporting {
         return URL(fileURLWithPath: scanDirectory.path + (format == .immersal ? "_immersal.zip" : ".zip"))
     }
 }
+
+final class ScanHistoryIdentityTests: XCTestCase {
+    func testDefaultMapNamesMeetCloudContractAndDistinguishDifferentScans() {
+        let directories = ["scan_20261005_180000", "scan_20261005_180001", "scan_20251231_235959"]
+        let names = directories.map { ScanHistoryItem.defaultImmersalMapName(for: $0) }
+        XCTAssertEqual(Set(names).count, directories.count)
+        for (directory, name) in zip(directories, names) {
+            XCTAssertTrue((1...24).contains(name.utf8.count))
+            XCTAssertTrue(name.utf8.allSatisfy(ImmersalJobStore.isAlphanumeric))
+            XCTAssertEqual(name, ScanHistoryItem.defaultImmersalMapName(for: directory))
+        }
+    }
+
+    func testMalformedDirectoriesCannotBecomeUnsafeCloudNames() {
+        for directory in ["", "../scan_20261005_180000", "scan_20260230_180000", "scan_٢٠٢٦١٠٠٥_١٨٠٠٠٠", "scan_20261005_180000_suffix"] {
+            let name = ScanHistoryItem.defaultImmersalMapName(for: directory)
+            XCTAssertTrue((1...24).contains(name.utf8.count))
+            XCTAssertTrue(name.utf8.allSatisfy(ImmersalJobStore.isAlphanumeric))
+            XCTAssertEqual(ScanHistoryItem.displayName(for: directory), "扫描记录")
+        }
+    }
+
+    func testDisplayNamePreservesFullCaptureTimeAndDoesNotExposeDirectoryPrefix() {
+        let name = ScanHistoryItem.displayName(for: "scan_20261005_180001")
+        XCTAssertTrue(name.contains("2026-10-05"))
+        XCTAssertTrue(name.contains("18:00:01"))
+        XCTAssertFalse(name.contains("scan_"))
+    }
+}

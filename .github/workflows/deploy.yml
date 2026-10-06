@@ -97,6 +97,12 @@ jobs:
             tests/test_scan_security.py \
             tests/test_scan_preparation.py \
             tests/test_mobile_scan_preparation.py \
+            tests/test_keyframe_quality.py \
+            tests/test_frame_selection.py \
+            tests/test_feature_budget.py \
+            tests/test_scan_preparation_v2.py \
+            tests/test_mobile_preparation_v2.py \
+            tests/test_critical_frame_protection.py \
             tests/test_mobile_feature_limits.py \
             tests/test_uv_frame_calibration.py \
             tests/test_uv_texture_memory.py \
@@ -272,6 +278,13 @@ jobs:
           . "$RUNNER_TEMP/area-target-smoke.env"
           set +a
           python tools/deployment/smoke.py --url http://127.0.0.1:15000 --large-scan --timeout 900
+
+      - name: Verify v2 deduplication and critical-frame protection
+        run: |
+          set -a
+          . "$RUNNER_TEMP/area-target-smoke.env"
+          set +a
+          python tools/deployment/smoke.py --url http://127.0.0.1:15000 --preparation-v2 --timeout 300
 
       - name: Login to Tencent Container Registry
         if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/publish' }}

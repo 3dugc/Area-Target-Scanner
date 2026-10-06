@@ -6,6 +6,9 @@ import os
 import zipfile
 from datetime import datetime, timedelta, timezone
 
+import cv2
+import pytest
+
 
 def _job(job_id, **overrides):
     job = {
@@ -205,6 +208,53 @@ def test_upload_reuses_completed_result_by_input_hash(monkeypatch, tmp_path):
     assert stored_job["source_job_id"] == "source"
     assert submitted == []
     assert not (upload_dir / job_id).exists()
+
+
+@pytest.mark.parametrize("previous_producer", ["legacy-v2", "4.13.0"])
+def test_upload_does_not_reuse_previous_opencv_producer(
+    monkeypatch, tmp_path, previous_producer
+):
+    app_module, store, upload_dir, output_dir = _isolate_app_store(monkeypatch, tmp_path)
+    submitted = []
+    monkeypatch.setattr(app_module, "_submit_pipeline_job", lambda *args: submitted.append(args))
+    # Even a deployment retaining the old operator-controlled cache namespace
+    # must distinguish the feature producer that generated its saved bundle.
+    monkeypatch.setattr(app_module, "PIPELINE_CACHE_VERSION", "v2")
+    zip_bytes = _zip_bytes().getvalue()
+    zip_hash = hashlib.sha256(zip_bytes).hexdigest()
+    if previous_producer == "legacy-v2":
+        previous_hash = hashlib.sha256(f"{zip_hash}:fast:0:v2".encode()).hexdigest()
+    else:
+        monkeypatch.setattr(cv2, "__version__", previous_producer)
+        previous_hash = app_module._make_input_hash(zip_hash, "fast", False)
+    result_zip = output_dir / "previous.zip"
+    result_zip.write_text("old feature bundle")
+    store.create(_job(
+        "previous",
+        status="completed",
+        progress=100,
+        result_zip=str(result_zip),
+        input_hash=previous_hash,
+        finished_at=datetime.now(timezone.utc).isoformat(),
+    ))
+    monkeypatch.setattr(cv2, "__version__", "5.0.0")
+
+    response = app_module.app.test_client().post(
+        "/api/upload",
+        data={"file": (io.BytesIO(zip_bytes), "scan.zip")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    job_id = response.get_json()["job_id"]
+    job = store.get(job_id)
+    assert job["status"] == "queued"
+    assert job["source_job_id"] is None
+    assert job["result_zip"] is None
+    assert len(submitted) == 1
+    assert submitted[0][0] == job_id
+    assert (upload_dir / job_id / "upload.zip").is_file()
+    assert result_zip.read_text() == "old feature bundle"
 
 
 def test_submit_pipeline_uses_executor(monkeypatch):

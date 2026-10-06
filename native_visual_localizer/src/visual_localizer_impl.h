@@ -1,10 +1,21 @@
 #pragma once
 #include <opencv2/core.hpp>
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/features.hpp>
+#include <opencv2/xfeatures2d.hpp>
+#else
 #include <opencv2/features2d.hpp>
+#endif
 #include <deque>
 #include <unordered_map>
 #include <vector>
 #include "visual_localizer.h"
+
+#if CV_VERSION_MAJOR >= 5
+using VisualLocalizerAkaze = cv::xfeatures2d::AKAZE;
+#else
+using VisualLocalizerAkaze = cv::AKAZE;
+#endif
 
 struct VocabWord {
     int word_id;
@@ -86,7 +97,7 @@ private:
     cv::Mat last_scan_from_camera_;  // 4×4 CV_32F
 
     // AKAZE fallback 相关成员
-    cv::Ptr<cv::AKAZE> akaze_;
+    cv::Ptr<VisualLocalizerAkaze> akaze_;
     cv::Ptr<cv::BFMatcher> akaze_matcher_;  // BFMatcher(NORM_HAMMING)
 
     struct AkazeKeyframeData {

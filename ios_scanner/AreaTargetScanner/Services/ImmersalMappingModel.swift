@@ -24,6 +24,9 @@ final class ImmersalMappingModel: ObservableObject {
     @Published var errorMessage: String?
 
     var isLoggedIn: Bool { credential != nil }
+    /// Local metadata remains visible without service authentication. Cloud actions
+    /// continue to use `jobs`, which is scoped to the current credential's user ID.
+    var localJobs: [ImmersalMappingJob] { allJobs.sorted { $0.createdAt > $1.createdAt } }
     private var credential: ImmersalCredential?
     private var allJobs: [ImmersalMappingJob] = []
     private let api: ImmersalAPI
@@ -157,9 +160,12 @@ final class ImmersalMappingModel: ObservableObject {
         if let id = activeJobID {
             do {
                 try update(id) { job in
-                    job.phase = job.pendingOperation == .construct ? .constructionUncertain :
-                        (job.pendingOperation == nil ? .paused : .captureUncertain)
-                    job.message = job.pendingOperation == nil ? "上传已暂停，可稍后继续。" : "请求已发出但结果尚未确认，不能直接重试。"
+                    // A workspace conflict still needs a fresh read and explicit clear confirmation.
+                    if job.pendingOperation == .construct { job.phase = .constructionUncertain }
+                    else if job.pendingOperation != nil { job.phase = .captureUncertain }
+                    else if job.phase != .workspaceConflict { job.phase = .paused }
+                    job.message = job.phase == .workspaceConflict ? "操作已暂停，请重新检查云端工作区并确认后继续。" :
+                        (job.pendingOperation == nil ? "上传已暂停，可稍后继续。" : "请求已发出但结果尚未确认，不能直接重试。")
                 }
             } catch { errorMessage = error.localizedDescription }
         }
@@ -239,8 +245,10 @@ final class ImmersalMappingModel: ObservableObject {
                 guard operationID == operation else { return }
                 do {
                     try update(jobID) { job in
-                        job.phase = job.pendingOperation == .construct ? .constructionUncertain :
-                            (job.pendingOperation == nil ? .paused : .captureUncertain)
+                        // Keep the confirmation boundary when preparation or status fails before upload.
+                        if job.pendingOperation == .construct { job.phase = .constructionUncertain }
+                        else if job.pendingOperation != nil { job.phase = .captureUncertain }
+                        else if job.phase != .workspaceConflict { job.phase = .paused }
                         job.message = job.phase == .constructionUncertain ? "建图提交结果尚未确认，将查询云端任务，不会重复提交。" :
                             (job.phase == .captureUncertain ? "上传请求结果尚未确认。请确认工作区后清空重传，避免重复图片。" : error.localizedDescription)
                     }

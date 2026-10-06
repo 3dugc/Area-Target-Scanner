@@ -6,3 +6,6 @@
 //
 
 #import "XAtlasBridge.h"
+
+// Shared grayscale risk kernel; no localization framework dependency.
+#import "area_target_runtime.h"

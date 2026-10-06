@@ -18,6 +18,42 @@ from processing_pipeline.feature_db import (
 from processing_pipeline.models import FeatureDatabase, KeyframeData
 
 
+@pytest.mark.parametrize("count", [81, 100, 500])
+def test_budgeted_database_round_trip_keeps_all_views_and_final_bow(monkeypatch, tmp_path, count):
+    import open3d as o3d
+    from processing_pipeline.feature_extraction import build_feature_database, _hamming_word_assignment
+    from tests.test_mobile_feature_limits import install_budget_detectors, budget_images
+
+    install_budget_detectors(monkeypatch)
+    original = build_feature_database(
+        budget_images(count), o3d.geometry.TriangleMesh.create_box(),
+        mobile_feature_budget="quality", bow_k=2,
+    )
+    path = tmp_path / f"budget-{count}.db"
+    save_feature_database(original, str(path))
+    loaded = load_feature_database(str(path))
+    assert len(loaded.keyframes) == count
+    assert [frame.image_id for frame in loaded.keyframes] == [frame.image_id for frame in original.keyframes]
+    assert sum(len(frame.descriptors) for frame in loaded.keyframes) == 160_000
+    assert sum(len(frame.akaze_descriptors) for frame in loaded.keyframes) == 40_000
+    np.testing.assert_array_equal(loaded.vocabulary, original.vocabulary)
+    np.testing.assert_array_equal(loaded.global_descriptors, original.global_descriptors)
+    with sqlite3.connect(path) as connection:
+        idf = np.array([row[0] for row in connection.execute("SELECT idf_weight FROM vocabulary ORDER BY word_id")])
+    for old, new in zip(original.keyframes, loaded.keyframes):
+        np.testing.assert_array_equal(old.descriptors, new.descriptors)
+        np.testing.assert_array_equal(old.akaze_descriptors, new.akaze_descriptors)
+        assert old.keypoints == new.keypoints and old.points_3d == new.points_3d
+        assert old.akaze_keypoints == new.akaze_keypoints and old.akaze_points_3d == new.akaze_points_3d
+        labels = _hamming_word_assignment(new.descriptors, loaded.vocabulary)
+        bow = np.bincount(labels, minlength=len(idf)) * idf
+        norm = np.linalg.norm(bow)
+        if norm > 1e-9:
+            bow /= norm
+        index = (new.image_id - 7) // 3
+        np.testing.assert_allclose(loaded.global_descriptors[index], bow, atol=1e-10)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -8,6 +8,13 @@ from typing import List
 import numpy as np
 import open3d as o3d
 
+from .feature_budget import (
+    MobileFeatureBudget,
+    balanced_quotas,
+    resolve_mobile_feature_budget,
+    validate_mobile_feature_database,
+)
+
 from .models import (
     FeatureDatabase,
     KeyframeData,
@@ -97,6 +104,19 @@ def _limit_detected_features(keypoints, descriptors, maximum):
     return [keypoints[index] for index in selected], descriptors[selected]
 
 
+def _retain_response_ranked_features(keyframe, responses, quota, *, akaze=False):
+    """Trim aligned geometry/descriptors only when the balanced quota is smaller."""
+    prefix = "akaze_" if akaze else ""
+    descriptors = getattr(keyframe, prefix + "descriptors")
+    if descriptors is None or len(descriptors) <= quota:
+        return
+    selected = sorted(range(len(descriptors)), key=lambda index: -responses[index])[:quota]
+    setattr(keyframe, prefix + "descriptors", descriptors[selected])
+    for name in ("keypoints", "points_3d"):
+        values = getattr(keyframe, prefix + name)
+        setattr(keyframe, prefix + name, [values[index] for index in selected])
+
+
 def build_feature_database(
     images: List[dict],
     mesh: o3d.geometry.TriangleMesh,
@@ -111,6 +131,8 @@ def build_feature_database(
     kmeans_max_iter: int = 300,
     assignment_batch_size: int = 2048,
     max_akaze_features: int | None = None,
+    keyframe_selection: str = "even",
+    mobile_feature_budget: str | MobileFeatureBudget | None = None,
 ) -> FeatureDatabase:
     """Extract ORB features from keyframes and build a visual feature database.
 
@@ -119,7 +141,8 @@ def build_feature_database(
     correspondences. Keyframes with fewer than 20 valid features are skipped.
 
     When ``extract_akaze`` is True, additionally extracts AKAZE features for
-    each keyframe using ``cv2.AKAZE_create()``, and obtains 3D points via the
+    each keyframe using the OpenCV AKAZE factory (xfeatures2d in OpenCV 5),
+    and obtains 3D points via the
     same ray-mesh intersection pipeline. AKAZE data is stored in the
     KeyframeData's ``akaze_*`` fields.
 
@@ -138,6 +161,9 @@ def build_feature_database(
             for each keyframe and store in akaze_* fields.
         max_akaze_features: Optional per-keyframe response-ranked AKAZE limit.
             None preserves legacy extraction; the explicit mobile producer uses 500.
+        mobile_feature_budget: Optional 'quality' / 'fast' mobile budget or its
+            fixed MobileFeatureBudget configuration. Quotas apply after geometry
+            eligibility and before vocabulary training, without dropping frames.
 
     Returns:
         Populated feature database with keyframes, vocabulary (uint8 medoids),
@@ -150,6 +176,14 @@ def build_feature_database(
     import numpy as np
 
     logger = logging.getLogger(__name__)
+    feature_budget = resolve_mobile_feature_budget(mobile_feature_budget)
+    if feature_budget is not None:
+        if max_keyframes is not None or keyframe_selection != "even":
+            raise ValueError("Mobile feature budgeting requires authoritative prepared frames")
+        orb_nfeatures = feature_budget.orb_per_frame
+        extract_akaze = feature_budget.akaze_per_frame > 0
+        max_akaze_features = feature_budget.akaze_per_frame or None
+        bow_k = min(bow_k, feature_budget.vocabulary_maximum)
 
     try:
         cv2.setNumThreads(1)
@@ -159,11 +193,27 @@ def build_feature_database(
     if max_akaze_features is not None and (not isinstance(max_akaze_features, int)
                                          or isinstance(max_akaze_features, bool) or max_akaze_features <= 0):
         raise ValueError("max_akaze_features must be a positive integer or None")
-    selected_images = _limit_keyframes_evenly(images, max_keyframes)
+    selection_report = None
+    if keyframe_selection == "even":
+        selected_images = _limit_keyframes_evenly(images, max_keyframes)
+    else:
+        from processing_pipeline.keyframe_quality import SELECTION_VERSION, select_quality_keyframes
+        if keyframe_selection != SELECTION_VERSION:
+            raise ValueError("Unsupported keyframe selection version")
+        selected_images, selection_report = select_quality_keyframes(images, max_keyframes)
+        logger.info("Keyframe selection: %s", selection_report)
+
+    if feature_budget is not None:
+        selected_images.sort(key=lambda item: item[1].get("source_image_id", item[0]))
 
     # --- Step 1: Create ORB detector (+ AKAZE if requested) ---
     orb = cv2.ORB_create(nfeatures=orb_nfeatures)
-    akaze = cv2.AKAZE_create() if extract_akaze else None
+    akaze = None
+    if extract_akaze:
+        akaze_factory = getattr(cv2, "AKAZE_create", None)
+        if akaze_factory is None:
+            akaze_factory = cv2.xfeatures2d.AKAZE_create
+        akaze = akaze_factory()
 
     # --- Step 2: Prepare ray-casting scene from mesh ---
     scene = o3d.t.geometry.RaycastingScene()
@@ -173,6 +223,10 @@ def build_feature_database(
     scene.add_triangles(mesh_t)
 
     keyframes: List[KeyframeData] = []
+    orb_responses = []
+    akaze_responses = []
+    insufficient_indices = []
+    unreadable_indices = []
 
     for idx, img_info in selected_images:
         img_path = img_info["path"]
@@ -181,7 +235,10 @@ def build_feature_database(
         # Load image in grayscale for ORB
         img_gray = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if img_gray is None:
+            if feature_budget is not None:
+                raise ValueError(f"Prepared image could not be read: {img_path}")
             logger.warning("Could not read image: %s, skipping.", img_path)
+            unreadable_indices.append(img_info.get("source_image_id", idx))
             continue
 
         h, w = img_gray.shape[:2]
@@ -195,6 +252,7 @@ def build_feature_database(
             logger.info(
                 "No features detected in image %d (%s), skipping.", idx, img_path
             )
+            insufficient_indices.append(img_info.get("source_image_id", idx))
             continue
 
         # --- Step 2b: Resolve manifest per-frame intrinsics or legacy fallback ---
@@ -204,6 +262,7 @@ def build_feature_database(
         valid_keypoints: List[tuple[float, float]] = []
         valid_descriptors: List[np.ndarray] = []
         valid_points_3d: List[tuple[float, float, float]] = []
+        valid_responses = []
 
         # Build rays for all keypoints at once for efficiency
         rays_list = []
@@ -245,6 +304,7 @@ def build_feature_database(
 
             valid_keypoints.append((kp.pt[0], kp.pt[1]))
             valid_descriptors.append(descriptors[j])
+            valid_responses.append(kp.response)
             valid_points_3d.append(
                 (float(hit_point[0]), float(hit_point[1]), float(hit_point[2]))
             )
@@ -255,18 +315,21 @@ def build_feature_database(
                 "Image %d (%s): only %d valid features (< 20), skipping.",
                 idx, img_path, len(valid_keypoints),
             )
+            insufficient_indices.append(img_info.get("source_image_id", idx))
             continue
 
         # Build KeyframeData
         desc_array = np.array(valid_descriptors, dtype=np.uint8)
         keyframe = KeyframeData(
-            image_id=idx,
+            image_id=img_info.get("source_image_id", idx),
             keypoints=valid_keypoints,
             descriptors=desc_array,
             points_3d=valid_points_3d,
             camera_pose=pose,
         )
         keyframes.append(keyframe)
+        orb_responses.append(valid_responses)
+        akaze_responses.append([])
         logger.info(
             "Image %d (%s): %d valid features added to database.",
             idx, img_path, len(valid_keypoints),
@@ -304,6 +367,7 @@ def build_feature_database(
                 akaze_valid_kps: List[tuple[float, float]] = []
                 akaze_valid_descs: List[np.ndarray] = []
                 akaze_valid_pts3d: List[tuple[float, float, float]] = []
+                akaze_valid_responses = []
 
                 for j, kp in enumerate(akaze_kps):
                     if np.isinf(akaze_t_hit[j]) or akaze_t_hit[j] <= 0:
@@ -315,6 +379,7 @@ def build_feature_database(
 
                     akaze_valid_kps.append((kp.pt[0], kp.pt[1]))
                     akaze_valid_descs.append(akaze_descs[j])
+                    akaze_valid_responses.append(kp.response)
                     akaze_valid_pts3d.append(
                         (float(hit_point[0]), float(hit_point[1]), float(hit_point[2]))
                     )
@@ -325,6 +390,7 @@ def build_feature_database(
                         akaze_valid_descs, dtype=np.uint8
                     )
                     keyframe.akaze_points_3d = akaze_valid_pts3d
+                    akaze_responses[-1] = akaze_valid_responses
                     logger.info(
                         "Image %d (%s): %d valid AKAZE features extracted.",
                         idx, img_path, len(akaze_valid_kps),
@@ -350,6 +416,32 @@ def build_feature_database(
             "Feature database is empty: no keyframes with sufficient features (>= 20) "
             "were found in any input image."
         )
+
+    if feature_budget is not None:
+        orb_quotas = balanced_quotas(
+            [len(frame.descriptors) for frame in keyframes], feature_budget.orb_total,
+            feature_budget.orb_per_frame, minimum=20,
+        )
+        akaze_quotas = balanced_quotas(
+            [0 if frame.akaze_descriptors is None else len(frame.akaze_descriptors)
+             for frame in keyframes], feature_budget.akaze_total,
+            feature_budget.akaze_per_frame or 1,
+        )
+        for i, frame in enumerate(keyframes):
+            _retain_response_ranked_features(frame, orb_responses[i], orb_quotas[i])
+            _retain_response_ranked_features(frame, akaze_responses[i], akaze_quotas[i], akaze=True)
+        selection_report = dict(selection_report or {"version": "prepared-coverage-v2"})
+        selection_report.update({
+            "featureBudgetVersion": "balanced-mobile-features-v1",
+            "featureBudgetProfile": feature_budget.profile,
+            "inputFrameCount": len(images),
+            "selectedFrameCount": len(selected_images),
+            "retainedIndices": [frame.image_id for frame in keyframes],
+            "insufficientFeatureFrameCount": len(insufficient_indices),
+            "insufficientFeatureFrameIndices": insufficient_indices,
+            "unreadableFrameCount": len(unreadable_indices),
+            "unreadableFrameIndices": unreadable_indices,
+        })
 
     # --- Step 3: Build visual Bag-of-Words (BoW) vocabulary ---
     vocabulary = None
@@ -464,8 +556,13 @@ def build_feature_database(
                 n_keyframes, k,
             )
 
-    return FeatureDatabase(
+    database = FeatureDatabase(
         keyframes=keyframes,
         vocabulary=vocabulary,
         global_descriptors=global_descriptors,
+        selection_report=selection_report,
     )
+    if feature_budget is not None:
+        selection_report.update(validate_mobile_feature_database(database, feature_budget))
+        logger.info("Mobile feature budget: %s", selection_report)
+    return database

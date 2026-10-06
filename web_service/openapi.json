@@ -347,7 +347,7 @@
     "/api/v1/processing-requirements": {
       "get": {
         "summary": "Read versioned client scan preparation requirements",
-        "description": "Public configuration, no task token required. Preserve the original scan and prepare a derivative ZIP. If this known policy is unavailable, raw uploads remain supported; the server independently validates and prepares inputs.",
+        "description": "Versioned server-authoritative requirements. Without policy returns v1; explicitly request mobile-scan-preparation-v2 for coverage-preserving preparation. Requires service login.",
         "security": [],
         "responses": {
           "200": {
@@ -359,8 +359,33 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Unknown preparation policy or invalid policy query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "policy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mobile-scan-preparation-v1",
+                "mobile-scan-preparation-v2"
+              ],
+              "default": "mobile-scan-preparation-v1"
+            }
+          }
+        ]
       }
     },
     "/api/auth/login": {
@@ -497,6 +522,14 @@
           },
           "retryable": {
             "type": "boolean"
+          },
+          "details": {
+            "type": "object",
+            "description": "Optional numeric resource diagnostics for coverage_budget_exceeded.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         }
       },
@@ -663,11 +696,19 @@
           },
           "policy": {
             "type": "string",
-            "example": "mobile-scan-preparation-v1"
+            "example": "mobile-scan-preparation-v1",
+            "enum": [
+              "mobile-scan-preparation-v1",
+              "mobile-scan-preparation-v2"
+            ]
           },
           "policyVersion": {
             "type": "integer",
-            "example": 1
+            "example": 1,
+            "enum": [
+              1,
+              2
+            ]
           },
           "profiles": {
             "type": "object",
@@ -698,6 +739,12 @@
                     "type": "integer",
                     "minimum": 1,
                     "example": 200000000
+                  },
+                  "minimumLongEdge": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1024,
+                    "description": "V2 floor; smaller source images are not enlarged or further reduced."
                   }
                 }
               },
@@ -723,6 +770,12 @@
                     "type": "integer",
                     "minimum": 1,
                     "example": 200000000
+                  },
+                  "minimumLongEdge": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "example": 1024,
+                    "description": "V2 floor; smaller source images are not enlarged or further reduced."
                   }
                 }
               }
@@ -783,6 +836,122 @@
                 "example": 8388608
               }
             }
+          },
+          "capacityTier": {
+            "type": "integer",
+            "enum": [
+              100,
+              500
+            ],
+            "description": "Required for v2. 500 is opt-in after independent deployment acceptance."
+          },
+          "keyframeSelection": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "maximumSourceQualityPixels": {
+                "type": "integer",
+                "example": 2000000000
+              }
+            }
+          },
+          "criticalFrameProtection": {
+            "$ref": "#/components/schemas/CriticalFrameProtectionCapability",
+            "description": "Optional v2 capability. Absent for v1; ordinary maximumLongEdge remains 1600."
+          }
+        }
+      },
+      "CriticalFrameProtectionCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "riskVersion",
+          "maximumProtectedFrames",
+          "maximumProtectedLongEdge",
+          "sharpnessThreshold",
+          "contrastThreshold"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "critical-frame-protection-v1"
+            ]
+          },
+          "riskVersion": {
+            "type": "string",
+            "enum": [
+              "gray-quality-risk-v1"
+            ]
+          },
+          "maximumProtectedFrames": {
+            "type": "integer",
+            "enum": [
+              8
+            ]
+          },
+          "maximumProtectedLongEdge": {
+            "type": "integer",
+            "enum": [
+              1920
+            ]
+          },
+          "sharpnessThreshold": {
+            "type": "number",
+            "enum": [
+              16
+            ]
+          },
+          "contrastThreshold": {
+            "type": "number",
+            "enum": [
+              20
+            ]
+          }
+        }
+      },
+      "CriticalFrameProtectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "riskVersion",
+          "protectedIndices",
+          "candidateFrameCount"
+        ],
+        "description": "Optional v2 clientPreparation extension inside the scan ZIP. Ordinary raster long edge is at most 1600; only the listed actual source ordinals may reach 1920. Source analysis remains bounded at 2B pixels. This grayscale proxy does not predict the 20-correspondence geometry gate.",
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "critical-frame-protection-v1"
+            ]
+          },
+          "riskVersion": {
+            "type": "string",
+            "enum": [
+              "gray-quality-risk-v1"
+            ]
+          },
+          "protectedIndices": {
+            "type": "array",
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9999
+            },
+            "description": "Sorted source ordinals, each less than the actual uploaded frame count. No source view is removed by the risk proxy."
+          },
+          "candidateFrameCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "At least the protected count and no greater than the actual source frame count."
           }
         }
       }
