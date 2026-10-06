@@ -1,10 +1,12 @@
 """UV rendering must retain bounded decoded frames and preserve global hole filling."""
 import gc
 import hashlib
+import tracemalloc
 import weakref
 
 import numpy as np
 from PIL import Image
+import pytest
 
 from processing_pipeline import uv_unwrap as uv
 
@@ -26,7 +28,8 @@ def _scene(tmp_path, count=1, size=(64, 48)):
     for index in range(count):
         x = 4 * index
         name = f"frame-{index}.png"
-        Image.new("RGB", size, (index + 1, 125, 249 - index)).save(tmp_path / name)
+        color = ((index + 1) % 256, 125 + index // 256, (249 - index) % 256)
+        Image.new("RGB", size, color).save(tmp_path / name)
         transform = np.eye(4)
         transform[0, 3] = x
         frames.append(dict(imageFile=name, transform=transform.flatten(order="F").tolist(),
@@ -40,6 +43,72 @@ def _scene(tmp_path, count=1, size=(64, 48)):
         uvs.extend([[left, bottom], [right, bottom], [left, top]])
     return (np.array(vertices), np.array(uvs), np.array(faces), str(tmp_path),
             _intrinsics(width, height), {"frames": frames})
+
+
+class _TrackedFaceArray(np.ndarray):
+    """Check input face views before any old dense broadcast can allocate memory."""
+
+    def __new__(cls, values, face_views):
+        result = np.asarray(values).view(cls)
+        result.face_views = face_views
+        return result
+
+    def __array_finalize__(self, source):
+        self.face_views = getattr(source, "face_views", None)
+
+    def __getitem__(self, key):
+        result = super().__getitem__(key)
+        if isinstance(result, np.ndarray) and result.ndim >= 2:
+            self.face_views.append(result.shape)
+            assert result.shape[0] <= 4096, "Frame assignment must process at most 4096 faces at once"
+        return result
+
+
+@pytest.mark.parametrize("frame_count", [100, 500])
+def test_assignment_workspace_is_bounded_across_multiple_face_chunks(frame_count):
+    face_count = 8197
+    view_indices = np.arange(face_count) % frame_count
+    centers = np.column_stack([view_indices * 4., np.zeros(face_count), -np.ones(face_count)])
+    normals = np.tile([0., 0., 1.], (face_count, 1))
+    cameras = []
+    for index in range(frame_count):
+        pose = np.eye(4)
+        pose[0, 3] = index * 4.
+        cameras.append(pose)
+    face_views = []
+    tracked_centers = _TrackedFaceArray(centers, face_views)
+    tracked_normals = _TrackedFaceArray(normals, face_views)
+    tracemalloc.start()
+    try:
+        actual = uv._vectorized_assign_frames(tracked_centers, tracked_normals, cameras, _intrinsics(64, 48))
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    np.testing.assert_array_equal(actual, view_indices)
+    assert face_views and max(shape[0] for shape in face_views) <= 4096
+    assert any(shape[0] == 5 for shape in face_views), "Final partial face chunk must be processed"
+    # NumPy allocations are traced, including ufunc/broadcast temporaries. A dense
+    # 8197 x 100 score array alone exceeds this whole assignment workspace bound.
+    assert peak_bytes < 8 * 1024 * 1024
+
+
+@pytest.mark.parametrize("frame_count", [100, 500])
+def test_renderer_really_samples_all_hundred_and_five_hundred_distinct_views(tmp_path, monkeypatch, frame_count):
+    scene = _scene(tmp_path, count=frame_count)
+    actual_array = np.array
+    decoded_colors = set()
+
+    def record_decodes(value, *args, **kwargs):
+        result = actual_array(value, *args, **kwargs)
+        if isinstance(value, Image.Image):
+            decoded_colors.add(tuple(result[0, 0]))
+        return result
+
+    monkeypatch.setattr(uv.np, "array", record_decodes)
+    # Distinct separated cameras and distinct chart colors must all reach the atlas.
+    atlas = uv.render_texture_atlas(*scene, atlas_size=512)
+    assert len(decoded_colors) == frame_count
+    assert len(np.unique(atlas.reshape(-1, 3), axis=0)) == frame_count
 
 
 def test_renderer_computes_global_nearest_indices_only_once(tmp_path, monkeypatch):

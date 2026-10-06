@@ -90,6 +90,15 @@ def _finite_intrinsic(value: object, name: str) -> float:
     return number
 
 
+def _source_image_id(frame, ordinal, seen):
+    value = frame.get("index", ordinal)
+    if (isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2147483647
+            or value in seen):
+        raise ValueError("Frame source index must be a unique nonnegative int32")
+    seen.add(value)
+    return value
+
+
 def _read_scan_manifest(manifest_path: str) -> list[dict]:
     """Read schema-v1 scanner metadata into normalized processing frames."""
     manifest = load_metadata(manifest_path)
@@ -110,9 +119,11 @@ def _read_scan_manifest(manifest_path: str) -> list[dict]:
         raise ValueError("scan manifest must contain at least one frame")
 
     images: list[dict] = []
+    source_ids = set()
     for index, frame in enumerate(frames):
         if not isinstance(frame, dict):
             raise ValueError(f"frames[{index}] must be an object")
+        source_id = _source_image_id(frame, index, source_ids)
 
         image_file = frame.get("imageFile")
         if not isinstance(image_file, str) or not image_file:
@@ -152,6 +163,7 @@ def _read_scan_manifest(manifest_path: str) -> list[dict]:
         images.append(
             {
                 "path": image_file,
+                "source_image_id": source_id,
                 "pose": arkit_column_major_to_matrix(frame.get("transform")),
                 "intrinsics": intrinsics,
                 "orientation": orientation,
@@ -175,9 +187,10 @@ class OptimizedPipeline:
         optimizer_url: Base URL of the 3D-Model-Optimizer service.
         optimizer_preset: Optimization preset passed to the optimizer
             (e.g. ``"balanced"``).
-        mobile_feature_limits: Explicitly bound native mobile databases to 80
-            keyframes and (for quality) 500 AKAZE features per frame. Legacy CLI
-            defaults remain unchanged; mobile workers opt in.
+        mobile_feature_limits: Apply the explicit mobile reader feature limits.
+        mobile_preparation_policy: v1 preserves the existing 80-frame selection;
+            v2 treats prepared frames as authoritative and budgets features.
+        mobile_preparation_capacity: Validated v2 prepared-frame capacity (100 or 500).
     """
 
     def __init__(
@@ -186,10 +199,20 @@ class OptimizedPipeline:
         optimizer_preset: str = "balanced",
         processing_profile: str = "quality",
         mobile_feature_limits: bool = False,
+        mobile_preparation_policy: str = "mobile-scan-preparation-v1",
+        mobile_preparation_capacity: int = 100,
     ) -> None:
+        if mobile_preparation_policy not in {"mobile-scan-preparation-v1", "mobile-scan-preparation-v2"}:
+            raise ValueError("Unsupported mobile preparation policy")
+        if (isinstance(mobile_preparation_capacity, bool)
+                or not isinstance(mobile_preparation_capacity, int)
+                or mobile_preparation_capacity not in {100, 500}):
+            raise ValueError("mobile_preparation_capacity must be 100 or 500")
         self.optimizer_url = optimizer_url
         self.optimizer_preset = optimizer_preset
         self.mobile_feature_limits = mobile_feature_limits
+        self.mobile_preparation_policy = mobile_preparation_policy
+        self.mobile_preparation_capacity = mobile_preparation_capacity
         self.processing_profile = (
             processing_profile
             if processing_profile in FEATURE_PROFILE_OPTIONS
@@ -239,10 +262,12 @@ class OptimizedPipeline:
             raise ValueError("poses.json 不包含任何帧")
 
         images = []
-        for frame in frames:
+        source_ids = set()
+        for ordinal, frame in enumerate(frames):
             image_path = contained_path(scan_dir, frame["imageFile"], require_file=True)
             transform = arkit_column_major_to_matrix(frame["transform"])
-            images.append({"path": image_path, "pose": transform})
+            images.append({"path": image_path, "pose": transform,
+                           "source_image_id": _source_image_id(frame, ordinal, source_ids)})
 
         intrinsics = None
         intrinsics_path = os.path.join(scan_dir, "intrinsics.json")
@@ -319,16 +344,22 @@ class OptimizedPipeline:
         """
         from processing_pipeline.feature_extraction import build_feature_database
 
+        mobile_v2 = self.mobile_preparation_policy == "mobile-scan-preparation-v2"
+        if mobile_v2 and len(images) > self.mobile_preparation_capacity:
+            raise ValueError("coverage_budget_exceeded: prepared frames exceed mobile capacity")
+
         # Convert trimesh mesh to Open3D TriangleMesh for ray-casting
         o3d_mesh = self._trimesh_to_o3d(mesh_tri)
 
         # Reuse existing ORB + ray-casting + BoW logic
         feature_options = dict(FEATURE_PROFILE_OPTIONS[self.processing_profile])
-        if self.mobile_feature_limits:
-            feature_options["max_keyframes"] = 80
+        if self.mobile_feature_limits or mobile_v2:
+            feature_options["max_keyframes"] = None if mobile_v2 else 80
             if feature_options["extract_akaze"]:
                 feature_options["max_akaze_features"] = 500
-        # quality: 80 * (2000 ORB + 500 AKAZE) <= the native reader's 200k cap.
+            if mobile_v2:
+                feature_options["keyframe_selection"] = "even"
+                feature_options["mobile_feature_budget"] = self.processing_profile
         return build_feature_database(
             images,
             o3d_mesh,
@@ -351,6 +382,12 @@ class OptimizedPipeline:
             features: The FeatureDatabase to serialize.
             output_dir: Directory to write the asset bundle into.
         """
+        import cv2
+
+        if self.mobile_preparation_policy == "mobile-scan-preparation-v2":
+            from processing_pipeline.feature_budget import validate_mobile_feature_database
+            validate_mobile_feature_database(features, self.processing_profile)
+
         os.makedirs(output_dir, exist_ok=True)
 
         # 1. Copy GLB
@@ -378,7 +415,10 @@ class OptimizedPipeline:
             "format": "glb",
             "optimizedWith": "3D-Model-Optimizer",
             "createdAt": datetime.now(timezone.utc).isoformat(),
+            "producer": {"opencvVersion": cv2.__version__},
         }
+        if features.selection_report is not None:
+            manifest.setdefault("producer", {})["keyframeSelection"] = features.selection_report
 
         with open(os.path.join(output_dir, "manifest.json"), "w") as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)

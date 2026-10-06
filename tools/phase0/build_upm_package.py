@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import gzip
+import hashlib
 import json
+import re
 import shutil
 import tarfile
 import tempfile
@@ -10,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "unity_plugin/AreaTargetPlugin"
 DIST = ROOT / "dist"
 IOS_PLUGIN_SOURCE = ROOT / "unity_project/Assets/Plugins/iOS/libvisual_localizer.a"
-IOS_OPENCV_FRAMEWORK_SOURCE = ROOT / "native_visual_localizer/opencv_ios/opencv2.framework"
+IOS_OPENCV_FRAMEWORK_SOURCE = ROOT / "native_visual_localizer/opencv_ios/5.0.0/opencv2.framework"
 EXCLUDED_NAMES = {
     "Tests",
     "Tests.meta",
@@ -37,6 +39,37 @@ def ignored(_directory, names):
         if name in EXCLUDED_NAMES
         or any(name.endswith(suffix) for suffix in EXCLUDED_SUFFIXES)
     }
+
+
+def validate_opencv_framework(framework):
+    """Reject a stale framework before combining it with the rebuilt wrapper."""
+    header = Path(framework) / "Headers/core/version.hpp"
+    if not header.is_file():
+        raise ValueError(f"missing OpenCV 5.0.0 version header: {header}")
+    text = header.read_text()
+    parts = [re.search(rf"^\s*#define\s+CV_VERSION_{name}\s+(\d+)\s*$", text, re.M)
+             for name in ("MAJOR", "MINOR", "REVISION")]
+    version = ".".join(part.group(1) for part in parts) if all(parts) else "unknown"
+    if version != "5.0.0":
+        raise ValueError(f"expected OpenCV 5.0.0 framework, found {version}: {framework}")
+    if not (Path(framework) / "Headers/xfeatures2d.hpp").is_file():
+        raise ValueError(f"OpenCV 5 framework needs contrib xfeatures2d for AKAZE: {framework}")
+    provenance = Path(framework) / "dependency.json"
+    if not provenance.is_file():
+        raise ValueError(f"OpenCV framework lacks verified dependency.json: {framework}")
+    metadata = json.loads(provenance.read_text())
+    expected = {
+        "version": "5.0.0", "platform": "iphoneos", "architecture": "arm64",
+        "sourceSHA256": "b0528f5a1d379d59d4701cb28c36e22214cc51cf64594e5b56f2d3e6c0233095",
+        "contribSHA256": "c58f6344170c39abf187c56f3843b59cab1fd3e89cf19ba2ce25dc061659b27f",
+    }
+    if any(metadata.get(key) != value for key, value in expected.items()):
+        raise ValueError(f"unexpected OpenCV framework dependency identity: {framework}")
+    if "xfeatures2d" not in metadata.get("modules", []):
+        raise ValueError(f"OpenCV framework lacks AKAZE contrib module: {framework}")
+    binary = Path(framework) / "opencv2"
+    if not binary.is_file() or hashlib.sha256(binary.read_bytes()).hexdigest() != metadata.get("binarySHA256"):
+        raise ValueError(f"OpenCV framework binary SHA256 mismatch: {framework}")
 
 
 def add_tree(archive, root):
@@ -74,6 +107,7 @@ def main():
 
         if not IOS_OPENCV_FRAMEWORK_SOURCE.is_dir():
             raise SystemExit(f"missing iOS OpenCV framework: {IOS_OPENCV_FRAMEWORK_SOURCE}")
+        validate_opencv_framework(IOS_OPENCV_FRAMEWORK_SOURCE)
         shutil.copytree(
             IOS_OPENCV_FRAMEWORK_SOURCE,
             package / "Runtime/Plugins/iOS/opencv2.framework",

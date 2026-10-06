@@ -23,6 +23,8 @@ final class ScanViewModel: ObservableObject {
     @Published var scanHistory: [ScanHistoryItem] = []
     @Published var deletionError: String?
     var deletionBlocked: (String) -> Bool = { _ in false }
+    /// A nonempty reason protects the scan; nil or blank keeps the legacy guard in effect.
+    var deletionBlockReason: ((String) -> String?)?
 
     @Published var gpsStatus = "GPS 未开启"
     @Published private(set) var exportStatus: String?
@@ -35,19 +37,29 @@ final class ScanViewModel: ObservableObject {
     private let scanner = ARKitScannerService()
     private let exporter: ScanExporting
     private let documentsDirectory: URL
+    private let cameraAuthorizationStatus: () -> AVAuthorizationStatus
     private let locationService: ScanLocationService
     private var exportID: UUID?
     private var exportCancellation: ScanExportCancellation?
 
     init(exporter: ScanExporting = ScanExportService(),
-         documentsDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!) {
+         documentsDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!,
+         cameraAuthorizationStatus: @escaping () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .video) }) {
         self.exporter = exporter
         self.documentsDirectory = documentsDirectory
+        self.cameraAuthorizationStatus = cameraAuthorizationStatus
         self.locationService = ScanLocationService(store: scanner.locationStore)
         locationService.$status.assign(to: &$gpsStatus)
     }
 
-    func setAppActive(_ active: Bool) { locationService.setAppActive(active) }
+    func setAppActive(_ active: Bool) {
+        locationService.setAppActive(active)
+        guard active else { return }
+        switch state {
+        case .permissionDenied, .requestingPermission: checkCameraPermission()
+        default: break
+        }
+    }
 
     func prepareExportAvailability(for path: String) async {
         let id = UUID()
@@ -108,7 +120,7 @@ final class ScanViewModel: ObservableObject {
     // MARK: - Camera Permission
 
     func checkCameraPermission() {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch cameraAuthorizationStatus() {
         case .authorized:
             state = .ready
         case .notDetermined:
@@ -132,6 +144,10 @@ final class ScanViewModel: ObservableObject {
 
     func startScanning() {
         guard !isExporting else { return }
+        guard cameraAuthorizationStatus() == .authorized else {
+            checkCameraPermission()
+            return
+        }
         let scanner = self.scanner
         scannerQueue.async { [weak self] in
             do {
@@ -200,7 +216,7 @@ final class ScanViewModel: ObservableObject {
         progress = ScanProgress(
             pointCount: 0, coverageArea: 0, keyframeCount: 0, isScanning: false
         )
-        state = .ready
+        checkCameraPermission()
     }
 
     /// Find a previewable 3D model file in the export directory.
@@ -345,8 +361,13 @@ final class ScanViewModel: ObservableObject {
     /// 删除一条扫描记录（目录 + ZIP）
     func deleteScan(_ item: ScanHistoryItem) {
         guard !isExporting else { return }
+        if let reason = deletionBlockReason?(item.directoryPath)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !reason.isEmpty {
+            deletionError = reason
+            return
+        }
         guard !deletionBlocked(item.directoryPath) else {
-            deletionError = "Immersal 上传任务仍需要这条扫描。请先完成上传，或在 Immersal 任务页停止本机任务。"
+            deletionError = "云端任务仍需要这条扫描。请先到任务页完成上传，或确认相关任务已不再需要原始数据，再删除扫描。"
             return
         }
         deletionError = nil

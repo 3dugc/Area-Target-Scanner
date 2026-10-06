@@ -57,6 +57,22 @@
 		A30006 /* ImmersalJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30006 /* ImmersalJobStore.swift */; };
 		A30007 /* ImmersalMappingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30007 /* ImmersalMappingModel.swift */; };
 		A30008 /* ImmersalMappingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30008 /* ImmersalMappingView.swift */; };
+		A40001 /* AreaTargetProcessingJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40001 /* AreaTargetProcessingJob.swift */; };
+		A40002 /* AreaTargetAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40002 /* AreaTargetAPIClient.swift */; };
+		A40003 /* AreaTargetProcessingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40003 /* AreaTargetProcessingModel.swift */; };
+		A40004 /* AreaTargetJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40004 /* AreaTargetJobStore.swift */; };
+		A40005 /* AreaTargetScanArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40005 /* AreaTargetScanArchive.swift */; };
+		A40006 /* AreaTargetAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40006 /* AreaTargetAssetStore.swift */; };
+		A40007 /* ScanSourceFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40007 /* ScanSourceFingerprint.swift */; };
+		A40008 /* AreaTargetProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40008 /* AreaTargetProcessingView.swift */; };
+		A40009 /* AreaTargetAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40009 /* AreaTargetAPIClientTests.swift */; };
+		A40010 /* AreaTargetProcessingModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40010 /* AreaTargetProcessingModelTests.swift */; };
+		A40011 /* AreaTargetProcessingViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40011 /* AreaTargetProcessingViewTests.swift */; };
+		A40012 /* AreaTargetScanArchiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40012 /* AreaTargetScanArchiveTests.swift */; };
+		A40013 /* AreaTargetAssetStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40013 /* AreaTargetAssetStoreTests.swift */; };
+		A40014 /* ScanSourceFingerprintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40014 /* ScanSourceFingerprintTests.swift */; };
+		A60001 /* ScanCaptureQuality.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60001 /* ScanCaptureQuality.swift */; };
+		A60002 /* gray_quality.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B60002 /* gray_quality.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -124,6 +140,22 @@
 		B30006 /* ImmersalJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalJobStore.swift; sourceTree = "<group>"; };
 		B30007 /* ImmersalMappingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingModel.swift; sourceTree = "<group>"; };
 		B30008 /* ImmersalMappingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingView.swift; sourceTree = "<group>"; };
+		B40001 /* AreaTargetProcessingJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingJob.swift; sourceTree = "<group>"; };
+		B40002 /* AreaTargetAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAPIClient.swift; sourceTree = "<group>"; };
+		B40003 /* AreaTargetProcessingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingModel.swift; sourceTree = "<group>"; };
+		B40004 /* AreaTargetJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetJobStore.swift; sourceTree = "<group>"; };
+		B40005 /* AreaTargetScanArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetScanArchive.swift; sourceTree = "<group>"; };
+		B40006 /* AreaTargetAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAssetStore.swift; sourceTree = "<group>"; };
+		B40007 /* ScanSourceFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSourceFingerprint.swift; sourceTree = "<group>"; };
+		B40008 /* AreaTargetProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingView.swift; sourceTree = "<group>"; };
+		B40009 /* AreaTargetAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAPIClientTests.swift; sourceTree = "<group>"; };
+		B40010 /* AreaTargetProcessingModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingModelTests.swift; sourceTree = "<group>"; };
+		B40011 /* AreaTargetProcessingViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingViewTests.swift; sourceTree = "<group>"; };
+		B40012 /* AreaTargetScanArchiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetScanArchiveTests.swift; sourceTree = "<group>"; };
+		B40013 /* AreaTargetAssetStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAssetStoreTests.swift; sourceTree = "<group>"; };
+		B40014 /* ScanSourceFingerprintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSourceFingerprintTests.swift; sourceTree = "<group>"; };
+		B60001 /* ScanCaptureQuality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCaptureQuality.swift; sourceTree = "<group>"; };
+		B60002 /* gray_quality.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "../native_visual_localizer/src/gray_quality.cpp"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -174,6 +206,7 @@
 		H10003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				B40001 /* AreaTargetProcessingJob.swift */,
 				B30005 /* ImmersalMappingJob.swift */,
 				B20002 /* ScanLocation.swift */,
 				B10003 /* CameraIntrinsics.swift */,
@@ -189,6 +222,14 @@
 		H10004 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B60001 /* ScanCaptureQuality.swift */,
+				B60002 /* gray_quality.cpp */,
+				B40002 /* AreaTargetAPIClient.swift */,
+				B40003 /* AreaTargetProcessingModel.swift */,
+				B40004 /* AreaTargetJobStore.swift */,
+				B40005 /* AreaTargetScanArchive.swift */,
+				B40006 /* AreaTargetAssetStore.swift */,
+				B40007 /* ScanSourceFingerprint.swift */,
 				B30007 /* ImmersalMappingModel.swift */,
 				B30006 /* ImmersalJobStore.swift */,
 				B30003 /* ImmersalKeychainStore.swift */,
@@ -212,6 +253,7 @@
 		H10005 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				B40008 /* AreaTargetProcessingView.swift */,
 				B30008 /* ImmersalMappingView.swift */,
 				B10010 /* PointCloudPreviewView.swift */,
 				B10011 /* ScanProgressView.swift */,
@@ -225,6 +267,12 @@
 		H10006 /* AreaTargetScannerTests */ = {
 			isa = PBXGroup;
 			children = (
+				B40009 /* AreaTargetAPIClientTests.swift */,
+				B40010 /* AreaTargetProcessingModelTests.swift */,
+				B40011 /* AreaTargetProcessingViewTests.swift */,
+				B40012 /* AreaTargetScanArchiveTests.swift */,
+				B40013 /* AreaTargetAssetStoreTests.swift */,
+				B40014 /* ScanSourceFingerprintTests.swift */,
 				B30004 /* ImmersalMappingTests.swift */,
 				B30001 /* ImmersalAPIClientTests.swift */,
 				B20006 /* DualExportViewModelTests.swift */,
@@ -372,6 +420,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A60001 /* ScanCaptureQuality.swift in Sources */,
+				A60002 /* gray_quality.cpp in Sources */,
+				A40001 /* AreaTargetProcessingJob.swift in Sources */,
+				A40002 /* AreaTargetAPIClient.swift in Sources */,
+				A40003 /* AreaTargetProcessingModel.swift in Sources */,
+				A40004 /* AreaTargetJobStore.swift in Sources */,
+				A40005 /* AreaTargetScanArchive.swift in Sources */,
+				A40006 /* AreaTargetAssetStore.swift in Sources */,
+				A40007 /* ScanSourceFingerprint.swift in Sources */,
+				A40008 /* AreaTargetProcessingView.swift in Sources */,
 				A30008 /* ImmersalMappingView.swift in Sources */,
 				A30007 /* ImmersalMappingModel.swift in Sources */,
 				A30006 /* ImmersalJobStore.swift in Sources */,
@@ -414,6 +472,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A40009 /* AreaTargetAPIClientTests.swift in Sources */,
+				A40010 /* AreaTargetProcessingModelTests.swift in Sources */,
+				A40011 /* AreaTargetProcessingViewTests.swift in Sources */,
+				A40012 /* AreaTargetScanArchiveTests.swift in Sources */,
+				A40013 /* AreaTargetAssetStoreTests.swift in Sources */,
+				A40014 /* ScanSourceFingerprintTests.swift in Sources */,
 				A30004 /* ImmersalMappingTests.swift in Sources */,
 				A30001 /* ImmersalAPIClientTests.swift in Sources */,
 				A20006 /* DualExportViewModelTests.swift in Sources */,
@@ -522,6 +586,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/AreaTargetScanner/ThirdParty/xatlas",
+					"$(SRCROOT)/../native_visual_localizer/include",
 				);
 				INFOPLIST_FILE = AreaTargetScanner/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Area Target Scanner";
@@ -556,6 +621,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/AreaTargetScanner/ThirdParty/xatlas",
+					"$(SRCROOT)/../native_visual_localizer/include",
 				);
 				INFOPLIST_FILE = AreaTargetScanner/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Area Target Scanner";
@@ -585,6 +651,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PK435YWZ25;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../native_visual_localizer/include",
+				);
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.areatarget.scanner.tests;
@@ -606,6 +676,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PK435YWZ25;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../native_visual_localizer/include",
+				);
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.areatarget.scanner.tests;

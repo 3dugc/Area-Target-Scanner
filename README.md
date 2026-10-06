@@ -135,7 +135,7 @@ A native Swift app that uses ARKit + LiDAR to capture:
 - RGB keyframe images
 - Camera intrinsics
 
-Exports everything as a tidy ZIP you can feed straight into the pipeline.
+Exports everything as a tidy ZIP you can feed straight into the pipeline. You can also sign in to your Area Target service from the app to upload a scan, track processing, and download the verified asset bundle. See [iOS Area Target service login](docs/ios-area-target-service-login.md).
 
 **Requirements:** iPhone 12 Pro or newer (needs LiDAR), iOS 16+, Xcode 15+
 
@@ -148,6 +148,8 @@ open ios_scanner/AreaTargetScanner.xcodeproj
 ## Processing Pipeline
 
 The Python pipeline turns raw scan data into a deployable asset bundle.
+
+The iOS service negotiates `mobile-scan-preparation-v2` for conservative duplicate-view removal and adaptive image resolution. It uploads all source frames, preserves distinct views through preparation and feature extraction, and reports budget failures explicitly. The default tier is 100 frames / 200 million pixels; the 500-frame / 600-million-pixel tier requires `AREA_TARGET_PREPARATION_TIER=500` and independent deployment acceptance. V2 also protects up to eight weak views at a 1920-pixel long edge before upload compression. See the [API contract](docs/area-target-api.md#versioned-scan-preparation) and [validation record](docs/validation/scan-coverage-preparation-v2.md).
 
 ```bash
 python -m processing_pipeline.cli --input ./scan_data --output ./asset_bundle --verbose
@@ -172,7 +174,7 @@ asset_bundle/
 └── features.db        # SQLite DB with ORB features + BoW vocabulary
 ```
 
-**Dependencies:** Python 3.11, Open3D, OpenCV 4.x, NumPy, scikit-learn, trimesh
+**Dependencies:** Python 3.11, Open3D, OpenCV 5.0.0 (contrib headless wheel 5.0.0.93), NumPy 2+, scikit-learn, trimesh. See the [upgrade validation](docs/opencv5-upgrade-validation.md) for platform coverage and outstanding device/field acceptance.
 
 ## Unity Plugin
 
@@ -201,12 +203,16 @@ Key capabilities:
 - Debug diagnostics API (`vl_get_debug_info`) for real-time pipeline introspection
 
 ```bash
-# Build on macOS
-cd native_visual_localizer && bash build_macos.sh
+# Build pinned static OpenCV + contrib, then the macOS wrapper (arm64 by default)
+bash tools/opencv5/build_dependency.sh
+OpenCV_DIR="$PWD/build/opencv5/install/lib/cmake/opencv5" \
+  bash native_visual_localizer/build_macos.sh --deploy
 
-# Build for iOS (produces libvisual_localizer.a)
-cd native_visual_localizer && bash build_ios.sh
+# Build for iOS, including the source-built AKAZE contrib framework
+bash native_visual_localizer/build_ios.sh --deploy
 ```
+
+Without `--deploy`, both wrappers stay in version-isolated build directories. The basic OpenCV 5 iOS release framework does not include AKAZE. Rebuild both wrappers and the contrib framework before packaging; OpenCV 4 wrappers cannot be mixed with the new framework. The macOS wrapper links OpenCV statically so it does not require a Homebrew or temporary-directory installation at runtime.
 
 ## Web UI
 
@@ -237,7 +243,7 @@ tools/phase1/verify.sh device
 
 # Python pipeline tests
 pip install -r requirements-dev.txt
-python -m pytest tests/ -v --tb=short
+python tools/opencv5/run_regression.py --import-mode=importlib
 
 # Reproducible UPM package
 python3 tools/phase0/build_upm_package.py
@@ -265,6 +271,7 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 - [Cross-Session Comparison Report](docs/cross-session-comparison-report.md) — localization accuracy across different scan sessions
 - [iOS Dual Export](docs/ios-dual-export.md) — Area Target / Immersal export formats, GPS and validation
 - [iOS Device Test Guide](docs/ios-device-test-guide.md) — step-by-step guide for on-device testing
+- [Area Target Service Login](docs/ios-area-target-service-login.md) — native service login, cloud processing tasks, and verified asset downloads
 - [Immersal Direct Upload](docs/ios-immersal-direct-upload.md) — email/password login, direct frame upload, and cloud mapping from the iOS scanner
 
 ## Project Structure

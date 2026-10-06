@@ -1,0 +1,54 @@
+{
+  "library": "unity_project/Assets/Plugins/macOS/libvisual_localizer.dylib",
+  "library_sha256": "739d45efcacadefda77ba71fd7d9524ba0fe1d6957b69c3e50e5f24b1b7c9233",
+  "config": {
+    "struct_size": 88,
+    "api_version": 2,
+    "max_image_bytes": 67108864,
+    "max_dimension": 8192,
+    "map_policy_version": 1,
+    "map_coordinate_policy": 1,
+    "max_keyframes": 1000,
+    "max_vocabulary_words": 4096,
+    "max_orb_features_per_keyframe": 2000,
+    "max_akaze_features_per_keyframe": 8192,
+    "max_database_bytes": 536870912,
+    "max_total_features": 200000,
+    "max_bow_products": 200000000,
+    "max_sql_steps": 20000000,
+    "max_sql_time_ns": 3000000000
+  },
+  "reports": [
+    {
+      "keyframes": 100,
+      "status": 0,
+      "loaded_keyframes": 100,
+      "orb_features": 160000,
+      "akaze_features": 40000,
+      "vocabulary": 1000,
+      "native_load_seconds": 34.59354683299898,
+      "database_bytes": 15958016,
+      "source_id_range": [
+        7,
+        304
+      ]
+    },
+    {
+      "keyframes": 500,
+      "status": 0,
+      "loaded_keyframes": 500,
+      "orb_features": 160000,
+      "akaze_features": 40000,
+      "vocabulary": 1000,
+      "native_load_seconds": 35.17243429099835,
+      "database_bytes": 19267584,
+      "source_id_range": [
+        7,
+        1504
+      ]
+    }
+  ],
+  "limitations": "Synthetic SQLite load capacity smoke; not independent queries, truth or phone performance.",
+  "date": "2026-10-06",
+  "platform": "macOS host, existing local native artifact"
+}

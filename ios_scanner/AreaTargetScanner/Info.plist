@@ -21,7 +21,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Area Target Scanner needs camera access to capture RGB images and LiDAR point clouds for 3D scene scanning.</string>
+	<string>用于采集扫描图像和 LiDAR 点云，生成并保存 3D 场景；未授权时仍可查看已保存的扫描。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于为扫描关键帧记录地理位置，随 Immersal 扫描包导出；不允许定位也可继续扫描。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

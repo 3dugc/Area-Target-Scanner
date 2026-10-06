@@ -35,11 +35,11 @@ run() {
 cd "$ROOT"
 run metadata "$PYTHON" tools/phase0/check_package_metadata.py unity_plugin/AreaTargetPlugin/package.json
 run hygiene "$PYTHON" -m pytest tests/phase0/test_repository_hygiene.py -q
-run python "$PYTHON" -m pytest tests/ -v --tb=short
+run native native_visual_localizer/build_macos.sh --deploy
+run python env VL_NATIVE_LIBRARY="$ROOT/unity_project/Assets/Plugins/macOS/libvisual_localizer.dylib" "$PYTHON" tools/opencv5/run_regression.py --import-mode=importlib
 run docker-config docker compose config --quiet
 run docker-build docker build -t area-target-scanner-phase0 .
-run native native_visual_localizer/build_macos.sh
-run native-python "$PYTHON" -m pytest tests/test_native_localizer.py -v --tb=short
+run native-python env VL_NATIVE_LIBRARY="$ROOT/unity_project/Assets/Plugins/macOS/libvisual_localizer.dylib" "$PYTHON" -m pytest tests/test_native_localizer.py -v --tb=short
 run ios-archive tools/phase0/check_native_symbols.sh unity_project/Assets/Plugins/iOS/libvisual_localizer.a
 
 if [[ "$MODE" == "ci" ]]; then

@@ -29,6 +29,13 @@ import zlib
 
 WIDTH, HEIGHT = 384, 256
 MAX_RESPONSE_BYTES = 50 * 1024 * 1024
+V2_POLICY = "mobile-scan-preparation-v2"
+V2_SIZES = ((1920, 1440), (1600, 1200), (384, 256), (384, 256))
+CRITICAL_CAPABILITY = {
+    "version": "critical-frame-protection-v1", "riskVersion": "gray-quality-risk-v1",
+    "maximumProtectedFrames": 8, "maximumProtectedLongEdge": 1920,
+    "sharpnessThreshold": 16, "contrastThreshold": 20,
+}
 # A generated 16x16 neutral JPEG; images used for features are procedural PNGs.
 TEXTURE_JPEG = base64.b64decode(
     "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/"
@@ -81,7 +88,61 @@ def model_obj() -> str:
     return "\n".join(lines) + "\n"
 
 
-def create_fixture(destination: Path, large_scan: bool = False) -> Path:
+def _digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _v2_scale_digest(count: int) -> str:
+    return _digest([{"index": i, "width": w, "height": h, "outputWidth": w, "outputHeight": h}
+                    for i, (w, h) in enumerate(V2_SIZES[:count])])
+
+
+def _v2_client_preparation() -> dict:
+    indices = list(range(4))
+    return {"schemaVersion": 1, "policy": V2_POLICY, "policyVersion": 2, "profile": "fast",
+            "preparedBy": "client", "originalFrameCount": 4, "receivedFrameCount": 4,
+            "selectedFrameCount": 4, "selectedIndices": indices,
+            "processedPixelCount": sum(w * h for w, h in V2_SIZES), "resizedFrameCount": 0,
+            "maximumOutputLongEdge": 1920, "scaleDigest": _v2_scale_digest(4),
+            "capacityTier": 100, "selectionVersion": "upload-all-v2",
+            "selectionDigest": _digest({"capacityTier": 100, "policy": V2_POLICY,
+                "selectedIndices": indices, "selectionVersion": "upload-all-v2"}),
+            "criticalFrameProtection": {"version": CRITICAL_CAPABILITY["version"],
+                "riskVersion": CRITICAL_CAPABILITY["riskVersion"],
+                "protectedIndices": [0], "candidateFrameCount": 1}}
+
+
+def _create_v2_fixture(destination: Path) -> Path:
+    # Only frames 2/3 share pose and encoded pixels; different views are >8cm apart.
+    frames, images = [], []
+    for index, ((width, height), tx) in enumerate(zip(V2_SIZES, (-.25, 0, .25, .25))):
+        focal = width * 320.0 / WIDTH
+        frames.append({"index": index, "timestamp": float(index + 1),
+            "imageFile": f"images/frame_{index:04d}.png",
+            "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, tx, 0, 0, 1],
+            "imageOrientation": "landscapeRight", "image": {"width": width, "height": height},
+            "intrinsics": {"fx": focal, "fy": focal, "cx": width / 2, "cy": height / 2}})
+        images.append(png_image(1024 + index, width, height) if index < 3 else images[2])
+    manifest = {"schemaVersion": 1, "coordinateSystem": "arkit-world",
+                "matrixLayout": "arkit-column-major", "units": "meters", "frames": frames,
+                "clientPreparation": _v2_client_preparation()}
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("model.obj", model_obj())
+        archive.writestr("model.mtl", "newmtl synthetic\nKa 0.2 0.2 0.2\nKd 1 1 1\nKs 0 0 0\nd 1\nillum 1\nmap_Kd texture.jpg\n")
+        archive.writestr("texture.jpg", TEXTURE_JPEG)
+        archive.writestr("poses.json", json.dumps({"frames": frames}))
+        archive.writestr("intrinsics.json", json.dumps({**frames[0]["intrinsics"], **frames[0]["image"]}))
+        archive.writestr("manifest.json", json.dumps(manifest))
+        for frame, pixels in zip(frames, images):
+            archive.writestr(frame["imageFile"], pixels)
+    return destination
+
+
+def create_fixture(destination: Path, large_scan: bool = False, preparation_v2: bool = False) -> Path:
+    require(not (large_scan and preparation_v2), "Choose either --large-scan or --preparation-v2")
+    if preparation_v2:
+        return _create_v2_fixture(destination)
     width, height = (1920, 1440) if large_scan else (WIDTH, HEIGHT)
     focal = 1600.0 if large_scan else 320.0
     positions = [(-0.1, 0.0, 0.1)[i % 3] for i in range(100)] if large_scan else (-0.1, 0.0, 0.1)
@@ -210,6 +271,14 @@ def verify_bundle(data: bytes, directory: Path) -> dict:
         require(connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "Feature database integrity check failed")
         counts = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                   for table in ("keyframes", "features", "vocabulary")}
+        akaze_count = (connection.execute("SELECT COUNT(*) FROM akaze_features").fetchone()[0]
+                       if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='akaze_features'").fetchone()
+                       else 0)
+        keyframe_ids = [row[0] for row in connection.execute("SELECT id FROM keyframes ORDER BY id")]
+        frame_counts = {str(frame): count for frame, count in
+                        connection.execute("SELECT keyframe_id,COUNT(*) FROM features GROUP BY keyframe_id")}
+        pixel_bounds = {str(frame): {"max_x": x, "max_y": y} for frame, x, y in
+                        connection.execute("SELECT keyframe_id,MAX(x),MAX(y) FROM features GROUP BY keyframe_id")}
         require(counts["keyframes"] > 0 and counts["features"] >= 20 and counts["vocabulary"] > 0, "Feature database is empty")
         require(manifest.get("keyframeCount") == counts["keyframes"], "Manifest keyframe count differs from database")
         require(connection.execute("SELECT COUNT(*) FROM features WHERE length(descriptor) <> 32").fetchone()[0] == 0, "Invalid ORB descriptors")
@@ -221,7 +290,13 @@ def verify_bundle(data: bytes, directory: Path) -> dict:
             require(all(math.isfinite(value) for value in values) and values[12:] == (0, 0, 0, 1), "Invalid row-major camera pose")
         for point in connection.execute("SELECT x3d,y3d,z3d FROM features"):
             require(all(math.isfinite(x) and a - 1e-3 <= x <= b + 1e-3 for x, a, b in zip(point, low, high)), "Feature raycast lies outside mesh bounds")
-    return {"keyframes": counts["keyframes"], "features": counts["features"], "vocabulary": counts["vocabulary"], "bundle_bytes": len(data), "scan_preparation": manifest.get("scanPreparation")}
+    producer = manifest.get("producer")
+    return {"keyframes": counts["keyframes"], "features": counts["features"], "vocabulary": counts["vocabulary"],
+            "akaze_features": akaze_count, "keyframe_ids": keyframe_ids,
+            "keyframe_feature_counts": frame_counts, "keyframe_pixel_bounds": pixel_bounds,
+            "bundle_bytes": len(data), "scan_preparation": manifest.get("scanPreparation"),
+            "client_preparation": manifest.get("clientPreparation"),
+            "feature_selection": producer.get("keyframeSelection") if isinstance(producer, dict) else None}
 
 
 def verify_large_preparation(metadata: dict | None) -> None:
@@ -238,14 +313,79 @@ def verify_large_preparation(metadata: dict | None) -> None:
             "Prepared images exceed processing budgets")
 
 
-def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool = False) -> dict:
+def verify_v2_requirements(requirements: dict) -> None:
+    require(requirements.get("schemaVersion") == 1 and requirements.get("policy") == V2_POLICY
+            and requirements.get("policyVersion") == 2 and requirements.get("capacityTier") == 100,
+            "V2 processing requirements are unavailable")
+    require(requirements.get("criticalFrameProtection") == CRITICAL_CAPABILITY,
+            "Unsupported critical protection capability")
+    require(requirements.get("profiles", {}).get("fast") == {
+        "maxFrames": 100, "maximumLongEdge": 1600, "minimumLongEdge": 1024,
+        "maximumTotalPixels": 200_000_000}, "Unexpected v2 fast preparation budgets")
+
+
+def verify_v2_preparation(verified: dict) -> None:
+    preparation = verified.get("scan_preparation")
+    require(isinstance(preparation, dict), "V2 scan bundle has no preparation metadata")
+    expected = {"schemaVersion": 1, "policy": V2_POLICY, "policyVersion": 2, "profile": "fast",
+        "preparedBy": "server", "originalFrameCount": 4, "receivedFrameCount": 4,
+        "selectedFrameCount": 3, "selectedIndices": [0, 1, 2], "duplicateFrameCount": 1,
+        "duplicateGroups": [{"representativeIndex": 2, "duplicateIndices": [3]}],
+        "selectionVersion": "pose-visual-dedup-v1", "capacityTier": 100,
+        "maximumTotalPixels": 200_000_000, "processedPixelCount": sum(w * h for w, h in V2_SIZES[:3]),
+        "maximumOutputLongEdge": 1920, "resizedFrameCount": 0, "scaleDigest": _v2_scale_digest(3),
+        "criticalFrameProtection": {"version": CRITICAL_CAPABILITY["version"],
+            "riskVersion": CRITICAL_CAPABILITY["riskVersion"], "candidateFrameCount": 1,
+            "requestedProtectedIndices": [0], "protectedIndices": [0], "deduplicatedProtectedIndices": []}}
+    expected["selectionDigest"] = hashlib.sha256(json.dumps({
+        "policy": V2_POLICY, "capacityTier": 100,
+        "selectionVersion": expected["selectionVersion"],
+        "selectedIndices": expected["selectedIndices"],
+        "duplicateGroups": expected["duplicateGroups"],
+    }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    for field, value in expected.items():
+        require(preparation.get(field) == value, f"V2 preparation did not exercise expected {field}")
+    require(verified.get("client_preparation") == _v2_client_preparation(),
+            "V2 client preparation provenance was not preserved")
+    require(verified.get("keyframes") == 3 and verified.get("keyframe_ids") == [0, 1, 2],
+            "V2 database did not retain all three distinct views")
+    require(60 <= verified.get("features", 0) <= 200_000 and verified.get("akaze_features") == 0
+            and 0 < verified.get("vocabulary", 0) <= 500, "V2 fast database exceeds feature budgets")
+    counts = verified.get("keyframe_feature_counts", {})
+    require(set(counts) == {"0", "1", "2"} and all(count >= 20 for count in counts.values()),
+            "V2 retained view has no usable 3D features")
+    selection = verified.get("feature_selection")
+    require(isinstance(selection, dict), "V2 database has no feature budget diagnostics")
+    feature_expected = {"version": "prepared-coverage-v2", "featureBudgetVersion": "balanced-mobile-features-v1",
+        "featureBudgetProfile": "fast", "inputFrameCount": 3, "selectedFrameCount": 3,
+        "retainedIndices": [0, 1, 2], "orbFeatureCount": verified["features"], "akazeFeatureCount": 0,
+        "vocabularySize": verified["vocabulary"], "retainedKeyframeCount": 3,
+        "insufficientFeatureFrameCount": 0, "insufficientFeatureFrameIndices": [],
+        "unreadableFrameCount": 0, "unreadableFrameIndices": []}
+    for field, value in feature_expected.items():
+        require(selection.get(field) == value, f"V2 feature diagnostics differ at {field}")
+    bounds = verified.get("keyframe_pixel_bounds", {})
+    require(set(bounds) == {"0", "1", "2"}, "V2 database has incomplete pixel coordinates")
+    for index, (width, height) in enumerate(V2_SIZES[:3]):
+        coordinate = bounds[str(index)]
+        require(all(isinstance(coordinate.get(axis), (int, float)) and math.isfinite(coordinate[axis])
+                    and 0 <= coordinate[axis] < edge
+                    for axis, edge in (("max_x", width), ("max_y", height))),
+                "V2 database pixel coordinates exceed the prepared raster")
+    require(bounds["0"]["max_x"] > 1600 and bounds["0"]["max_y"] > 1200,
+            "Protected view has no actual high-resolution feature coordinates")
+
+
+def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool = False,
+              preparation_v2: bool = False) -> dict:
     username = os.environ.get("AREA_TARGET_USERNAME", "")
     password = os.environ.get("AREA_TARGET_PASSWORD", "")
     require(bool(username and password), "Set AREA_TARGET_USERNAME and AREA_TARGET_PASSWORD for authenticated smoke checks")
     deadline = time.monotonic() + timeout
     with tempfile.TemporaryDirectory(prefix="area-target-smoke-") as temporary:
         directory = Path(temporary)
-        fixture = create_fixture(directory / "synthetic-scan.zip", large_scan=large_scan)
+        fixture = create_fixture(directory / "synthetic-scan.zip", large_scan=large_scan,
+                                 preparation_v2=preparation_v2)
         wait_ready(url, deadline)
         body, content_type = multipart_fixture(fixture, skip_uv=skip_uv)
         job_id = str(uuid.uuid4())
@@ -270,6 +410,10 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool 
         if large_scan:
             requirements = json.loads(fetch(url + "/api/v1/processing-requirements", deadline, headers=service_auth))
             require(requirements.get("policy") == "mobile-scan-preparation-v1", "Processing requirements are unavailable")
+        if preparation_v2:
+            requirements = json.loads(fetch(url + "/api/v1/processing-requirements?policy=" + V2_POLICY,
+                                           deadline, headers=service_auth))
+            verify_v2_requirements(requirements)
         auth = {**service_auth, **job_auth}
         submit_headers = {**auth, "Idempotency-Key": job_id, "Content-Type": content_type}
         status, response = fetch_response(url + "/api/v1/jobs", deadline, body, submit_headers)
@@ -316,6 +460,9 @@ def run_smoke(url: str, timeout: float, skip_uv: bool = False, large_scan: bool 
             verify_large_preparation(verified.get("scan_preparation"))
             require(verified["keyframes"] <= 80 and verified["features"] <= 80_000
                     and verified["vocabulary"] <= 500, "Large fast scan exceeds iOS feature database budgets")
+        if preparation_v2:
+            verify_v2_preparation(verified)
+            verified["preparation_v2"] = True
         return {"job_id": job_id, "size_bytes": len(bundle), "sha256": metadata["sha256"],
                 "protected_api": True, "service_login": True, **verified}
 
@@ -325,20 +472,25 @@ def main() -> int:
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--url", help="Pipeline base URL; e.g. http://127.0.0.1:8080")
     action.add_argument("--fixture-only", type=Path, metavar="ZIP", help="Write a synthetic scan ZIP and skip HTTP operations")
-    parser.add_argument("--large-scan", action="store_true", help="Exercise 100 original 1920x1440 frames and bounded server preparation")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--large-scan", action="store_true", help="Exercise 100 original 1920x1440 frames and bounded server preparation")
+    mode.add_argument("--preparation-v2", action="store_true", help="Exercise v2 deduplication, mixed resolutions and critical frame protection")
     parser.add_argument("--skip-uv", action="store_true", help="Skip the default native xatlas UV unwrap stage")
     parser.add_argument("--timeout", type=float, default=180, help="Overall service startup and processing timeout in seconds (default: 180)")
     args = parser.parse_args()
     try:
         if args.fixture_only:
-            path = create_fixture(args.fixture_only.resolve(), large_scan=args.large_scan)
-            print(json.dumps({"fixture": str(path), "bytes": path.stat().st_size, "frames": 100 if args.large_scan else 3}))
+            path = create_fixture(args.fixture_only.resolve(), large_scan=args.large_scan,
+                                  preparation_v2=args.preparation_v2)
+            print(json.dumps({"fixture": str(path), "bytes": path.stat().st_size,
+                              "frames": 4 if args.preparation_v2 else (100 if args.large_scan else 3)}))
             return 0
         parsed = urllib.parse.urlsplit(args.url)
         require(parsed.scheme in ("http", "https") and bool(parsed.netloc) and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment,
                 "--url must be an HTTP(S) base URL without credentials, query, or fragment")
         require(math.isfinite(args.timeout) and args.timeout > 0, "--timeout must be a positive finite number")
-        result = run_smoke(args.url.rstrip("/"), args.timeout, skip_uv=args.skip_uv, large_scan=args.large_scan)
+        result = run_smoke(args.url.rstrip("/"), args.timeout, skip_uv=args.skip_uv,
+                           large_scan=args.large_scan, preparation_v2=args.preparation_v2)
         print("Synthetic pipeline smoke passed: " + json.dumps(result, sort_keys=True), flush=True)
         return 0
     except Exception as error:

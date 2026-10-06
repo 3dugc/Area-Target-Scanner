@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   python-tests:
+    needs: native-macos
     runs-on: ubuntu-latest
 
     steps:
@@ -35,18 +36,14 @@ jobs:
           pip install -r web_service/requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Prepare fixed iOS OpenCV framework for UPM content tests
-        run: |
-          mkdir -p native_visual_localizer/opencv_ios
-          curl --fail --location --retry 3 --retry-delay 2 \
-            https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip \
-            --output native_visual_localizer/opencv_ios/opencv_ios.zip
-          unzip -q native_visual_localizer/opencv_ios/opencv_ios.zip \
-            -d native_visual_localizer/opencv_ios
-          test -d native_visual_localizer/opencv_ios/opencv2.framework
+      - name: Use rebuilt OpenCV 5 native artifacts for UPM tests
+        uses: actions/download-artifact@v4
+        with:
+          name: opencv5-native
+          path: .
 
       - name: Run Phase 1 Python tests
-        run: python -m pytest --import-mode=importlib tests/phase1 tests/ -v --tb=short
+        run: python tools/opencv5/run_regression.py --import-mode=importlib
 
       - name: Validate package metadata
         run: python tools/phase0/check_package_metadata.py unity_plugin/AreaTargetPlugin/package.json
@@ -84,14 +81,55 @@ jobs:
 
       - name: Install native dependencies
         run: |
-          brew install cmake opencv@4
-          echo "OpenCV_DIR=$(brew --prefix opencv@4)/lib/cmake/opencv4" >> "$GITHUB_ENV"
+          brew install cmake
+          bash tools/opencv5/build_dependency.sh "$RUNNER_TEMP/area-target-opencv5"
+          echo "OpenCV_DIR=$RUNNER_TEMP/area-target-opencv5/install/lib/cmake/opencv5" >> "$GITHUB_ENV"
 
       - name: Build iOS native artifact and cache OpenCV framework
-        run: native_visual_localizer/build_ios.sh
+        run: native_visual_localizer/build_ios.sh --deploy
+
+      - name: Verify Swift native dependency acceptance and fixture producer
+        run: |
+          python tools/ios/test_opencv5_dependency.py
+          python tools/ios/generate_native_fixture.test.py
+
+      - name: Test iOS preparation and retry contracts
+        timeout-minutes: 20
+        run: |
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/scanner-simulators.json"
+          python - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          devices = json.loads(Path(os.environ["RUNNER_TEMP"]).joinpath("scanner-simulators.json").read_text())["devices"]
+          candidates = [device for runtime, values in sorted(devices.items(), reverse=True)
+                        if "iOS" in runtime for device in values
+                        if device.get("isAvailable") and device["name"].startswith("iPhone")]
+          if not candidates:
+              raise RuntimeError("No available iPhone simulator for scan preparation tests")
+          Path(os.environ["RUNNER_TEMP"]).joinpath("scanner-simulator-id").write_text(candidates[0]["udid"])
+          PYCODE
+          simulator_id=$(cat "$RUNNER_TEMP/scanner-simulator-id")
+          xcodebuild -project ios_scanner/AreaTargetScanner.xcodeproj \
+            -scheme AreaTargetScanner -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "$RUNNER_TEMP/scanner-derived-data" \
+            -parallel-testing-enabled NO -collect-test-diagnostics never \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
+            -only-testing:AreaTargetScannerTests/AreaTargetAPIClientTests \
+            -only-testing:AreaTargetScannerTests/AreaTargetScanArchiveTests \
+            -only-testing:AreaTargetScannerTests/AreaTargetProcessingModelTests test
 
       - name: Run Phase 1 non-device release gates
         run: tools/phase1/verify.sh ci
+
+      - name: Share verified native artifacts with Python content tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencv5-native
+          if-no-files-found: error
+          path: |
+            unity_project/Assets/Plugins/iOS/libvisual_localizer.a
+            unity_project/Assets/Plugins/macOS/libvisual_localizer.dylib
+            native_visual_localizer/opencv_ios/5.0.0/opencv2.framework
 
   # Unity EditMode, clean UPM installation, Unity iOS export, generic Xcode
   # linking and device smoke remain local release gates. verify.sh ci emits
@@ -113,10 +151,17 @@ jobs:
         run: >
           ruff check
           processing_pipeline/feature_extraction.py
+          processing_pipeline/critical_frame_protection.py
+          processing_pipeline/feature_budget.py
+          processing_pipeline/frame_selection.py
+          processing_pipeline/keyframe_quality.py
+          processing_pipeline/native_quality.py
           processing_pipeline/optimized_pipeline.py
           processing_pipeline/uv_unwrap.py
           web_service/app.py
           web_service/auth.py
+          tools/deployment/smoke.py
+          tests/test_deployment_smoke.py
           tests/test_service_auth.py
           tests/service_auth_helpers.py
           tests/test_efficiency_profiles.py

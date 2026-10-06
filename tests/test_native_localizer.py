@@ -9,12 +9,14 @@ import cv2
 import pytest
 
 # --- Load the native library ---
-DYLIB_PATH = os.path.join(
+DYLIB_PATH = os.environ.get("VL_NATIVE_LIBRARY") or os.path.join(
     os.path.dirname(__file__), "..",
-    "native_visual_localizer", "build", "libvisual_localizer.dylib"
+    "native_visual_localizer", "build", "macos_opencv5", "libvisual_localizer.dylib"
 )
 
 if not os.path.exists(DYLIB_PATH):
+    if os.environ.get("VL_NATIVE_LIBRARY"):
+        raise FileNotFoundError(f"explicit native library missing: {DYLIB_PATH}")
     pytest.skip("libvisual_localizer.dylib not built", allow_module_level=True)
 
 lib = ctypes.CDLL(DYLIB_PATH)
@@ -38,7 +40,7 @@ lib.vl_destroy.argtypes = [ctypes.c_void_p]
 lib.vl_add_vocabulary_word.restype = ctypes.c_int
 lib.vl_add_vocabulary_word.argtypes = [
     ctypes.c_void_p, ctypes.c_int,
-    ctypes.POINTER(ctypes.c_float), ctypes.c_int, ctypes.c_float
+    ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int, ctypes.c_float
 ]
 
 lib.vl_add_keyframe.restype = ctypes.c_int
@@ -91,7 +93,7 @@ class TestHandleLifecycle:
 # =====================================================================
 class TestNullHandleSafety:
     def test_add_vocabulary_word_null(self):
-        desc = (ctypes.c_float * 32)(*([0.0] * 32))
+        desc = (ctypes.c_ubyte * 32)(*([0] * 32))
         ret = lib.vl_add_vocabulary_word(None, 0, desc, 32, 1.0)
         assert ret == 0
 
@@ -156,7 +158,7 @@ class TestLostStateConsistency:
 class TestDataLoading:
     def test_add_vocabulary_word_succeeds(self):
         handle = lib.vl_create()
-        desc = (ctypes.c_float * 32)(*([1.0] * 32))
+        desc = (ctypes.c_ubyte * 32)(*([1] * 32))
         ret = lib.vl_add_vocabulary_word(handle, 0, desc, 32, 1.5)
         assert ret == 1
         lib.vl_destroy(handle)
@@ -237,7 +239,7 @@ class TestEndToEnd:
         n_features = len(kps)
 
         # Add a dummy vocabulary (single word)
-        vocab_desc = (ctypes.c_float * 32)(*([128.0] * 32))
+        vocab_desc = (ctypes.c_ubyte * 32)(*([128] * 32))
         lib.vl_add_vocabulary_word(handle, 0, vocab_desc, 32, 1.0)
 
         # Prepare keyframe data

@@ -3,10 +3,16 @@ import SwiftUI
 struct ImmersalMappingView: View {
     @ObservedObject var model: ImmersalMappingModel
     let scanDirectory: URL?
+    var selectScan: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var cloudActions = ImmersalCloudActionCoordinator()
+    @State private var dismissedAuthenticationID: UUID?
+    @State private var loginSubmitted = false
     @State private var email = ""
     @State private var password = ""
-    @State private var mapName = "MyScan"
+    @State private var mapName = ""
+    @State private var mapNameSourceID: String?
     @State private var selectedJobID: UUID?
     @State private var showHistory = false
     @State private var sheet: Sheet?
@@ -14,9 +20,14 @@ struct ImmersalMappingView: View {
     @State private var summaryFrameCount: Int?
     @State private var summaryLoading = true
 
-    private enum Sheet: String, Identifiable {
-        case account, details
-        var id: String { rawValue }
+    private enum Sheet: Identifiable {
+        case account(UUID), details
+        var id: String {
+            switch self {
+            case .account(let id): return "account-\(id)"
+            case .details: return "details"
+            }
+        }
     }
 
     private enum Confirmation {
@@ -42,10 +53,11 @@ struct ImmersalMappingView: View {
     }
 
     private var currentJob: ImmersalMappingJob? {
-        if let selectedJobID, let selected = model.jobs.first(where: { $0.id == selectedJobID }) { return selected }
+        if let selectedJobID, let selected = model.localJobs.first(where: { $0.id == selectedJobID }) { return selected }
         guard let scanName = scanDirectory?.lastPathComponent else { return nil }
-        return model.jobs.first(where: { $0.scanName == scanName && $0.needsSource }) ??
-            model.jobs.first(where: { $0.scanName == scanName && $0.phase != .abandoned })
+        let available = model.isLoggedIn ? model.jobs : model.localJobs
+        return available.first(where: { $0.scanName == scanName && $0.needsSource }) ??
+            available.first(where: { $0.scanName == scanName && $0.phase != .abandoned })
     }
 
     private var sourceDirectory: URL? {
@@ -94,7 +106,7 @@ struct ImmersalMappingView: View {
             .navigationTitle("Immersal 建图")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("历史") { showHistory = true }.disabled(model.isBusy) }
+                ToolbarItem(placement: .navigationBarLeading) { Button("任务") { showHistory = true }.disabled(model.isBusy) }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     moreMenu.disabled(model.isBusy)
                     Button("完成") { dismiss() }
@@ -109,7 +121,17 @@ struct ImmersalMappingView: View {
                         case .details: detailsView
                         }
                     }
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { sheet = nil } } }
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") {
+                                if case .account(let id) = value { cancelAuthentication(id: id) }
+                                sheet = nil
+                            }
+                        }
+                    }
+                }
+                .onDisappear {
+                    if case .account(let id) = value { authenticationDismissed(id: id) }
                 }
             }
             .confirmationDialog(presentedConfirmation?.title ?? "", isPresented: Binding(
@@ -125,7 +147,7 @@ struct ImmersalMappingView: View {
                 switch value {
                 case .workspace(let prompt):
                     Button("清空并上传 \(prompt.frameCount) 帧", role: .destructive) {
-                        model.restartAfterClearingWorkspace(jobID: prompt.jobID, confirmation: prompt)
+                        requestCloudAction(.confirmedWorkspace(prompt))
                     }
                     Button("暂不上传", role: .cancel) { model.cancelWorkspaceConfirmation(prompt) }
                 case .abandon(let job):
@@ -144,10 +166,43 @@ struct ImmersalMappingView: View {
                 if let prompt { selectedJobID = prompt.jobID }
             }
             .onChange(of: model.isLoggedIn) { loggedIn in
-                if loggedIn { password = ""; if sheet == .account { sheet = nil } }
-                else { selectedJobID = nil }
+                if loggedIn {
+                    password = ""
+                    if case .account(let id) = sheet, id == cloudActions.pendingID { sheet = nil }
+                } else {
+                    cloudActions.operationFinished(using: model)
+                }
             }
-            .onDisappear { password = ""; model.cancelWorkspaceConfirmation() }
+            .onChange(of: model.isBusy) { busy in
+                if !busy {
+                    continueDismissedAuthentication()
+                    cloudActions.operationFinished(using: model)
+                }
+            }
+            .onChange(of: model.isRefreshing) { refreshing in
+                if !refreshing {
+                    continueDismissedAuthentication()
+                    cloudActions.operationFinished(using: model)
+                }
+            }
+            .onChange(of: cloudActions.needsAuthentication) { needed in
+                if needed, scenePhase != .background, let id = cloudActions.pendingID {
+                    dismissedAuthenticationID = nil
+                    sheet = .account(id)
+                }
+            }
+            .onChange(of: scenePhase) { phase in
+                if phase == .background {
+                    cancelAuthentication()
+                    cloudActions.cancelPendingAuthentication(cancelActiveAction: true)
+                    sheet = nil
+                }
+            }
+            .onDisappear {
+                cancelAuthentication()
+                cloudActions.cancelPendingAuthentication(cancelActiveAction: true)
+                model.cancelWorkspaceConfirmation()
+            }
         }
     }
 
@@ -227,6 +282,8 @@ struct ImmersalMappingView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeading("本次扫描")
             VStack(spacing: 0) {
+                summaryRow("场景名称", symbol: "cube", value: ScanHistoryItem.displayName(for: currentJob?.scanName ?? scanDirectory?.lastPathComponent ?? ""))
+                Divider().padding(.horizontal, 16)
                 summaryRow("扫描时间", symbol: "clock", value: scanDate)
                 Divider().padding(.horizontal, 16)
                 summaryRow("图片数量", symbol: "photo", value: frameCount.map { "\($0) 帧" } ?? (summaryLoading ? "读取中…" : "无法读取"))
@@ -238,7 +295,7 @@ struct ImmersalMappingView: View {
                     if let job = currentJob, job.phase != .abandoned {
                         Text(job.displayName).multilineTextAlignment(.trailing)
                     } else {
-                        TextField("MyScan", text: $mapName)
+                        TextField("地图名称", text: $mapName)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .multilineTextAlignment(.trailing).frame(minWidth: 80)
                             .disabled(model.isBusy)
@@ -328,14 +385,14 @@ struct ImmersalMappingView: View {
 
     private var emptyScanNotice: some View {
         notice(symbol: "viewfinder", color: .accentColor, title: "尚未选择扫描",
-               message: "可在历史中继续已有任务，或从扫描预览页创建新地图。")
+               message: "请从扫描历史选择已保存的扫描。已有云端任务可在本页任务列表中查看。")
     }
 
     private var actionFooter: some View {
         VStack(spacing: 8) {
             primaryAction
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .frame(maxWidth: .infinity).tint(.accentColor)
+                .frame(maxWidth: .infinity).tint(ScannerTheme.actionBlue)
             Button(currentJob?.phase == .done ? "关闭" : "稍后处理") {
                 if model.isBusy { model.pause() }
                 dismiss()
@@ -347,9 +404,11 @@ struct ImmersalMappingView: View {
     }
 
     @ViewBuilder private var primaryAction: some View {
-        if !model.isLoggedIn {
-            fullWidthButton("登录并继续", symbol: "person.crop.circle") { sheet = .account }
-                .disabled(model.isBusy)
+        if sourceDirectory == nil && currentJob == nil {
+            fullWidthButton("选择扫描", symbol: "clock.arrow.circlepath") {
+                dismiss()
+                selectScan?()
+            }.disabled(model.isBusy)
         } else if model.isBusy {
             if currentJob?.phase == .uploading {
                 fullWidthButton("暂停上传", symbol: "pause") { model.pause() }
@@ -358,19 +417,19 @@ struct ImmersalMappingView: View {
                     .disabled(true)
             }
         } else if let job = currentJob, job.canRestart {
-            fullWidthButton("检查并继续", symbol: "arrow.right") { model.requestWorkspaceRestart(jobID: job.id) }
+            fullWidthButton("检查并继续", symbol: "arrow.right") { requestCloudAction(.checkWorkspace(jobID: job.id, userID: job.userID)) }
         } else if let job = currentJob, job.canResume {
-            fullWidthButton("继续上传", symbol: "icloud.and.arrow.up") { model.resume(jobID: job.id) }
+            fullWidthButton("继续上传", symbol: "icloud.and.arrow.up") { requestCloudAction(.resume(jobID: job.id, userID: job.userID)) }
         } else if let job = currentJob, job.phase == .constructionUncertain || job.phase == .constructing {
             fullWidthButton(model.isRefreshing ? "正在查询…" : "查询建图结果", symbol: "arrow.clockwise") {
-                Task { await model.refreshJobs() }
+                requestCloudAction(.refresh(jobID: job.id, userID: job.userID))
             }.disabled(model.isRefreshing)
         } else if let job = currentJob, job.stage == .construction {
             Link(destination: portalURL) { Label("查看 Immersal Portal", systemImage: "arrow.up.right.square").frame(maxWidth: .infinity, minHeight: 24) }
         } else if blockingJob != nil {
             fullWidthButton("处理未完成任务", symbol: "clock.arrow.circlepath") { showHistory = true }
         } else if let directory = sourceDirectory {
-            fullWidthButton("上传并建图", symbol: "icloud.and.arrow.up") { model.start(scanDirectory: directory, mapName: mapName) }
+            fullWidthButton("上传并建图", symbol: "icloud.and.arrow.up") { requestCloudAction(.upload(scanDirectory: directory, mapName: mapName)) }
         } else {
             fullWidthButton("查看历史任务", symbol: "clock.arrow.circlepath") { showHistory = true }
         }
@@ -384,19 +443,24 @@ struct ImmersalMappingView: View {
 
     private var moreMenu: some View {
         Menu {
-            Button { sheet = .account } label: { Label(model.isLoggedIn ? "账号" : "登录账号", systemImage: "person.crop.circle") }
+            if model.isLoggedIn {
+                Button(role: .destructive) {
+                    logout()
+                } label: { Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right") }
+            }
             Button { sheet = .details } label: { Label("扫描与任务详情", systemImage: "info.circle") }
             Link(destination: portalURL) { Label("打开 Immersal Portal", systemImage: "arrow.up.right.square") }
-            if currentJob?.stage == .construction {
-                Button { Task { await model.refreshJobs() } } label: { Label("刷新建图状态", systemImage: "arrow.clockwise") }
+            if let job = currentJob, job.stage == .construction {
+                Button { requestCloudAction(.refresh(jobID: job.id, userID: job.userID)) } label: { Label("刷新建图状态", systemImage: "arrow.clockwise") }
                     .disabled(model.isBusy || model.isRefreshing)
             }
             if let job = currentJob, [.done, .failed, .abandoned].contains(job.phase), blockingJob == nil {
                 Button { mapName = job.displayName; startAnotherUpload(job) } label: {
                     Label("再次上传此扫描", systemImage: "icloud.and.arrow.up")
-                }.disabled(model.isBusy || !model.isLoggedIn)
+                }.disabled(model.isBusy)
             }
-            if let job = currentJob, job.canAbandon {
+            if let job = currentJob, job.canAbandon,
+               model.jobs.contains(where: { $0.id == job.id && $0.userID == job.userID }) {
                 Divider()
                 Button(role: .destructive) { abandonJob = job } label: {
                     Label(job.pendingOperation == .construct ? "停止本机跟踪…" : "停止本机任务…", systemImage: "stop.circle")
@@ -408,7 +472,8 @@ struct ImmersalMappingView: View {
 
     private func startAnotherUpload(_ job: ImmersalMappingJob) {
         let parent = scanDirectory?.deletingLastPathComponent() ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        model.start(scanDirectory: parent.appendingPathComponent(job.scanName), mapName: job.displayName)
+        requestCloudAction(.uploadAgain(jobID: job.id, userID: job.userID,
+            scanDirectory: parent.appendingPathComponent(job.scanName), mapName: job.displayName))
     }
 
     private var accountView: some View {
@@ -416,16 +481,21 @@ struct ImmersalMappingView: View {
             Section {
                 if let account = model.email {
                     Label(account, systemImage: "person.crop.circle").textSelection(.enabled)
-                    Button("退出登录", role: .destructive) { model.logout() }
+                    Button("退出登录", role: .destructive) { logout() }
                 } else {
                     TextField("邮箱", text: $email).keyboardType(.emailAddress).textContentType(.username)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().disabled(model.isBusy)
+                        .accessibilityLabel("Immersal 邮箱")
                     SecureField("密码", text: $password).textContentType(.password).disabled(model.isBusy)
+                        .accessibilityLabel("Immersal 密码")
                     Button(model.isBusy ? "正在登录…" : "登录") {
                         let submitted = password; password = ""
+                        loginSubmitted = true
                         model.login(email: email, password: submitted)
                     }.disabled(model.isBusy || email.isEmpty || password.isEmpty)
-                    if model.isBusy { Button("取消登录", role: .cancel) { model.pause() } }
+                    if model.isBusy {
+                        Button("取消登录", role: .cancel) { cancelAuthentication(); sheet = nil }
+                    }
                 }
             } footer: { Text("使用 Immersal 邮箱和密码登录。登录凭据保存在本机钥匙串，下次自动使用；App 不保存密码。") }
             if let error = model.errorMessage { Text(error).foregroundStyle(.red) }
@@ -460,15 +530,10 @@ struct ImmersalMappingView: View {
 
     private var historyView: some View {
         List {
-            if !model.isLoggedIn {
-                Section {
-                    Text("登录后查看此账号在本机发起的任务。").foregroundStyle(.secondary)
-                    Button("登录 Immersal 账号") { sheet = .account }
-                }
-            } else if model.jobs.isEmpty {
+            if model.localJobs.isEmpty {
                 Text("暂无本机任务").foregroundStyle(.secondary)
             } else {
-                ForEach(model.jobs) { job in
+                ForEach(model.localJobs) { job in
                     Button {
                         selectedJobID = job.id; mapName = job.displayName; showHistory = false
                     } label: {
@@ -490,12 +555,51 @@ struct ImmersalMappingView: View {
         .navigationTitle("上传历史").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button { Task { await model.refreshJobs() } } label: {
+                Button { requestCloudAction(.refreshJobs) } label: {
                     Image(systemName: "arrow.clockwise").frame(minWidth: 32, minHeight: 44)
-                }.accessibilityLabel("刷新建图状态").disabled(!model.isLoggedIn || model.isBusy || model.isRefreshing)
+                }.accessibilityLabel("刷新建图状态").disabled(model.isBusy || model.isRefreshing || model.localJobs.isEmpty)
             }
         }
-        .refreshable { await model.refreshJobs() }
+        .refreshable {
+            if !model.localJobs.isEmpty { requestCloudAction(.refreshJobs) }
+        }
+    }
+
+    private func requestCloudAction(_ action: ImmersalCloudAction) {
+        cloudActions.request(action, using: model)
+    }
+
+    private func logout() {
+        cancelAuthentication()
+        cloudActions.cancelPendingAuthentication(cancelActiveAction: true)
+        model.logout()
+        sheet = nil
+    }
+
+    private func cancelAuthentication(id: UUID? = nil) {
+        if let id, id != cloudActions.pendingID { return }
+        cloudActions.cancelPendingAuthentication(requestID: id)
+        dismissedAuthenticationID = nil
+        password = ""
+        if loginSubmitted && model.isBusy { model.pause() }
+        loginSubmitted = false
+    }
+
+    private func authenticationDismissed(id: UUID) {
+        guard id == cloudActions.pendingID else { return }
+        if model.isLoggedIn {
+            dismissedAuthenticationID = id
+            continueDismissedAuthentication()
+        } else {
+            cancelAuthentication(id: id)
+        }
+    }
+
+    private func continueDismissedAuthentication() {
+        guard let id = dismissedAuthenticationID, model.isLoggedIn, !model.isBusy, !model.isRefreshing else { return }
+        dismissedAuthenticationID = nil
+        loginSubmitted = false
+        cloudActions.continueAfterLogin(requestID: id, using: model)
     }
 
     private func historySymbol(_ job: ImmersalMappingJob) -> String {
@@ -510,6 +614,13 @@ struct ImmersalMappingView: View {
     }
 
     private func readScanSummary() async {
+        let sourceID = sourceDirectory?.standardizedFileURL.path
+        if sourceID != mapNameSourceID {
+            mapNameSourceID = sourceID
+            mapName = currentJob?.displayName ?? sourceDirectory.map {
+                ScanHistoryItem.defaultImmersalMapName(for: $0.lastPathComponent)
+            } ?? ""
+        }
         summaryFrameCount = nil
         summaryLoading = true
         guard let directory = sourceDirectory else { summaryLoading = false; return }
@@ -523,5 +634,127 @@ struct ImmersalMappingView: View {
         guard !Task.isCancelled, sourceDirectory == directory else { return }
         summaryFrameCount = count
         summaryLoading = false
+    }
+}
+
+
+/// Each authenticated continuation holds the source or task selected by its explicit action.
+/// A changed selection or a later account cannot replace that action.
+enum ImmersalCloudAction: Equatable {
+    case upload(scanDirectory: URL, mapName: String)
+    case uploadAgain(jobID: UUID, userID: Int, scanDirectory: URL, mapName: String)
+    case resume(jobID: UUID, userID: Int)
+    case checkWorkspace(jobID: UUID, userID: Int)
+    case confirmedWorkspace(ImmersalWorkspaceConfirmation)
+    case refresh(jobID: UUID, userID: Int)
+    case refreshJobs
+
+    var jobIdentity: (id: UUID, userID: Int)? {
+        switch self {
+        case .resume(let id, let userID), .checkWorkspace(let id, let userID), .refresh(let id, let userID):
+            return (id, userID)
+        case .uploadAgain(let id, let userID, _, _): return (id, userID)
+        case .confirmedWorkspace(let prompt): return (prompt.jobID, prompt.userID)
+        case .upload, .refreshJobs: return nil
+        }
+    }
+}
+
+@MainActor
+final class ImmersalCloudActionCoordinator: ObservableObject {
+    @Published private(set) var pendingAction: ImmersalCloudAction?
+    @Published private(set) var pendingID: UUID?
+    @Published private(set) var needsAuthentication = false
+    private var activeAction: ImmersalCloudAction?
+
+    func request(_ action: ImmersalCloudAction, using model: ImmersalMappingModel) {
+        guard !model.isBusy, !model.isRefreshing else { return }
+        cancelPendingAuthentication()
+        if model.isLoggedIn { perform(action, using: model) }
+        else { requireAuthentication(for: action) }
+    }
+
+    func cancelPendingAuthentication(requestID: UUID? = nil, cancelActiveAction: Bool = false) {
+        if let requestID, requestID != pendingID { return }
+        pendingAction = nil
+        pendingID = nil
+        needsAuthentication = false
+        if cancelActiveAction { activeAction = nil }
+    }
+
+    func continueAfterLogin(requestID: UUID? = nil, using model: ImmersalMappingModel) {
+        guard model.isLoggedIn, !model.isBusy, !model.isRefreshing, let action = pendingAction,
+              requestID == nil || requestID == pendingID else { return }
+        cancelPendingAuthentication()
+        perform(action, using: model)
+    }
+
+    /// Authentication expiry prompts only for this explicit operation, never a background poll.
+    func operationFinished(using model: ImmersalMappingModel) {
+        guard !model.isBusy, !model.isRefreshing, let action = activeAction else { return }
+        activeAction = nil
+        guard !model.isLoggedIn else { return }
+        if let identity = action.jobIdentity {
+            guard let job = model.localJobs.first(where: { $0.id == identity.id && $0.userID == identity.userID }) else { return }
+            if job.canRestart { requireAuthentication(for: .checkWorkspace(jobID: job.id, userID: job.userID)) }
+            else if job.canResume { requireAuthentication(for: .resume(jobID: job.id, userID: job.userID)) }
+            else if job.shouldQuery { requireAuthentication(for: .refresh(jobID: job.id, userID: job.userID)) }
+        } else if action == .refreshJobs {
+            requireAuthentication(for: action)
+        }
+    }
+
+    private func requireAuthentication(for action: ImmersalCloudAction) {
+        // A login can never replay destructive authorization from a prior session.
+        if case .confirmedWorkspace(let prompt) = action {
+            pendingAction = .checkWorkspace(jobID: prompt.jobID, userID: prompt.userID)
+        } else { pendingAction = action }
+        pendingID = UUID()
+        needsAuthentication = true
+    }
+
+    private func perform(_ action: ImmersalCloudAction, using model: ImmersalMappingModel) {
+        guard model.isLoggedIn, !model.isBusy, !model.isRefreshing else { return }
+        activeAction = nil
+        let job: ImmersalMappingJob?
+        if let identity = action.jobIdentity {
+            guard let matching = model.jobs.first(where: { $0.id == identity.id && $0.userID == identity.userID }) else {
+                model.errorMessage = "这项本机任务属于其他 Immersal 账号，或记录已改变。请检查任务记录并使用原账号；扫描和本机记录已保留。"
+                return
+            }
+            job = matching
+        } else { job = nil }
+        switch action {
+        case .upload(let directory, let mapName), .uploadAgain(_, _, let directory, let mapName):
+            model.start(scanDirectory: directory, mapName: mapName)
+            if let id = model.activeJobID, let started = model.jobs.first(where: { $0.id == id }) {
+                activeAction = .resume(jobID: started.id, userID: started.userID)
+            }
+        case .resume:
+            guard job?.canResume == true else { taskChanged(model); return }
+            activeAction = action
+            model.resume(jobID: job!.id)
+        case .checkWorkspace:
+            guard job?.canRestart == true else { taskChanged(model); return }
+            activeAction = action
+            model.requestWorkspaceRestart(jobID: job!.id)
+        case .confirmedWorkspace(let prompt):
+            guard job?.canRestart == true, model.workspaceConfirmation == prompt else {
+                model.errorMessage = "工作区确认已失效，请重新检查并确认。未清空或上传。"
+                return
+            }
+            activeAction = action
+            model.restartAfterClearingWorkspace(jobID: prompt.jobID, confirmation: prompt)
+        case .refresh, .refreshJobs:
+            activeAction = action
+            Task {
+                await model.refreshJobs()
+                operationFinished(using: model)
+            }
+        }
+    }
+
+    private func taskChanged(_ model: ImmersalMappingModel) {
+        model.errorMessage = "任务状态已改变，请检查当前任务后再继续。未重新上传或清空云端工作区。"
     }
 }

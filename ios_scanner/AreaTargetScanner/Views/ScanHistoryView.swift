@@ -15,29 +15,33 @@ struct ScanHistoryView: View {
                         Image(systemName: "chevron.left")
                         Text("返回")
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ScannerTheme.accent)
+                    .frame(minWidth: 64, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 Text("扫描历史")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
+                    .frame(minHeight: 44)
                 Spacer()
-                // 占位，保持标题居中
-                Text("返回").opacity(0).accessibilityHidden(true)
+                // 与返回按钮等宽，保持标题居中。
+                Color.clear.frame(width: 64, height: 44).accessibilityHidden(true)
             }
             .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
 
             if viewModel.scanHistory.isEmpty {
                 Spacer()
                 VStack(spacing: 16) {
                     Image(systemName: "tray")
                         .font(.system(size: 48))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(ScannerTheme.accent)
                     Text("暂无扫描记录")
                         .font(.title3)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
             } else {
@@ -72,6 +76,7 @@ struct ScanHistoryView: View {
                 }
             }
         }
+        .background(Color(uiColor: .systemGroupedBackground))
         .alert("确认删除", isPresented: $showDeleteConfirm) {
             Button("取消", role: .cancel) { itemToDelete = nil }
             Button("删除", role: .destructive) {
@@ -98,41 +103,49 @@ private struct ScanHistoryRow: View {
             // 图标
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(item.hasTexture ? Color.green.opacity(0.2) : Color.blue.opacity(0.2))
+                    .fill(ScannerTheme.accent.opacity(0.10))
                     .frame(width: 44, height: 44)
                 Image(systemName: item.hasTexture ? "cube.fill" : "cube")
                     .font(.system(size: 20))
-                    .foregroundStyle(item.hasTexture ? .green : .blue)
+                    .foregroundStyle(ScannerTheme.accent)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.formattedDate)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 HStack(spacing: 12) {
-                    Label("\(item.keyframeCount) 帧", systemImage: "camera")
-                    Label(String(format: "%.1f MB", item.totalSizeMB), systemImage: "doc")
+                    Label {
+                        Text("\(item.keyframeCount) 帧")
+                    } icon: {
+                        Image(systemName: "camera").foregroundStyle(ScannerTheme.accent)
+                    }
+                    Label {
+                        Text(String(format: "%.1f MB", item.totalSizeMB))
+                    } icon: {
+                        Image(systemName: "doc").foregroundStyle(ScannerTheme.accent)
+                    }
                     if item.hasImmersalZip {
-                        Text("Immersal").foregroundStyle(.cyan)
+                        Text("Immersal")
                     }
                     if item.hasZip {
                         Image(systemName: "doc.zipper")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(ScannerTheme.accent)
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(ScannerTheme.accent)
         }
         .padding(12)
-        .background(Color.white.opacity(0.06))
-        .cornerRadius(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("扫描记录 \(item.formattedDate), \(item.keyframeCount) 帧, \(String(format: "%.1f", item.totalSizeMB)) MB")
     }

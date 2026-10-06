@@ -26,6 +26,34 @@ from processing_pipeline.optimized_pipeline import OptimizedPipeline
 from processing_pipeline import optimized_pipeline
 
 
+@pytest.mark.parametrize("selection,maximum", [("even", 80), ("quality-coverage-v1", None)])
+def test_prepared_mobile_budget_cannot_request_second_frame_selection(monkeypatch, selection, maximum):
+    monkeypatch.setattr(cv2, "ORB_create", lambda **_: pytest.fail("invalid selection must fail before extraction"))
+    with pytest.raises(ValueError, match="authoritative prepared frames"):
+        build_feature_database([], o3d.geometry.TriangleMesh.create_box(),
+                               mobile_feature_budget="quality", keyframe_selection=selection,
+                               max_keyframes=maximum)
+
+
+def test_prepared_mobile_image_decode_failure_cannot_be_reported_as_success(monkeypatch):
+    from tests.test_mobile_feature_limits import install_budget_detectors, budget_images
+    install_budget_detectors(monkeypatch)
+    read_image = cv2.imread
+    monkeypatch.setattr(cv2, "imread", lambda path, *args: None if path == "1" else read_image(path, *args))
+    with pytest.raises(ValueError, match="Prepared image could not be read"):
+        build_feature_database(budget_images(2), o3d.geometry.TriangleMesh.create_box(),
+                               mobile_feature_budget="quality", bow_k=2)
+
+
+def test_legacy_image_decode_failure_still_skips_the_unreadable_image(monkeypatch):
+    from tests.test_mobile_feature_limits import install_budget_detectors, budget_images
+    install_budget_detectors(monkeypatch)
+    read_image = cv2.imread
+    monkeypatch.setattr(cv2, "imread", lambda path, *args: None if path == "1" else read_image(path, *args))
+    database = build_feature_database(budget_images(2), o3d.geometry.TriangleMesh.create_box(), bow_k=2)
+    assert [frame.image_id for frame in database.keyframes] == [7]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -321,6 +349,7 @@ class TestBuildFeatureDatabaseAKAZE:
                 assert kf.akaze_points_3d is not None
                 assert len(kf.akaze_keypoints) == len(kf.akaze_points_3d)
                 assert kf.akaze_descriptors.shape[0] == len(kf.akaze_keypoints)
+                assert kf.akaze_descriptors.shape[1] == 61
                 assert kf.akaze_descriptors.dtype == np.uint8
         assert has_akaze, "At least one keyframe should have AKAZE features"
 
