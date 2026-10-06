@@ -112,7 +112,8 @@ jobs:
           xcodebuild -project ios_scanner/AreaTargetScanner.xcodeproj \
             -scheme AreaTargetScanner -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$RUNNER_TEMP/scanner-derived-data" \
-            -parallel-testing-enabled NO -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO \
+            -parallel-testing-enabled NO -collect-test-diagnostics never \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
             -only-testing:AreaTargetScannerTests/AreaTargetAPIClientTests \
             -only-testing:AreaTargetScannerTests/AreaTargetScanArchiveTests \
             -only-testing:AreaTargetScannerTests/AreaTargetProcessingModelTests test

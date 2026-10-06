@@ -19,6 +19,8 @@ Linux/amd64 实际镜像 HTTP 冒烟验证已通过：实际 OpenCV 5.0.0 和预
 
 首轮 develop CI `37510288013` 的 OpenCV 5 iPhoneOS 编译、安装与框架打包均成功，但 Xcode 26.6 的 `lipo -verify_arch` 将末尾文件路径视为架构名而失败。两处架构检查改为先传文件路径，再传检查参数；保留完整 arm64 验证及后续链接门槛。此修复仍须以重跑 CI 的结果确认。
 
+第二轮 CI `37512421077` 已通过该架构检查、完整 iPhoneOS 链接及 Swift 依赖/夹具验证，但模拟器禁用签名导致真实 Keychain 会话读写测试失败（122 项中 120 通过、1 项默认夹具跳过、1 项失败）。CI 改用 `CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-` 的模拟器 ad hoc 签名，保留全部测试。修复后的本地完整重跑为 121 通过、1 项默认夹具跳过、0 失败；实际应用的 ad hoc 签名及 Mach-O 内应用标识权限均核验通过。仍以新提交 CI 的完整结果作为晋级门槛。
+
 本记录随功能提交。develop、main、publish 的 CI/Deploy 成功状态及最终镜像发布结果以 GitHub Actions 的相应提交运行记录为准；正在执行时不将计划写成已完成。生产 Portainer 的容器更新与 GitHub Actions 镜像发布是两个步骤，本仓库工作流只负责验证并发布镜像。
 
 既有真实回放结果见 [临界帧保护三轮复测](scan-coverage-critical-frame-retest-2026-10-07.md)。这些查询缺少独立位置真值；容量、模拟器和冒烟验证不能代替手机现场识别验收。
