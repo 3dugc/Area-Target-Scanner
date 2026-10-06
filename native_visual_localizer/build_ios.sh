@@ -76,7 +76,7 @@ expected = {"version": "5.0.0", "platform": "iphoneos", "architecture": "arm64",
 if any(metadata.get(key) != value for key, value in expected.items()):
     raise SystemExit("ERROR: stale/modified OpenCV 5 + contrib framework provenance")
 PY
-lipo -verify_arch arm64 "$OPENCV_FW/opencv2"
+lipo "$OPENCV_FW/opencv2" -verify_arch arm64
 
 echo "--- OpenCV framework: $OPENCV_FW ---"
 

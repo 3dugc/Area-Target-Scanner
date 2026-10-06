@@ -85,7 +85,7 @@ shopt -s nullglob
 THIRD_PARTY_LIBRARIES=("$PREFIX"/lib/opencv5/3rdparty/*.a)
 shopt -u nullglob
 run_step framework libtool -static -o "$FRAMEWORK/opencv2" "${LIBRARIES[@]}" "${THIRD_PARTY_LIBRARIES[@]}"
-lipo -verify_arch arm64 "$FRAMEWORK/opencv2"
+lipo "$FRAMEWORK/opencv2" -verify_arch arm64
 cp -R "$PREFIX/share/licenses/opencv5/." "$FRAMEWORK/Licenses/"
 cp "$SOURCE/LICENSE" "$FRAMEWORK/Licenses/OpenCV-LICENSE.txt"
 cp "$CONTRIB/LICENSE" "$FRAMEWORK/Licenses/OpenCV-Contrib-LICENSE.txt"
