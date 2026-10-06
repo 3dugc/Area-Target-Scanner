@@ -19,10 +19,19 @@ RUN python -c "import open3d, cv2; assert cv2.__version__.split('.')[0] == '5'; 
 COPY processing_pipeline/ /app/processing_pipeline/
 COPY web_service/ /app/web_service/
 COPY native/ /app/native/
+COPY native_visual_localizer/include/area_target_runtime.h /app/native-quality/include/area_target_runtime.h
+COPY native_visual_localizer/src/frame_contract.h /app/native-quality/src/frame_contract.h
+COPY native_visual_localizer/src/frame_contract.cpp /app/native-quality/src/frame_contract.cpp
+COPY native_visual_localizer/src/gray_quality.cpp /app/native-quality/src/gray_quality.cpp
+COPY native_visual_localizer/src/rigid_math.h /app/native-quality/src/rigid_math.h
+COPY native_visual_localizer/src/keyframe_selection.cpp /app/native-quality/src/keyframe_selection.cpp
 COPY ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.h /app/native/xatlas/xatlas.h
 COPY ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.cpp /app/native/xatlas/xatlas.cpp
 
 RUN mkdir -p /app/bin && \
+    g++ -std=c++17 -O2 -shared -fPIC -fvisibility=hidden -I/app/native-quality/include -I/app/native-quality/src \
+        /app/native-quality/src/gray_quality.cpp /app/native-quality/src/frame_contract.cpp /app/native-quality/src/keyframe_selection.cpp \
+        -o /app/bin/libarea_target_quality.so && \
     g++ -std=c++17 -O2 -DNDEBUG -I/app/native/xatlas \
         /app/native/xatlas_helper.cpp /app/native/xatlas/xatlas.cpp \
         -o /app/bin/xatlas_helper && \
@@ -31,6 +40,7 @@ RUN mkdir -p /app/bin && \
     chown -R appuser:appuser /tmp/pipeline_uploads /tmp/pipeline_outputs
 
 ENV PYTHONPATH=/app
+ENV AREA_TARGET_QUALITY_LIBRARY=/app/bin/libarea_target_quality.so
 
 EXPOSE 5000
 

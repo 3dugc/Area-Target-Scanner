@@ -391,14 +391,24 @@ final class AreaTargetProcessingModel: ObservableObject {
                 archiveURL = existing
             } else {
                 try edit(jobID) { $0.phase = .preparing; $0.detail = "正在获取云端预处理要求…" }
-                let requirements: AreaTargetProcessingRequirements?
-                do { requirements = try await api(for: job).fetchProcessingRequirements() }
+                let requirements: AreaTargetProcessingRequirements
+                do { requirements = try await api(for: job).fetchProcessingRequirements(policy: "mobile-scan-preparation-v2") }
                 catch {
-                    if Self.isCancellation(error) || Self.isServiceAuthenticationError(error) { throw error }
-                    requirements = nil // Older/offline requirements endpoints can still accept raw uploads.
+                    if case AreaTargetAPIError.server(let status, let problem, _) = error,
+                       status == 400, problem.code == "unsupported_preparation_policy" {
+                        requirements = try await api(for: job).fetchProcessingRequirements()
+                    } else { throw error }
                 }
+                guard requirements.preparationPolicy(for: job.profile) != nil else { throw AreaTargetAPIError.invalidResponse }
                 try Task.checkCancellation()
                 guard self.generation == generation, !cancellation.isCancelled else { throw CancellationError() }
+                let preparationCapability: String?
+                if let policy = requirements.preparationPolicy(for: job.profile) {
+                    preparationCapability = requirements.policyVersion == 2
+                        ? "云端当前支持去重后最多 \(policy.maxFrames) 个工作视角；正在准备全部源帧上传…"
+                        : "云端采用旧版处理，最多保留 \(policy.maxFrames) 帧；正在准备上传副本…"
+                    try edit(jobID) { $0.detail = preparationCapability! }
+                } else { preparationCapability = nil }
                 let work = AreaTargetArchiveWork(archiver: archiver)
                 let directory = job.scanDirectory
                 let unwrap = job.uvUnwrap
@@ -406,7 +416,7 @@ final class AreaTargetProcessingModel: ObservableObject {
                 let progressSink: @Sendable (String) -> Void = { [weak self] detail in
                     Task { @MainActor [weak self] in
                         guard let self, self.generation == generation else { return }
-                        self.updateDetail(detail, jobID: jobID)
+                        self.updateDetail(preparationCapability.map { $0 + "\n" + detail } ?? detail, jobID: jobID)
                     }
                 }
                 let prepared = try await Task.detached(priority: .utility) {
@@ -462,7 +472,11 @@ final class AreaTargetProcessingModel: ObservableObject {
             try accept(remote, jobID: jobID)
         } catch {
             guard self.generation == generation else { return }
-            let text = Self.isCancellation(error) ? (sending ? "本机上传已暂停。继续时会先确认云端是否已接收。" : "准备已暂停，可以继续上传") : safeMessage(error)
+            let text: String
+            if Self.isCancellation(error) { text = sending ? "本机上传已暂停。继续时会先确认云端是否已接收。" : "准备已暂停，可以继续上传" }
+            else if !sending, error is AreaTargetAPIError, jobs.first(where: { $0.id == jobID })?.archiveURL == nil {
+                text = "尚未确认云端处理能力，上传尚未开始。" + safeMessage(error)
+            } else { text = safeMessage(error) }
             let phase: AreaTargetTaskPhase
             if sending, !definitelyRejected(error) { phase = .submissionUnknown }
             else if Self.isCancellation(error) { phase = .paused }

@@ -19,12 +19,25 @@ extension AreaTargetArchiving {
 }
 
 final class AreaTargetScanArchive: AreaTargetArchiving {
+    private let maximumExpandedBytes: Int64
+    private let maximumZIPBytes: Int64
+
+    /// Callers may reserve part of the existing transport budget, never raise its safety ceilings.
+    init(maximumExpandedBytes: Int64 = AreaTargetFileSafety.maximumExpandedBytes,
+         maximumZIPBytes: Int64 = AreaTargetFileSafety.maximumZIPBytes) {
+        precondition(maximumExpandedBytes > 0 && maximumExpandedBytes <= AreaTargetFileSafety.maximumExpandedBytes)
+        precondition(maximumZIPBytes > 4096 && maximumZIPBytes <= AreaTargetFileSafety.maximumZIPBytes)
+        self.maximumExpandedBytes = maximumExpandedBytes
+        self.maximumZIPBytes = maximumZIPBytes
+    }
     enum ArchiveError: Error, LocalizedError, Equatable {
         case invalidScan(String)
+        case uploadBudgetExceeded
         case cancelled
         var errorDescription: String? {
             switch self {
             case .invalidScan(let reason): return reason
+            case .uploadBudgetExceeded: return "全部关键帧的上传副本超过上传字节预算。原始扫描仍保存在本机，请使用容量足够的处理服务。"
             case .cancelled: return "已取消扫描归档。"
             }
         }
@@ -32,8 +45,19 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
     func archive(scanDirectory: URL, uvUnwrap: Bool, profile: String, requirements: AreaTargetProcessingRequirements?,
                  progress: @escaping @Sendable (String) -> Void, isCancelled: @escaping @Sendable () -> Bool) throws -> URL {
         guard let requirements, let policy = requirements.preparationPolicy(for: profile) else {
+            if requirements?.criticalFrameProtection != nil { throw invalid("云端临界帧保护能力无效") }
             return try archive(scanDirectory: scanDirectory, uvUnwrap: uvUnwrap, progress: progress, isCancelled: isCancelled)
         }
+        return try preparedArchive(scanDirectory: scanDirectory, uvUnwrap: uvUnwrap, profile: profile, requirements: requirements,
+            policy: policy, uploadLongEdge: policy.maximumLongEdge, progress: progress, isCancelled: isCancelled)
+    }
+
+    private func preparedArchive(scanDirectory: URL, uvUnwrap: Bool, profile: String,
+                                 requirements: AreaTargetProcessingRequirements, policy: AreaTargetProcessingRequirements.Profile,
+                                 uploadLongEdge: Int, frozenProtection: AreaTargetCriticalFrameProtection? = nil,
+                                 frozenSourceDigests: [String: String]? = nil,
+                                 progress: @escaping @Sendable (String) -> Void,
+                                 isCancelled: @escaping @Sendable () -> Bool) throws -> URL {
         try check(isCancelled)
         let root = scanDirectory.standardizedFileURL
         let values = try root.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
@@ -47,6 +71,9 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
             sourceDigests[path] = try AreaTargetFileSafety.digest(AreaTargetFileSafety.safeFile(path, in: root),
                 maximum: AreaTargetFileSafety.maximumExpandedBytes, isCancelled: isCancelled).sha256
         }
+        if let frozenSourceDigests, sourceDigests != frozenSourceDigests {
+            throw invalid("扫描源文件已改变，请重新创建上传任务")
+        }
         let native = FileManager.default.fileExists(atPath: root.appendingPathComponent("manifest.json").path)
         var manifest = try document(native ? "manifest.json" : "poses.json", in: root)
         guard let frames = manifest["frames"] as? [[String: Any]], !frames.isEmpty, frames.count <= 10_000 else { throw invalid("扫描清单已改变或关键帧无效") }
@@ -54,23 +81,42 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
         guard try AreaTargetFileSafety.digest(AreaTargetFileSafety.safeFile(metadataPath, in: root),
             maximum: AreaTargetFileSafety.maximumMetadataBytes).sha256 == sourceDigests[metadataPath] else { throw invalid("扫描源文件已改变，请重新创建上传任务") }
         let fallback = native ? nil : try document("intrinsics.json", in: root)
-        let count = min(frames.count, policy.maxFrames)
-        let indices = count == 1 ? [0] : (0..<count).map { ($0 * (frames.count - 1) + (count - 1) / 2) / (count - 1) }
+        let uploadsAllFrames = requirements.policy == "mobile-scan-preparation-v2"
+        let count = uploadsAllFrames ? frames.count : min(frames.count, policy.maxFrames)
+        let indices = uploadsAllFrames ? Array(frames.indices) : (count == 1 ? [0] : (0..<count).map { ($0 * (frames.count - 1) + (count - 1) / 2) / (count - 1) })
+        let protection: AreaTargetCriticalFrameProtection?
+        if let capability = requirements.criticalFrameProtection {
+            protection = try frozenProtection ?? criticalProtection(frames: frames, root: root, capability: capability,
+                progress: progress, isCancelled: isCancelled)
+            progress("临界弱视角候选保护：实际保护 \(protection!.protectedIndices.count) 帧，其余上传副本使用普通分辨率。")
+        } else { protection = nil }
+        let protectedIndices = Set(protection?.protectedIndices ?? [])
         var dimensions: [(width: Int, height: Int, outputWidth: Int, outputHeight: Int)] = []
         for index in indices {
             guard let value = frames[index]["image"] as? [String: Any] ?? fallback,
                   let width = integer(value["width"]), let height = integer(value["height"]),
                   width > 0, height > 0, width <= 8192, height <= 8192, Int64(width) * Int64(height) <= 32_000_000 else { throw invalid("关键帧图像尺寸无效") }
-            let scale = min(1, Double(policy.maximumLongEdge) / Double(max(width, height)))
-            dimensions.append((width, height, max(1, Int(floor(Double(width) * scale))), max(1, Int(floor(Double(height) * scale)))))
+            if uploadsAllFrames {
+                // Pin the long dimension exactly: floating multiplication can turn
+                // an intended 1024px floor into 1023px for some source dimensions.
+                let maximumEdge = protectedIndices.contains(index) ? requirements.criticalFrameProtection!.maximumProtectedLongEdge : uploadLongEdge
+                let edge = min(maximumEdge, max(width, height))
+                let outputWidth = width >= height ? edge : max(1, width * edge / height)
+                let outputHeight = height >= width ? edge : max(1, height * edge / width)
+                dimensions.append((width, height, outputWidth, outputHeight))
+            } else {
+                let scale = min(1, Double(uploadLongEdge) / Double(max(width, height)))
+                dimensions.append((width, height, max(1, Int(floor(Double(width) * scale))), max(1, Int(floor(Double(height) * scale)))))
+            }
         }
         let firstPixels = dimensions.reduce(Int64(0)) { $0 + Int64($1.outputWidth) * Int64($1.outputHeight) }
-        if firstPixels > policy.maximumTotalPixels {
+        if !uploadsAllFrames && firstPixels > policy.maximumTotalPixels {
             let scale = sqrt(Double(policy.maximumTotalPixels) / Double(firstPixels))
             dimensions = dimensions.map { ($0.width, $0.height, max(1, Int(floor(Double($0.outputWidth) * scale))), max(1, Int(floor(Double($0.outputHeight) * scale)))) }
         }
         let pixels = dimensions.reduce(Int64(0)) { $0 + Int64($1.outputWidth) * Int64($1.outputHeight) }
-        guard pixels <= policy.maximumTotalPixels else {
+        if protection != nil && pixels > 2_000_000_000 { throw ArchiveError.uploadBudgetExceeded }
+        guard uploadsAllFrames || pixels <= policy.maximumTotalPixels else {
             return try archive(scanDirectory: root, uvUnwrap: uvUnwrap, progress: progress, isCancelled: isCancelled)
         }
         let scaleRecords = indices.enumerated().map { offset, index in
@@ -82,7 +128,11 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
         let preparation = AreaTargetClientPreparation(schemaVersion: 1, policy: requirements.policy, policyVersion: requirements.policyVersion,
             profile: profile, preparedBy: "client", originalFrameCount: frames.count, selectedFrameCount: count, selectedIndices: indices,
             processedPixelCount: pixels, resizedFrameCount: dimensions.filter { $0.width != $0.outputWidth || $0.height != $0.outputHeight }.count,
-            maximumOutputLongEdge: dimensions.map { max($0.outputWidth, $0.outputHeight) }.max() ?? 0, scaleDigest: digest)
+            maximumOutputLongEdge: dimensions.map { max($0.outputWidth, $0.outputHeight) }.max() ?? 0, scaleDigest: digest,
+            receivedFrameCount: uploadsAllFrames ? frames.count : nil, capacityTier: uploadsAllFrames ? requirements.capacityTier : nil,
+            selectionVersion: uploadsAllFrames ? "upload-all-v2" : nil,
+            selectionDigest: uploadsAllFrames ? try AreaTargetClientPreparation.uploadSelectionDigest(capacityTier: requirements.capacityTier!, indices: indices) : nil,
+            criticalFrameProtection: protection)
         let stage = FileManager.default.temporaryDirectory.appendingPathComponent("area-target-prepared-" + UUID().uuidString.lowercased())
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: stage) }
@@ -109,13 +159,16 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
             try FileManager.default.copyItem(at: AreaTargetFileSafety.safeFile(path, in: root), to: target(path))
         }
         var preparedFrames: [[String: Any]] = []
+        let cameraPrefix = "images/prepared_" + UUID().uuidString.lowercased() + "_"
         for (offset, index) in indices.enumerated() {
             try check(isCancelled)
             progress("正在准备上传关键帧（\(offset + 1)/\(count)）…")
             var frame = frames[index]
             let size = dimensions[offset]
             guard let path = frame["imageFile"] as? String, path.hasPrefix("images/"), AreaTargetFileSafety.safeRelativePath(path) else { throw invalid("关键帧图片路径无效") }
-            let destination = try target(path)
+            let extensionName = size.width == size.outputWidth && size.height == size.outputHeight ? (path as NSString).pathExtension.lowercased() : "jpg"
+            let outputPath = uploadsAllFrames ? cameraPrefix + String(index) + "." + extensionName : path
+            let destination = try target(outputPath)
             if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
             let source = try AreaTargetFileSafety.safeFile(path, in: root)
             if size.width == size.outputWidth && size.height == size.outputHeight { try FileManager.default.copyItem(at: source, to: destination) }
@@ -126,6 +179,7 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
             let sx = Double(size.outputWidth) / Double(size.width), sy = Double(size.outputHeight) / Double(size.height)
             let k: [String: Any] = ["fx": fx * sx, "cx": cx * sx, "fy": fy * sy, "cy": cy * sy]
             frame["intrinsics"] = k
+            frame["imageFile"] = outputPath
             frame["image"] = ["width": size.outputWidth, "height": size.outputHeight]
             if !native && frame["imageOrientation"] == nil { frame["imageOrientation"] = "landscapeRight" }
             preparedFrames.append(frame)
@@ -158,7 +212,24 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
                 throw invalid("扫描源文件已改变，请重新创建上传任务")
             }
         }
-        return try archive(scanDirectory: stage, uvUnwrap: uvUnwrap, progress: progress, isCancelled: isCancelled)
+        do { return try archive(scanDirectory: stage, uvUnwrap: uvUnwrap, progress: progress, isCancelled: isCancelled) }
+        catch ArchiveError.invalidScan(let reason) where uploadsAllFrames &&
+            ["扫描展开后超过 500 MiB 限制", "扫描 ZIP 超过上传大小限制"].contains(reason) {
+            let minimum = policy.minimumLongEdge!
+            guard uploadLongEdge > minimum, protectedIndices.count < indices.count else { throw ArchiveError.uploadBudgetExceeded }
+            // Re-encode ordinary frames from the original source; protected sizes
+            // and the risk selection remain fixed across transport budget retries.
+            try FileManager.default.removeItem(at: stage)
+            progress(protection == nil ? "全部源帧上传副本超过字节预算，正在统一缩小副本…" : "上传副本超过字节预算，正在缩小普通帧，保留 \(protectedIndices.count) 帧保护尺寸…")
+            return try preparedArchive(scanDirectory: root, uvUnwrap: uvUnwrap, profile: profile, requirements: requirements,
+                policy: policy, uploadLongEdge: max(minimum, Int(floor(Double(uploadLongEdge) * 0.85))), frozenProtection: protection,
+                frozenSourceDigests: sourceDigests, progress: progress,
+                isCancelled: isCancelled)
+        }
+        catch ArchiveError.invalidScan(let reason) where uploadsAllFrames &&
+            ["扫描包含过多文件", "扫描缺少关键帧或文件数量过多"].contains(reason) {
+            throw ArchiveError.uploadBudgetExceeded
+        }
     }
 
     static func clientPreparation(in archiveURL: URL) throws -> AreaTargetClientPreparation? {
@@ -170,17 +241,88 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
             guard bytes.count <= AreaTargetFileSafety.maximumMetadataBytes else { throw ArchiveError.invalidScan("上传清单超过元数据大小限制") }
         }
         guard let object = try JSONSerialization.jsonObject(with: bytes) as? [String: Any], let preparation = object["clientPreparation"] else { return nil }
+        guard let preparationDocument = preparation as? [String: Any] else { throw ArchiveError.invalidScan("上传预处理记录无效") }
+        do { try AreaTargetCriticalProtectionJSON.validatePreparation(preparationDocument) }
+        catch { throw ArchiveError.invalidScan("上传临界帧保护记录无效") }
         let value = try JSONDecoder().decode(AreaTargetClientPreparation.self, from: JSONSerialization.data(withJSONObject: preparation))
-        guard value.schemaVersion == 1, value.policy == "mobile-scan-preparation-v1", value.policyVersion == 1,
+        let protection = value.criticalFrameProtection
+        guard protection == nil || (value.policy == "mobile-scan-preparation-v2" && protection!.isValid(sourceFrameCount: value.originalFrameCount)) else {
+            throw ArchiveError.invalidScan("上传临界帧保护记录无效")
+        }
+        let maximumLongEdge = protection?.protectedIndices.isEmpty == false ? 1920 : 1600
+        guard value.schemaVersion == 1,
               value.preparedBy == "client", ["fast", "quality"].contains(value.profile),
-              (1...10_000).contains(value.originalFrameCount), (1...80).contains(value.selectedFrameCount),
-              value.selectedFrameCount == value.selectedIndices.count, value.selectedIndices.first == 0,
-              value.selectedIndices.last == value.originalFrameCount - 1,
-              zip(value.selectedIndices, value.selectedIndices.dropFirst()).allSatisfy({ $0 < $1 }),
-              value.processedPixelCount > 0, value.processedPixelCount <= 200_000_000,
-              (0...value.selectedFrameCount).contains(value.resizedFrameCount), (1...1600).contains(value.maximumOutputLongEdge),
+              (1...10_000).contains(value.originalFrameCount), (1...value.originalFrameCount).contains(value.selectedFrameCount),
+              value.selectedFrameCount == value.selectedIndices.count,
+              value.processedPixelCount > 0,
+              (0...value.selectedFrameCount).contains(value.resizedFrameCount), (1...maximumLongEdge).contains(value.maximumOutputLongEdge),
               AreaTargetFileSafety.isLowerHex64(value.scaleDigest) else { throw ArchiveError.invalidScan("上传预处理记录无效") }
-        return value
+        if value.policy == "mobile-scan-preparation-v1", value.policyVersion == 1,
+           value.selectedFrameCount <= 80, value.selectedIndices.first == 0, value.selectedIndices.last == value.originalFrameCount - 1,
+           zip(value.selectedIndices, value.selectedIndices.dropFirst()).allSatisfy({ $0 < $1 }),
+           value.processedPixelCount <= 200_000_000 { return value }
+        if value.policy == "mobile-scan-preparation-v2", value.policyVersion == 2,
+           value.receivedFrameCount == value.originalFrameCount, value.selectedFrameCount == value.originalFrameCount,
+           value.selectedIndices == Array(0..<value.originalFrameCount),
+           let tier = value.capacityTier, [100, 500].contains(tier), value.selectionVersion == "upload-all-v2",
+           let digest = value.selectionDigest, AreaTargetFileSafety.isLowerHex64(digest),
+           digest == (try AreaTargetClientPreparation.uploadSelectionDigest(capacityTier: tier, indices: value.selectedIndices)),
+           value.processedPixelCount <= 2_000_000_000,
+           value.processedPixelCount <= Int64(value.selectedFrameCount - (protection?.protectedIndices.count ?? 0)) * 1600 * 1600 + Int64(protection?.protectedIndices.count ?? 0) * 1920 * 1920 { return value }
+        throw ArchiveError.invalidScan("上传预处理记录无效")
+    }
+
+    private func criticalProtection(frames: [[String: Any]], root: URL,
+                                    capability: AreaTargetCriticalFrameProtectionCapability,
+                                    progress: @escaping @Sendable (String) -> Void,
+                                    isCancelled: @escaping @Sendable () -> Bool) throws -> AreaTargetCriticalFrameProtection {
+        var qualities: [ScanFrameQuality] = []
+        for (index, frame) in frames.enumerated() {
+            try check(isCancelled)
+            progress("正在分析临界弱视角风险（\(index + 1)/\(frames.count)）…")
+            guard let path = frame["imageFile"] as? String else { throw invalid("关键帧图片路径无效") }
+            let quality = try autoreleasepool { try grayQuality(AreaTargetFileSafety.safeFile(path, in: root), maximumLongEdge: capability.maximumProtectedLongEdge) }
+            try check(isCancelled)
+            qualities.append(quality)
+        }
+        return try Self.criticalProtection(qualities: qualities, capability: capability)
+    }
+
+    /// Ranks quality risk only; source ordinals are independent of capture IDs.
+    static func criticalProtection(qualities: [ScanFrameQuality], capability: AreaTargetCriticalFrameProtectionCapability) throws -> AreaTargetCriticalFrameProtection {
+        var candidates: [(index: Int, rejected: Bool, sharpness: Double)] = []
+        for (index, quality) in qualities.enumerated() {
+            guard quality.rejection != .unreadable, quality.sampleCount > 0, quality.sharpness.isFinite, quality.contrast.isFinite else {
+                throw ArchiveError.invalidScan("无法分析关键帧图像，临界帧保护已停止")
+            }
+            // These 2D quality measurements are risk proxies, not the server's 3D
+            // correspondence count. Every frame is still uploaded for deduplication.
+            if quality.rejection != nil || quality.sharpness <= Double(capability.sharpnessThreshold) || quality.contrast <= Double(capability.contrastThreshold) {
+                candidates.append((index, quality.rejection != nil, quality.sharpness))
+            }
+        }
+        candidates.sort {
+            if $0.rejected != $1.rejected { return $0.rejected }
+            if $0.sharpness != $1.sharpness { return $0.sharpness < $1.sharpness }
+            return $0.index < $1.index
+        }
+        return AreaTargetCriticalFrameProtection(version: capability.version, riskVersion: capability.riskVersion,
+            protectedIndices: candidates.prefix(capability.maximumProtectedFrames).map(\.index).sorted(), candidateFrameCount: candidates.count)
+    }
+
+    private func grayQuality(_ sourceURL: URL, maximumLongEdge: Int) throws -> ScanFrameQuality {
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false, kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: false, kCGImageSourceThumbnailMaxPixelSize: maximumLongEdge]
+        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, options as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              image.width > 0, image.height > 0, max(image.width, image.height) <= maximumLongEdge,
+              let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width,
+                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue), let data = context.data else {
+            throw invalid("无法解码关键帧图像，临界帧保护已停止")
+        }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bytes = data.assumingMemoryBound(to: UInt8.self)
+        return ScanFrameQuality.assess(width: image.width, height: image.height) { x, y in bytes[y * image.width + x] }
     }
 
     private func resizedImage(_ sourceURL: URL, to destinationURL: URL, width: Int, height: Int) throws {
@@ -218,14 +360,14 @@ final class AreaTargetScanArchive: AreaTargetArchiving {
             do { digest = try AreaTargetFileSafety.digest(url, maximum: AreaTargetFileSafety.maximumExpandedBytes, isCancelled: isCancelled) }
             catch AreaTargetAPIError.cancelled { throw ArchiveError.cancelled }
             total += digest.size
-            guard total <= AreaTargetFileSafety.maximumExpandedBytes else { throw invalid("扫描展开后超过 500 MiB 限制") }
+            guard total <= maximumExpandedBytes else { throw invalid("扫描展开后超过 500 MiB 限制") }
             snapshots.append((path, url, digest.size, digest.sha256))
         }
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("area-target-scan-" + UUID().uuidString.lowercased() + ".zip")
         do {
             try write(snapshots, root: root, to: output, progress: progress, isCancelled: isCancelled)
             try check(isCancelled)
-            guard try AreaTargetFileSafety.regularFileSize(output) < AreaTargetFileSafety.maximumZIPBytes - 4096 else { throw invalid("扫描 ZIP 超过上传大小限制") }
+            guard try AreaTargetFileSafety.regularFileSize(output) < maximumZIPBytes - 4096 else { throw invalid("扫描 ZIP 超过上传大小限制") }
             progress("扫描归档已就绪")
             return output
         } catch {

@@ -14,8 +14,10 @@ enum AreaTargetServerOrigin: String, Codable, CaseIterable {
     }
 
     func allows(_ url: URL) -> Bool {
-        url.scheme == "https" && url.host == baseURL.host && url.port == nil &&
-        url.user == nil && url.password == nil && url.query == nil && url.fragment == nil
+        let allowedQuery = url.query == nil || (url.path == "/api/v1/processing-requirements" &&
+            url.query == "policy=mobile-scan-preparation-v2")
+        return url.scheme == "https" && url.host == baseURL.host && url.port == nil &&
+        url.user == nil && url.password == nil && allowedQuery && url.fragment == nil
     }
 }
 
@@ -122,11 +124,111 @@ struct AreaTargetRemoteJob: Codable, Equatable {
     }
 }
 
+private struct CriticalProtectionKey: CodingKey {
+    let stringValue: String
+    var intValue: Int? { nil }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+
+/// JSONDecoder accepts 1.0 as Int. Check the new extension before token types
+/// are lost so remote requirements, ZIPs, and journals match the server contract.
+enum AreaTargetCriticalProtectionJSON {
+    private enum ValidationError: Error { case malformed }
+
+    static func validateRequirements(_ document: [String: Any]) throws {
+        guard document.keys.contains("criticalFrameProtection") else { return }
+        guard document["policy"] as? String == "mobile-scan-preparation-v2",
+              let fields = document["criticalFrameProtection"] as? [String: Any],
+              Set(fields.keys) == ["version", "riskVersion", "maximumProtectedFrames", "maximumProtectedLongEdge", "sharpnessThreshold", "contrastThreshold"],
+              ["maximumProtectedFrames", "maximumProtectedLongEdge", "sharpnessThreshold", "contrastThreshold"].allSatisfy({ isInteger(fields[$0]) }) else {
+            throw ValidationError.malformed
+        }
+    }
+
+    static func validatePreparation(_ document: [String: Any]) throws {
+        guard document.keys.contains("criticalFrameProtection") else { return }
+        guard let fields = document["criticalFrameProtection"] as? [String: Any],
+              Set(fields.keys) == ["version", "riskVersion", "protectedIndices", "candidateFrameCount"],
+              isInteger(fields["candidateFrameCount"]), let indices = fields["protectedIndices"] as? [Any],
+              indices.allSatisfy({ isInteger($0) }) else { throw ValidationError.malformed }
+    }
+
+    private static func isInteger(_ value: Any?) -> Bool {
+        guard let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID() else { return false }
+        return ["c", "s", "i", "l", "q", "C", "S", "I", "L", "Q"].contains(String(cString: value.objCType))
+    }
+}
+
+struct AreaTargetCriticalFrameProtectionCapability: Codable, Equatable {
+    let version: String
+    let riskVersion: String
+    let maximumProtectedFrames: Int
+    let maximumProtectedLongEdge: Int
+    let sharpnessThreshold: Int
+    let contrastThreshold: Int
+
+    var isSupported: Bool {
+        version == "critical-frame-protection-v1" && riskVersion == "gray-quality-risk-v1" &&
+        maximumProtectedFrames == 8 && maximumProtectedLongEdge == 1920 && sharpnessThreshold == 16 && contrastThreshold == 20
+    }
+
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CriticalProtectionKey.self)
+        guard Set(fields.allKeys.map(\.stringValue)) == ["version", "riskVersion", "maximumProtectedFrames", "maximumProtectedLongEdge", "sharpnessThreshold", "contrastThreshold"] else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid critical frame protection capability fields"))
+        }
+        version = try fields.decode(String.self, forKey: CriticalProtectionKey(stringValue: "version")!)
+        riskVersion = try fields.decode(String.self, forKey: CriticalProtectionKey(stringValue: "riskVersion")!)
+        maximumProtectedFrames = try fields.decode(Int.self, forKey: CriticalProtectionKey(stringValue: "maximumProtectedFrames")!)
+        maximumProtectedLongEdge = try fields.decode(Int.self, forKey: CriticalProtectionKey(stringValue: "maximumProtectedLongEdge")!)
+        sharpnessThreshold = try fields.decode(Int.self, forKey: CriticalProtectionKey(stringValue: "sharpnessThreshold")!)
+        contrastThreshold = try fields.decode(Int.self, forKey: CriticalProtectionKey(stringValue: "contrastThreshold")!)
+        guard isSupported else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unsupported critical frame protection capability"))
+        }
+    }
+}
+
+struct AreaTargetCriticalFrameProtection: Codable, Equatable {
+    let version: String
+    let riskVersion: String
+    let protectedIndices: [Int]
+    let candidateFrameCount: Int
+
+    func isValid(sourceFrameCount: Int) -> Bool {
+        version == "critical-frame-protection-v1" && riskVersion == "gray-quality-risk-v1" &&
+        protectedIndices.count <= 8 && protectedIndices.allSatisfy { $0 >= 0 && $0 < sourceFrameCount } &&
+        zip(protectedIndices, protectedIndices.dropFirst()).allSatisfy { $0 < $1 } &&
+        candidateFrameCount >= protectedIndices.count && candidateFrameCount <= sourceFrameCount
+    }
+
+    private enum CodingKeys: String, CodingKey { case version, riskVersion, protectedIndices, candidateFrameCount }
+}
+
+extension AreaTargetCriticalFrameProtection {
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CriticalProtectionKey.self)
+        guard Set(fields.allKeys.map(\.stringValue)) == ["version", "riskVersion", "protectedIndices", "candidateFrameCount"] else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid critical frame protection record fields"))
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(String.self, forKey: .version)
+        riskVersion = try values.decode(String.self, forKey: .riskVersion)
+        protectedIndices = try values.decode([Int].self, forKey: .protectedIndices)
+        candidateFrameCount = try values.decode(Int.self, forKey: .candidateFrameCount)
+        guard isValid(sourceFrameCount: 10_000) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid critical frame protection record"))
+        }
+    }
+}
+
 struct AreaTargetProcessingRequirements: Codable, Equatable {
     struct Profile: Codable, Equatable {
         let maxFrames: Int
         let maximumLongEdge: Int
         let maximumTotalPixels: Int64
+        var minimumLongEdge: Int? = nil
     }
     struct Safety: Codable, Equatable {
         let maximumRequestBytes: Int64
@@ -142,19 +244,39 @@ struct AreaTargetProcessingRequirements: Codable, Equatable {
     let policyVersion: Int
     let profiles: [String: Profile]
     let safety: Safety
+    var capacityTier: Int? = nil
+    var criticalFrameProtection: AreaTargetCriticalFrameProtectionCapability? = nil
+    private enum CodingKeys: String, CodingKey { case schemaVersion, policy, policyVersion, profiles, safety, capacityTier, criticalFrameProtection }
 
     func preparationPolicy(for profile: String) -> Profile? {
-        guard schemaVersion == 1, policy == "mobile-scan-preparation-v1", policyVersion == 1,
-              ["fast", "quality"].contains(profile), let value = profiles[profile],
-              (2...80).contains(value.maxFrames), (1...1600).contains(value.maximumLongEdge),
-              value.maximumTotalPixels > 0, value.maximumTotalPixels <= 200_000_000,
+        guard schemaVersion == 1, ["fast", "quality"].contains(profile), let value = profiles[profile],
               safety.maximumRequestBytes == AreaTargetFileSafety.maximumZIPBytes,
               safety.maximumExpandedBytes == AreaTargetFileSafety.maximumExpandedBytes,
               safety.maximumArchiveEntries == AreaTargetFileSafety.maximumEntries,
               safety.maximumSourceFrameCount == 10_000, safety.maximumImagePixels == 32_000_000,
               safety.maximumImageDimension == 8192,
               safety.maximumMetadataBytes == AreaTargetFileSafety.maximumMetadataBytes else { return nil }
-        return value
+        if policy == "mobile-scan-preparation-v1", policyVersion == 1, criticalFrameProtection == nil,
+           (2...80).contains(value.maxFrames), (1...1600).contains(value.maximumLongEdge),
+           value.maximumTotalPixels > 0, value.maximumTotalPixels <= 200_000_000 { return value }
+        if policy == "mobile-scan-preparation-v2", policyVersion == 2, criticalFrameProtection?.isSupported != false, let capacityTier,
+           [100, 500].contains(capacityTier), value.maxFrames == capacityTier,
+           value.maximumLongEdge == 1600, value.minimumLongEdge == 1024,
+           value.maximumTotalPixels == (capacityTier == 100 ? 200_000_000 : 600_000_000) { return value }
+        return nil
+    }
+}
+
+extension AreaTargetProcessingRequirements {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        policy = try values.decode(String.self, forKey: .policy)
+        policyVersion = try values.decode(Int.self, forKey: .policyVersion)
+        profiles = try values.decode([String: Profile].self, forKey: .profiles)
+        safety = try values.decode(Safety.self, forKey: .safety)
+        capacityTier = try values.decodeIfPresent(Int.self, forKey: .capacityTier)
+        criticalFrameProtection = values.contains(.criticalFrameProtection) ? try values.decode(AreaTargetCriticalFrameProtectionCapability.self, forKey: .criticalFrameProtection) : nil
     }
 }
 
@@ -171,9 +293,58 @@ struct AreaTargetClientPreparation: Codable, Equatable {
     let resizedFrameCount: Int
     let maximumOutputLongEdge: Int
     let scaleDigest: String
+    var receivedFrameCount: Int? = nil
+    var capacityTier: Int? = nil
+    var selectionVersion: String? = nil
+    var selectionDigest: String? = nil
+    var criticalFrameProtection: AreaTargetCriticalFrameProtection? = nil
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, policy, policyVersion, profile, preparedBy, originalFrameCount, selectedFrameCount, selectedIndices
+        case processedPixelCount, resizedFrameCount, maximumOutputLongEdge, scaleDigest, receivedFrameCount, capacityTier, selectionVersion, selectionDigest, criticalFrameProtection
+    }
 
     var identityConfiguration: String {
-        "preparation_schema=\(schemaVersion);policy=\(policy);policy_version=\(policyVersion);profile=\(profile);prepared_by=\(preparedBy);original_frames=\(originalFrameCount);selected_frames=\(selectedFrameCount);scale_sha256=\(scaleDigest)"
+        let original = "preparation_schema=\(schemaVersion);policy=\(policy);policy_version=\(policyVersion);profile=\(profile);prepared_by=\(preparedBy);original_frames=\(originalFrameCount);selected_frames=\(selectedFrameCount);scale_sha256=\(scaleDigest)"
+        guard policy == "mobile-scan-preparation-v2" else { return original }
+        let v2 = original + ";capacity_tier=\(capacityTier.map(String.init) ?? "unrecorded");selection_sha256=\(selectionDigest ?? "unrecorded")"
+        guard let protection = criticalFrameProtection else { return v2 }
+        return v2 + ";critical_frame_protection=\(protection.version);critical_frame_risk=\(protection.riskVersion);protected_indices=\(protection.protectedIndices.map(String.init).joined(separator: ","));candidate_frames=\(protection.candidateFrameCount)"
+    }
+
+    static func uploadSelectionDigest(capacityTier: Int, indices: [Int]) throws -> String {
+        let record: [String: Any] = ["capacityTier": capacityTier, "policy": "mobile-scan-preparation-v2",
+            "selectedIndices": indices, "selectionVersion": "upload-all-v2"]
+        return SHA256.hash(data: try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+extension AreaTargetClientPreparation {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        policy = try values.decode(String.self, forKey: .policy)
+        policyVersion = try values.decode(Int.self, forKey: .policyVersion)
+        profile = try values.decode(String.self, forKey: .profile)
+        preparedBy = try values.decode(String.self, forKey: .preparedBy)
+        originalFrameCount = try values.decode(Int.self, forKey: .originalFrameCount)
+        selectedFrameCount = try values.decode(Int.self, forKey: .selectedFrameCount)
+        selectedIndices = try values.decode([Int].self, forKey: .selectedIndices)
+        processedPixelCount = try values.decode(Int64.self, forKey: .processedPixelCount)
+        resizedFrameCount = try values.decode(Int.self, forKey: .resizedFrameCount)
+        maximumOutputLongEdge = try values.decode(Int.self, forKey: .maximumOutputLongEdge)
+        scaleDigest = try values.decode(String.self, forKey: .scaleDigest)
+        receivedFrameCount = try values.decodeIfPresent(Int.self, forKey: .receivedFrameCount)
+        capacityTier = try values.decodeIfPresent(Int.self, forKey: .capacityTier)
+        selectionVersion = try values.decodeIfPresent(String.self, forKey: .selectionVersion)
+        selectionDigest = try values.decodeIfPresent(String.self, forKey: .selectionDigest)
+        criticalFrameProtection = values.contains(.criticalFrameProtection) ? try values.decode(AreaTargetCriticalFrameProtection.self, forKey: .criticalFrameProtection) : nil
+        if let protection = criticalFrameProtection {
+            guard policy == "mobile-scan-preparation-v2", policyVersion == 2, (1...10_000).contains(originalFrameCount),
+                  protection.isValid(sourceFrameCount: originalFrameCount) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Critical frame protection does not match the source contract"))
+            }
+        }
     }
 }
 
@@ -223,6 +394,7 @@ protocol AreaTargetAPI {
     func validateServiceSession() async throws -> AreaTargetServiceSession?
     func signOut() async throws
     func fetchProcessingRequirements() async throws -> AreaTargetProcessingRequirements
+    func fetchProcessingRequirements(policy: String) async throws -> AreaTargetProcessingRequirements
     func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob
     func status(jobID: String, token: String) async throws -> AreaTargetRemoteJob
@@ -237,6 +409,9 @@ extension AreaTargetAPI {
     func validateServiceSession() async throws -> AreaTargetServiceSession? { try savedServiceSession() }
     func signOut() async throws { }
     func fetchProcessingRequirements() async throws -> AreaTargetProcessingRequirements { throw AreaTargetAPIError.invalidResponse }
+    func fetchProcessingRequirements(policy: String) async throws -> AreaTargetProcessingRequirements {
+        try await fetchProcessingRequirements()
+    }
 }
 
 /// Every client is bound to one fixed origin. The delegate refuses redirects and keeps transfers on disk.
@@ -333,17 +508,31 @@ final class AreaTargetAPIClient: AreaTargetAPI {
     }
 
     func fetchProcessingRequirements() async throws -> AreaTargetProcessingRequirements {
-        var request = URLRequest(url: origin.baseURL.appendingPathComponent("api/v1/processing-requirements"))
+        try await processingRequirements(policy: nil)
+    }
+
+    func fetchProcessingRequirements(policy: String) async throws -> AreaTargetProcessingRequirements {
+        guard policy == "mobile-scan-preparation-v2" else { throw AreaTargetAPIError.invalidRequest("policy") }
+        return try await processingRequirements(policy: policy)
+    }
+
+    private func processingRequirements(policy: String?) async throws -> AreaTargetProcessingRequirements {
+        var components = URLComponents(url: origin.baseURL.appendingPathComponent("api/v1/processing-requirements"), resolvingAgainstBaseURL: false)!
+        if let policy { components.queryItems = [URLQueryItem(name: "policy", value: policy)] }
+        var request = URLRequest(url: components.url!)
         request.httpMethod = "GET"
         request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let transfer = try await perform(request: request)
         let data = try Self.responseData(transfer, accepted: [200])
-        guard data.count <= 16 * 1024,
-              let requirements = try? JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: data) else {
+        guard data.count <= 16 * 1024 else { throw AreaTargetAPIError.invalidResponse }
+        do {
+            guard let document = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw AreaTargetAPIError.invalidResponse }
+            try AreaTargetCriticalProtectionJSON.validateRequirements(document)
+            return try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: data)
+        } catch {
             throw AreaTargetAPIError.invalidResponse
         }
-        return requirements
     }
 
     func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,

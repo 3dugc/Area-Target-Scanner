@@ -405,6 +405,133 @@ final class AreaTargetAPIClientTests: XCTestCase {
         }
     }
 
+    func testV2RequirementsAcceptOnlyFrozenCapacityAndImageBudgets() throws {
+        for tier in [100, 500] {
+            var value = try XCTUnwrap(JSONSerialization.jsonObject(with: requirementsJSON()) as? [String: Any])
+            value["policy"] = "mobile-scan-preparation-v2"; value["policyVersion"] = 2; value["capacityTier"] = tier
+            value["profiles"] = ["fast": ["maxFrames": tier, "maximumLongEdge": 1600, "minimumLongEdge": 1024,
+                "maximumTotalPixels": tier == 100 ? 200_000_000 : 600_000_000]]
+            func decode(_ object: [String: Any]) throws -> AreaTargetProcessingRequirements {
+                try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: object))
+            }
+            XCTAssertEqual(try decode(value).preparationPolicy(for: "fast")?.maxFrames, tier)
+            for mutation in ["capacityTier", "policyVersion", "schemaVersion"] {
+                var unsafe = value; unsafe[mutation] = 999
+                XCTAssertNil(try decode(unsafe).preparationPolicy(for: "fast"), mutation)
+            }
+            var unsafe = value
+            unsafe["profiles"] = ["fast": ["maxFrames": tier, "maximumLongEdge": 1600, "minimumLongEdge": 1000,
+                "maximumTotalPixels": tier == 100 ? 200_000_000 : 600_000_000]]
+            XCTAssertNil(try decode(unsafe).preparationPolicy(for: "fast"))
+        }
+    }
+
+    func testCriticalFrameProtectionCapabilityIsExactAndOptionalForV2() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: requirementsJSON()) as? [String: Any])
+        object["policy"] = "mobile-scan-preparation-v2"; object["policyVersion"] = 2; object["capacityTier"] = 100
+        object["profiles"] = ["fast": ["maxFrames": 100, "maximumLongEdge": 1600, "minimumLongEdge": 1024, "maximumTotalPixels": 200_000_000]]
+        let capability: [String: Any] = ["version": "critical-frame-protection-v1", "riskVersion": "gray-quality-risk-v1",
+            "maximumProtectedFrames": 8, "maximumProtectedLongEdge": 1920, "sharpnessThreshold": 16, "contrastThreshold": 20]
+        func decode(_ record: [String: Any]) throws -> AreaTargetProcessingRequirements {
+            try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: record))
+        }
+        XCTAssertNotNil(try decode(object).preparationPolicy(for: "fast"))
+        object["criticalFrameProtection"] = capability
+        let value = try decode(object)
+        XCTAssertNotNil(value.preparationPolicy(for: "fast"))
+        let roundTrip = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? [String: Any])
+        XCTAssertEqual(roundTrip["criticalFrameProtection"] as? NSDictionary, capability as NSDictionary)
+        for key in capability.keys {
+            var incomplete = capability; incomplete.removeValue(forKey: key)
+            var invalid = object; invalid["criticalFrameProtection"] = incomplete
+            XCTAssertThrowsError(try decode(invalid), key)
+        }
+        for (key, replacement) in ["version": "future", "riskVersion": "future", "maximumProtectedFrames": 9,
+            "maximumProtectedLongEdge": 2000, "sharpnessThreshold": 17, "contrastThreshold": 21, "unexpected": 1] as [String: Any] {
+            var altered = capability; altered[key] = replacement
+            var invalid = object; invalid["criticalFrameProtection"] = altered
+            XCTAssertThrowsError(try decode(invalid), key)
+        }
+        for bad in [NSNull(), true, ["maximumProtectedFrames": true]] as [Any] {
+            var invalid = object; invalid["criticalFrameProtection"] = bad
+            XCTAssertThrowsError(try decode(invalid))
+        }
+        object["policy"] = "mobile-scan-preparation-v1"; object["policyVersion"] = 1
+        XCTAssertNil(try decode(object).preparationPolicy(for: "fast"))
+    }
+
+    func testExplicitV2NegotiationToleratesLegacyResponseAndConfinesQueryToRequirements() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AreaTargetTestURLProtocol.self]
+        AreaTargetTestURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://at.3dugc.com/api/v1/processing-requirements?policy=mobile-scan-preparation-v2")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Area-Target-Session"), String(repeating: "b", count: 64))
+            return (200, self.requirementsJSON())
+        }
+        let requirements = try await authenticatedClient(configuration: configuration).fetchProcessingRequirements(policy: "mobile-scan-preparation-v2")
+        XCTAssertEqual(requirements.preparationPolicy(for: "fast")?.maxFrames, 80)
+        for value in ["https://at.3dugc.com/api/v1/jobs?policy=mobile-scan-preparation-v2",
+                      "https://at.3dugc.com/api/v1/processing-requirements?policy=future-policy",
+                      "https://at.3dugc.com/api/v1/processing-requirements?policy=mobile-scan-preparation-v2&token=secret"] {
+            XCTAssertFalse(AreaTargetServerOrigin.current.allows(try XCTUnwrap(URL(string: value))))
+        }
+    }
+
+    func testCriticalProtectionDecoderValidatesItsSourceCountAndPolicy() throws {
+        var object: [String: Any] = ["schemaVersion": 1, "policy": "mobile-scan-preparation-v2", "policyVersion": 2,
+            "profile": "fast", "preparedBy": "client", "originalFrameCount": 2, "selectedFrameCount": 2,
+            "selectedIndices": [0, 1], "processedPixelCount": 20_000, "resizedFrameCount": 0,
+            "maximumOutputLongEdge": 100, "scaleDigest": String(repeating: "a", count: 64)]
+        let protection: [String: Any] = ["version": "critical-frame-protection-v1", "riskVersion": "gray-quality-risk-v1",
+            "protectedIndices": [1], "candidateFrameCount": 2]
+        object["criticalFrameProtection"] = protection
+        func decode(_ value: [String: Any]) throws -> AreaTargetClientPreparation {
+            try JSONDecoder().decode(AreaTargetClientPreparation.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        XCTAssertNotNil(try decode(object))
+        for (key, value) in ["protectedIndices": [2], "candidateFrameCount": 3] as [String: Any] {
+            var cap = protection; cap[key] = value
+            var invalid = object; invalid["criticalFrameProtection"] = cap
+            XCTAssertThrowsError(try decode(invalid), key)
+        }
+        for (key, value) in ["policy": "mobile-scan-preparation-v1", "policyVersion": 1, "originalFrameCount": 0] as [String: Any] {
+            var invalid = object; invalid[key] = value
+            XCTAssertThrowsError(try decode(invalid), key)
+        }
+        object["criticalFrameProtection"] = ["version": "critical-frame-protection-v1", "riskVersion": "gray-quality-risk-v1",
+            "protectedIndices": [], "candidateFrameCount": 0]
+        XCTAssertNotNil(try decode(object))
+    }
+
+    func testCriticalCapabilityRejectsIntegralFloatAndBooleanTokensAtResponseBoundary() async throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: requirementsJSON()) as? [String: Any])
+        object["policy"] = "mobile-scan-preparation-v2"; object["policyVersion"] = 2; object["capacityTier"] = 100
+        object["profiles"] = ["fast": ["maxFrames": 100, "maximumLongEdge": 1600, "minimumLongEdge": 1024, "maximumTotalPixels": 200_000_000]]
+        object["criticalFrameProtection"] = ["version": "critical-frame-protection-v1", "riskVersion": "gray-quality-risk-v1",
+            "maximumProtectedFrames": 8, "maximumProtectedLongEdge": 1920, "sharpnessThreshold": 16, "contrastThreshold": 20]
+        let original = String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AreaTargetTestURLProtocol.self]
+        for (old, new) in [("\"maximumProtectedFrames\":8", "\"maximumProtectedFrames\":8.0"),
+            ("\"maximumProtectedFrames\":8", "\"maximumProtectedFrames\":8e0"),
+            ("\"maximumProtectedLongEdge\":1920", "\"maximumProtectedLongEdge\":1920.0"),
+            ("\"sharpnessThreshold\":16", "\"sharpnessThreshold\":16.0"),
+            ("\"contrastThreshold\":20", "\"contrastThreshold\":20.0"),
+            ("\"maximumProtectedFrames\":8", "\"maximumProtectedFrames\":true")] {
+            let altered = original.replacingOccurrences(of: old, with: new)
+            XCTAssertNotEqual(altered, original)
+            AreaTargetTestURLProtocol.handler = { _ in (200, Data(altered.utf8)) }
+            do { _ = try await authenticatedClient(configuration: configuration).fetchProcessingRequirements(policy: "mobile-scan-preparation-v2"); XCTFail("accepted " + new) }
+            catch { XCTAssertEqual(error as? AreaTargetAPIError, .invalidResponse) }
+        }
+    }
+
+    func testUploadSelectionDigestMatchesFrozenPythonCanonicalRecord() throws {
+        XCTAssertEqual(try AreaTargetClientPreparation.uploadSelectionDigest(capacityTier: 100, indices: [0, 1, 2, 99]),
+            "37998e40ccd2c192ea6c0af84ac0c491e546ca4d2f8ef7cff3d231d1ac9af356")
+    }
+
     func testMalformedRequirementsAreSanitizedAsInvalidResponse() async {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AreaTargetTestURLProtocol.self]

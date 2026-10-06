@@ -117,6 +117,7 @@ class FeatureDatabase:
     keyframes: List[KeyframeData] = field(default_factory=list)
     global_descriptors: Optional[NDArray[np.float64]] = None
     vocabulary: Optional[Any] = None  # sklearn KMeans or similar
+    selection_report: Optional[dict] = None  # Producer diagnostics; not descriptor ABI.
 
 
 @dataclass

@@ -580,9 +580,9 @@ def _make_input_hash(zip_hash, profile, uv_unwrap):
     import cv2
 
     digest = hashlib.sha256()
-    # Feature descriptors and vocabularies belong to the OpenCV producer.
-    # Keep that identity even when an operator retains an older cache namespace.
-    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}"
+    # Include both the descriptor producer and preparation policy in cache identity.
+    from processing_pipeline.scan_preparation import POLICY_V2
+    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}"
     digest.update(payload.encode("utf-8"))
     return digest.hexdigest()
 
@@ -708,14 +708,21 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
         protected = bool((_get_job_snapshot(job_id) or {}).get('token_hash'))
         if protected:
             from processing_pipeline.scan_security import validate_scan
-            from processing_pipeline.scan_preparation import prepare_scan
+            from processing_pipeline.scan_preparation import POLICY, POLICY_V2, prepare_scan
+            from processing_pipeline.scan_security import load_metadata
             # Admission accepts bounded raw archives; expensive stages see only a working derivative.
             validate_frame_resources(scan_root, max_total_frame_pixels=None)
+            source_manifest = os.path.join(scan_root, 'manifest.json')
+            client_policy = load_metadata(source_manifest).get('clientPreparation') if os.path.isfile(source_manifest) else None
+            mobile_policy = client_policy['policy'] if client_policy is not None else POLICY
+            mobile_capacity = client_policy.get('capacityTier') if client_policy is not None else None
             prepared_dir = tempfile.mkdtemp(prefix='prepared_', dir=os.path.join(UPLOAD_DIR, job_id))
             preparation = prepare_scan(scan_root, os.path.join(prepared_dir, 'scan'),
-                                       profile=profile, uv_unwrap=uv_unwrap)
+                                       profile=profile, uv_unwrap=uv_unwrap,
+                                       policy=mobile_policy, capacity=mobile_capacity)
             scan_root = str(preparation.root)
-            validate_scan(scan_root, uv_unwrap, prepare_uv=True)
+            validate_scan(scan_root, uv_unwrap, prepare_uv=True,
+                          max_total_frame_pixels=preparation.metadata.get('maximumTotalPixels', 200_000_000))
         else:
             validate_frame_resources(scan_root)
 
@@ -741,10 +748,15 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             "MODEL_OPTIMIZER_URL",
             "http://model_optimizer:3000",
         )
+        mobile_options = {}
+        if preparation is not None and preparation.metadata['policy'] == POLICY_V2:
+            mobile_options = {'mobile_preparation_policy': POLICY_V2,
+                              'mobile_preparation_capacity': preparation.metadata['capacityTier']}
         pipeline = OptimizedPipeline(
             optimizer_url=optimizer_url,
             processing_profile=profile,
             mobile_feature_limits=protected,
+            **mobile_options,
         )
         os.makedirs(output_dir, exist_ok=True)
 
@@ -806,6 +818,10 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             from processing_pipeline.scan_security import load_metadata
             manifest = load_metadata(manifest_path)
             manifest['scanPreparation'] = preparation.metadata
+            prepared_manifest = load_metadata(os.path.join(preparation.root, 'manifest.json'))
+            if 'sourceKeyframeSelection' in prepared_manifest:
+                # Preserve original-frame diagnostics separately from derivative feature selection.
+                manifest['sourceKeyframeSelection'] = prepared_manifest['sourceKeyframeSelection']
             if preparation.client_preparation is not None:
                 manifest['clientPreparation'] = preparation.client_preparation
             manifest.setdefault('buildConfiguration', {})['scanPreparation'] = preparation.metadata
@@ -838,7 +854,10 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
 
     except Exception as e:
         logger.exception("job %s failed", job_id)
-        _update_job(job_id, status="failed", error=str(e), error_code="processing_failed", finished_at=_now_iso())
+        code = getattr(e, 'code', None)
+        diagnostic = json.dumps({'message': str(e), 'details': e.details}) if code == 'coverage_budget_exceeded' else str(e)
+        _update_job(job_id, status="failed", error=diagnostic,
+                    error_code=code if code == 'coverage_budget_exceeded' else 'processing_failed', finished_at=_now_iso())
     finally:
         if work_dir and os.path.isdir(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)

@@ -12,6 +12,7 @@ services:
       - AREA_TARGET_USERNAME=${AREA_TARGET_USERNAME:?Set AREA_TARGET_USERNAME}
       - AREA_TARGET_PASSWORD_HASH=${AREA_TARGET_PASSWORD_HASH:?Set AREA_TARGET_PASSWORD_HASH using python -m web_service.auth hash-password}
       - AREA_TARGET_COOKIE_SECURE=${AREA_TARGET_COOKIE_SECURE:-0}
+      - AREA_TARGET_PREPARATION_TIER=${AREA_TARGET_PREPARATION_TIER:-100}
       - UPLOAD_DIR=/tmp/pipeline_uploads
       - OUTPUT_DIR=/tmp/pipeline_outputs
       - MODEL_OPTIMIZER_URL=http://model_optimizer:3000

@@ -20,6 +20,14 @@ struct AreaTargetJobStore: AreaTargetJobStoring {
         }
         let bytes = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard bytes.count <= 8 * 1024 * 1024 else { throw AreaTargetLocalError.invalidJournal }
+        if let records = try JSONSerialization.jsonObject(with: bytes) as? [[String: Any]] {
+            for record in records {
+                if let preparation = record["clientPreparation"] as? [String: Any] {
+                    do { try AreaTargetCriticalProtectionJSON.validatePreparation(preparation) }
+                    catch { throw AreaTargetLocalError.invalidJournal }
+                }
+            }
+        }
         let jobs = try JSONDecoder().decode([AreaTargetProcessingJob].self, from: bytes)
         try validate(jobs)
         return jobs

@@ -523,8 +523,8 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertEqual(model.jobs.first?.phase, .processing)
     }
 
-    func testRequirementsFailureFallsBackToRawAndImmutableRetryDoesNotRefetch() async throws {
-        await api.setRejectBeforeAccepting(true)
+    func testRequirementsFailurePreservesRetryWithoutCreatingAmbiguousRawUpload() async throws {
+        await api.setRequirements(nil)
         let model = model()
         await model.start(scanDirectory: scan, displayName: "完整原扫描")
         let id = try XCTUnwrap(model.jobs.first?.id)
@@ -533,12 +533,115 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertNil(archive.requirementsSeen)
         XCTAssertNil(model.jobs.first?.clientPreparation)
         XCTAssertEqual(model.jobs.first?.phase, .paused)
-        await api.setRejectBeforeAccepting(false)
+        XCTAssertEqual(archive.calls, 0)
+        XCTAssertNil(model.jobs.first?.archiveURL)
+        let events = await api.events
+        let submissions = events.filter { $0.0 == "submit" }
+        XCTAssertTrue(submissions.isEmpty)
+        await api.setRequirements(AreaFlowAPI.legacyRequirements)
         await model.resume(jobID: id)
         let retryRequestCount = await api.requirementsCallCount()
-        XCTAssertEqual(retryRequestCount, 1)
+        XCTAssertEqual(retryRequestCount, 2)
         XCTAssertEqual(archive.calls, 1)
         XCTAssertEqual(model.jobs.first?.phase, .processing)
+    }
+
+    func testKnownUnsupportedV2QueriesLegacyRequirementsAndDisplaysActualCapacity() async throws {
+        await api.setRequirementsPolicyError(.server(statusCode: 400,
+            problem: .init(code: "unsupported_preparation_policy", message: "Unsupported policy", retryable: false), retryAfter: nil))
+        let model = model(); await model.start(scanDirectory: scan, displayName: "旧服务器扫描")
+        let count = await api.requirementsCallCount()
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(archive.requirementsSeen, AreaFlowAPI.legacyRequirements)
+        XCTAssertTrue(journal.details.contains { $0.contains("旧") && $0.contains("80") })
+        XCTAssertEqual(model.jobs.first?.phase, .processing)
+    }
+
+    func testUnknownRequirementsDoNotProduceRawUpload() async throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(AreaFlowAPI.legacyRequirements)) as? [String: Any])
+        object["policy"] = "future-policy"
+        await api.setRequirements(try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: object)))
+        let model = model(); await model.start(scanDirectory: scan, displayName: "未知策略")
+        XCTAssertEqual(model.jobs.first?.phase, .paused)
+        XCTAssertEqual(archive.calls, 0)
+        XCTAssertNil(model.jobs.first?.archiveURL)
+    }
+
+    func testNewTaskRequestsV2AndDisplaysReturnedLegacyCapacityWhilePreparing() async throws {
+        let requirements = try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: Data(#"{"schemaVersion":1,"policy":"mobile-scan-preparation-v1","policyVersion":1,"profiles":{"fast":{"maxFrames":80,"maximumLongEdge":1600,"maximumTotalPixels":200000000}},"safety":{"maximumRequestBytes":536870912,"maximumExpandedBytes":524288000,"maximumArchiveEntries":10000,"maximumSourceFrameCount":10000,"maximumImagePixels":32000000,"maximumImageDimension":8192,"maximumMetadataBytes":8388608}}"#.utf8))
+        await api.setRequirements(requirements)
+        await model().start(scanDirectory: scan, displayName: "旧服务器扫描")
+        let requested = await api.requestedPreparationPolicy()
+        XCTAssertEqual(requested, "mobile-scan-preparation-v2")
+        XCTAssertTrue(journal.details.contains { $0.contains("80") && $0.contains("旧") })
+        XCTAssertEqual(archive.requirementsSeen, requirements)
+    }
+
+    func testHistoricalPreparationDecodesWithoutV2FieldsAndKeepsExactIdentity() throws {
+        let bytes = Data(#"{"schemaVersion":1,"policy":"mobile-scan-preparation-v1","policyVersion":1,"profile":"fast","preparedBy":"client","originalFrameCount":120,"selectedFrameCount":2,"selectedIndices":[0,119],"processedPixelCount":3840000,"resizedFrameCount":2,"maximumOutputLongEdge":1600,"scaleDigest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}"#.utf8)
+        let value = try JSONDecoder().decode(AreaTargetClientPreparation.self, from: bytes)
+        XCTAssertEqual(value.identityConfiguration, "preparation_schema=1;policy=mobile-scan-preparation-v1;policy_version=1;profile=fast;prepared_by=client;original_frames=120;selected_frames=2;scale_sha256=" + String(repeating: "d", count: 64))
+    }
+
+    func testV2PreparationAndIdentityRemainFrozenWhenRetryRequirementsChange() async throws {
+        var object: [String: Any] = ["schemaVersion": 1, "policy": "mobile-scan-preparation-v2", "policyVersion": 2,
+            "capacityTier": 100, "profiles": ["fast": ["maxFrames": 100, "maximumLongEdge": 1600, "minimumLongEdge": 1024, "maximumTotalPixels": 200_000_000]],
+            "safety": ["maximumRequestBytes": 536870912, "maximumExpandedBytes": 524288000, "maximumArchiveEntries": 10000,
+                "maximumSourceFrameCount": 10000, "maximumImagePixels": 32000000, "maximumImageDimension": 8192, "maximumMetadataBytes": 8388608]]
+        let requirements = try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: object))
+        await api.setRequirements(requirements)
+        let digest = try AreaTargetClientPreparation.uploadSelectionDigest(capacityTier: 100, indices: [0, 1])
+        let preparation = AreaTargetClientPreparation(schemaVersion: 1, policy: "mobile-scan-preparation-v2", policyVersion: 2,
+            profile: "fast", preparedBy: "client", originalFrameCount: 2, selectedFrameCount: 2, selectedIndices: [0, 1],
+            processedPixelCount: 20_000, resizedFrameCount: 0, maximumOutputLongEdge: 100, scaleDigest: String(repeating: "d", count: 64),
+            receivedFrameCount: 2, capacityTier: 100, selectionVersion: "upload-all-v2", selectionDigest: digest)
+        archive.preparation = preparation
+        await api.setRejectBeforeAccepting(true)
+        let model = model(); await model.start(scanDirectory: scan, displayName: "全帧扫描")
+        let job = try XCTUnwrap(model.jobs.first)
+        XCTAssertEqual(job.phase, .paused)
+        XCTAssertEqual(job.clientPreparation, preparation)
+        XCTAssertTrue(job.localizationBuildConfiguration.contains("capacity_tier=100;selection_sha256=" + digest))
+        let zipDigest = job.archiveSHA256
+        object["capacityTier"] = 500
+        object["profiles"] = ["fast": ["maxFrames": 500, "maximumLongEdge": 1600, "minimumLongEdge": 1024, "maximumTotalPixels": 600_000_000]]
+        await api.setRequirements(try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: object)))
+        await model.resume(jobID: job.id)
+        let count = await api.requirementsCallCount()
+        XCTAssertEqual(count, 1)
+        XCTAssertEqual(archive.calls, 1)
+        XCTAssertEqual(model.jobs.first?.archiveSHA256, zipDigest)
+        XCTAssertEqual(model.jobs.first?.clientPreparation, preparation)
+        XCTAssertEqual(model.jobs.first?.localizationBuildConfiguration, job.localizationBuildConfiguration)
+    }
+
+    func testCriticalProtectionIdentityIsOptionalAndFrozenAcrossSavedZIPRetry() async throws {
+        let digest = try AreaTargetClientPreparation.uploadSelectionDigest(capacityTier: 100, indices: [0, 1])
+        var preparation = AreaTargetClientPreparation(schemaVersion: 1, policy: "mobile-scan-preparation-v2", policyVersion: 2,
+            profile: "fast", preparedBy: "client", originalFrameCount: 2, selectedFrameCount: 2, selectedIndices: [0, 1],
+            processedPixelCount: 20_000, resizedFrameCount: 0, maximumOutputLongEdge: 100, scaleDigest: String(repeating: "d", count: 64),
+            receivedFrameCount: 2, capacityTier: 100, selectionVersion: "upload-all-v2", selectionDigest: digest)
+        let legacyIdentity = "preparation_schema=1;policy=mobile-scan-preparation-v2;policy_version=2;profile=fast;prepared_by=client;original_frames=2;selected_frames=2;scale_sha256=" + String(repeating: "d", count: 64) + ";capacity_tier=100;selection_sha256=" + digest
+        XCTAssertEqual(preparation.identityConfiguration, legacyIdentity)
+        preparation.criticalFrameProtection = .init(version: "critical-frame-protection-v1", riskVersion: "gray-quality-risk-v1", protectedIndices: [1], candidateFrameCount: 2)
+        XCTAssertEqual(preparation.identityConfiguration, legacyIdentity + ";critical_frame_protection=critical-frame-protection-v1;critical_frame_risk=gray-quality-risk-v1;protected_indices=1;candidate_frames=2")
+        archive.preparation = preparation
+        await api.setRejectBeforeAccepting(true)
+        let model = model(); await model.start(scanDirectory: scan, displayName: "保护扫描")
+        let job = try XCTUnwrap(model.jobs.first)
+        XCTAssertEqual(job.clientPreparation, preparation)
+        await api.setRequirements(AreaFlowAPI.legacyRequirements)
+        await model.resume(jobID: job.id)
+        let count = await api.requirementsCallCount()
+        XCTAssertEqual(count, 1); XCTAssertEqual(archive.calls, 1)
+        XCTAssertEqual(model.jobs.first?.clientPreparation, preparation)
+        XCTAssertEqual(model.jobs.first?.archiveSHA256, job.archiveSHA256)
+        XCTAssertEqual(model.jobs.first?.localizationBuildConfiguration, job.localizationBuildConfiguration)
+        var changed = preparation
+        changed.criticalFrameProtection = .init(version: "critical-frame-protection-v1", riskVersion: "gray-quality-risk-v1", protectedIndices: [0], candidateFrameCount: 2)
+        XCTAssertNotEqual(changed.identityConfiguration, preparation.identityConfiguration)
+        changed.criticalFrameProtection = .init(version: "critical-frame-protection-v1", riskVersion: "gray-quality-risk-v1", protectedIndices: [1], candidateFrameCount: 1)
+        XCTAssertNotEqual(changed.identityConfiguration, preparation.identityConfiguration)
     }
 
     func testCancellationWhileFetchingRequirementsDoesNotPrepareOrSubmit() async throws {
@@ -886,15 +989,41 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertThrowsError(try store.save([corrupt]))
         XCTAssertEqual(try store.load(), [job], "Rejecting invalid data must preserve the earlier journal")
     }
+
+    func testJournalRejectsIntegralFloatAndBooleanProtectionTokensWithoutChangingStoredBytes() throws {
+        let store = AreaTargetJobStore(url: root.appendingPathComponent("persist/critical-jobs.json"))
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "保护任务", createdAt: Date())
+        job.clientPreparation = .init(schemaVersion: 1, policy: "mobile-scan-preparation-v2", policyVersion: 2,
+            profile: "fast", preparedBy: "client", originalFrameCount: 2, selectedFrameCount: 2, selectedIndices: [0, 1],
+            processedPixelCount: 20_000, resizedFrameCount: 0, maximumOutputLongEdge: 100, scaleDigest: String(repeating: "a", count: 64),
+            receivedFrameCount: 2, capacityTier: 100, selectionVersion: "upload-all-v2",
+            selectionDigest: try AreaTargetClientPreparation.uploadSelectionDigest(capacityTier: 100, indices: [0, 1]),
+            criticalFrameProtection: .init(version: "critical-frame-protection-v1", riskVersion: "gray-quality-risk-v1", protectedIndices: [1], candidateFrameCount: 1))
+        try store.save([job]); XCTAssertEqual(try store.load(), [job])
+        let original = String(decoding: try Data(contentsOf: store.url), as: UTF8.self)
+        for (old, new) in [("\"candidateFrameCount\":1", "\"candidateFrameCount\":1.0"),
+            ("\"candidateFrameCount\":1", "\"candidateFrameCount\":true"),
+            ("\"protectedIndices\":[1]", "\"protectedIndices\":[1.0]"),
+            ("\"protectedIndices\":[1]", "\"protectedIndices\":[true]")] {
+            let altered = Data(original.replacingOccurrences(of: old, with: new).utf8)
+            XCTAssertNotEqual(altered, Data(original.utf8))
+            try altered.write(to: store.url)
+            XCTAssertThrowsError(try store.load(), new)
+            XCTAssertEqual(try Data(contentsOf: store.url), altered, "Rejected journal is retained for diagnosis")
+        }
+    }
 }
 
 final class AreaFlowJournal: AreaTargetJobStoring {
     var jobs: [AreaTargetProcessingJob] = []
+    var details: [String] = []
     var failWrites = false
     func load() throws -> [AreaTargetProcessingJob] { jobs }
     func save(_ jobs: [AreaTargetProcessingJob]) throws {
         if failWrites { throw CocoaError(.fileWriteNoPermission) }
         self.jobs = jobs
+        details.append(contentsOf: jobs.map(\.detail))
     }
 }
 
@@ -969,14 +1098,26 @@ final class AreaFlowAssets: AreaTargetAssetStoring {
 }
 
 actor AreaFlowAPI: AreaTargetAPI {
+    static var legacyRequirements: AreaTargetProcessingRequirements {
+        try! JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: Data(#"{"schemaVersion":1,"policy":"mobile-scan-preparation-v1","policyVersion":1,"profiles":{"fast":{"maxFrames":80,"maximumLongEdge":1600,"maximumTotalPixels":200000000}},"safety":{"maximumRequestBytes":536870912,"maximumExpandedBytes":524288000,"maximumArchiveEntries":10000,"maximumSourceFrameCount":10000,"maximumImagePixels":32000000,"maximumImageDimension":8192,"maximumMetadataBytes":8388608}}"#.utf8))
+    }
     let root: URL
     var events: [(String, String, String)] = []
     var requirements: AreaTargetProcessingRequirements?
     var requirementsCalls = 0
+    var requestedPolicy: String?
+    var requirementsPolicyError: AreaTargetAPIError?
+    func setRequirementsPolicyError(_ value: AreaTargetAPIError?) { requirementsPolicyError = value }
     var holdRequirements = false
     func setRequirements(_ value: AreaTargetProcessingRequirements?) { requirements = value }
     func setHoldRequirements(_ value: Bool) { holdRequirements = value }
     func requirementsCallCount() -> Int { requirementsCalls }
+    func requestedPreparationPolicy() -> String? { requestedPolicy }
+    func fetchProcessingRequirements(policy: String) async throws -> AreaTargetProcessingRequirements {
+        requestedPolicy = policy
+        if let requirementsPolicyError { requirementsCalls += 1; throw requirementsPolicyError }
+        return try await fetchProcessingRequirements()
+    }
     func fetchProcessingRequirements() async throws -> AreaTargetProcessingRequirements {
         requirementsCalls += 1
         if holdRequirements { try await Task.sleep(nanoseconds: 30_000_000_000) }
@@ -996,7 +1137,7 @@ actor AreaFlowAPI: AreaTargetAPI {
         holdStatus = value
         if !value { statusContinuation?.resume(); statusContinuation = nil }
     }
-    init(root: URL) { self.root = root }
+    init(root: URL) { self.root = root; requirements = Self.legacyRequirements }
     func setRemoteStatus(_ value: AreaTargetRemoteStatus) { remoteStatus = value }
     func setRemoteProblem(_ value: AreaTargetAPIProblem) { remoteProblem = value }
     func setLostResponse(_ value: Bool) { lostResponse = value }

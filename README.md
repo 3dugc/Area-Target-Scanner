@@ -149,6 +149,8 @@ open ios_scanner/AreaTargetScanner.xcodeproj
 
 The Python pipeline turns raw scan data into a deployable asset bundle.
 
+The iOS service negotiates `mobile-scan-preparation-v2` for conservative duplicate-view removal and adaptive image resolution. It uploads all source frames, preserves distinct views through preparation and feature extraction, and reports budget failures explicitly. The default tier is 100 frames / 200 million pixels; the 500-frame / 600-million-pixel tier requires `AREA_TARGET_PREPARATION_TIER=500` and independent deployment acceptance. V2 also protects up to eight weak views at a 1920-pixel long edge before upload compression. See the [API contract](docs/area-target-api.md#versioned-scan-preparation) and [validation record](docs/validation/scan-coverage-preparation-v2.md).
+
 ```bash
 python -m processing_pipeline.cli --input ./scan_data --output ./asset_bundle --verbose
 ```
