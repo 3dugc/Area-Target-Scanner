@@ -5,7 +5,9 @@
     "AreaTargetPlugin.Runtime",
     "AreaTargetTest",
     "Gilzoide.SqliteNet",
-    "VideoPlaybackTestScene"
+    "VideoPlaybackTestScene",
+    "Unity.XR.Management",
+    "Unity.XR.Management.Editor"
   ],
   "includePlatforms": [
     "Editor"

@@ -75,9 +75,8 @@ run() {
 run_non_unity_checks() {
   run contract "$PYTHON" tools/phase1/validate_scan_contract.py \
     tests/fixtures/phase1/coordinate-contract-v1.json
-  run python-pipeline "$PYTHON" -m pytest --import-mode=importlib \
-    tests/phase1 tests/ -v --tb=short
-  run native-macos "$BASH_BIN" native_visual_localizer/build_macos.sh
+  run native-macos "$BASH_BIN" native_visual_localizer/build_macos.sh --deploy
+  run python-pipeline env VL_NATIVE_LIBRARY="$ROOT/unity_project/Assets/Plugins/macOS/libvisual_localizer.dylib" "$PYTHON" tools/opencv5/run_regression.py --import-mode=importlib
   run native-ios "$BASH_BIN" tools/phase0/check_native_symbols.sh \
     unity_project/Assets/Plugins/iOS/libvisual_localizer.a
   run upm-content "$PYTHON" -m pytest tests/phase0/test_upm_package.py -v

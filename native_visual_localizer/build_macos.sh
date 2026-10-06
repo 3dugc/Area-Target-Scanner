@@ -1,43 +1,60 @@
 #!/usr/bin/env bash
-# Build script for the current macOS host architecture.
-# Prerequisites: brew install opencv cmake
+# Build against a selected OpenCV install without replacing Unity artifacts.
+# For a 4.x baseline set OPENCV_REQUIRED_MAJOR=4 and OpenCV_DIR explicitly.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OUTPUT_LIBRARY="$SCRIPT_DIR/build/libvisual_localizer.dylib"
+OPENCV_REQUIRED_MAJOR="${OPENCV_REQUIRED_MAJOR:-5}"
+BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build/macos_opencv$OPENCV_REQUIRED_MAJOR}"
+OUTPUT_LIBRARY="${OUTPUT_LIBRARY:-$BUILD_DIR/libvisual_localizer.dylib}"
 ARCHITECTURES="${MACOS_ARCHITECTURES:-$(uname -m)}"
 DEPLOY=false
 
-if [[ "${1:-}" == "--deploy" ]]; then
+if [[ "${1:-}" == "--deploy" && $# == 1 ]]; then
     DEPLOY=true
 elif [[ $# -gt 0 ]]; then
     echo "usage: $0 [--deploy]" >&2
+    echo "environment: OpenCV_DIR BUILD_DIR OUTPUT_LIBRARY OPENCV_REQUIRED_MAJOR MACOS_ARCHITECTURES" >&2
     exit 2
 fi
 
-echo "=== Building macOS binary for $ARCHITECTURES ==="
+if [[ "$OPENCV_REQUIRED_MAJOR" != 4 && "$OPENCV_REQUIRED_MAJOR" != 5 ]]; then
+    echo "ERROR: OPENCV_REQUIRED_MAJOR must be 4 or 5" >&2
+    exit 2
+fi
+echo "=== Building macOS OpenCV $OPENCV_REQUIRED_MAJOR for $ARCHITECTURES ==="
 
 # Configure with CMake
-cmake -B "$SCRIPT_DIR/build" \
-    -S "$SCRIPT_DIR" \
-    -DCMAKE_OSX_ARCHITECTURES="$ARCHITECTURES" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_TESTING=ON
+CONFIGURE_ARGS=(
+    -B "$BUILD_DIR" -S "$SCRIPT_DIR"
+    -DCMAKE_OSX_ARCHITECTURES="$ARCHITECTURES"
+    -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+    -DOPENCV_REQUIRED_MAJOR="$OPENCV_REQUIRED_MAJOR"
+)
+if [[ -n "${OpenCV_DIR:-}" ]]; then
+    CONFIGURE_ARGS+=(-DOpenCV_DIR="$OpenCV_DIR")
+fi
+cmake "${CONFIGURE_ARGS[@]}"
 
 # Build
-cmake --build "$SCRIPT_DIR/build" --config Release
+cmake --build "$BUILD_DIR" --config Release
 
-echo "=== Running native pose contract test ==="
-ctest --test-dir "$SCRIPT_DIR/build" --output-on-failure
+echo "=== Running native localization contract tests ==="
+ctest --test-dir "$BUILD_DIR" --output-on-failure
 
 # Verify the output
-if [ ! -f "$OUTPUT_LIBRARY" ]; then
-    echo "ERROR: $OUTPUT_LIBRARY not found"
+BUILT_LIBRARY="$BUILD_DIR/libvisual_localizer.dylib"
+if [ ! -f "$BUILT_LIBRARY" ]; then
+    echo "ERROR: $BUILT_LIBRARY not found"
     exit 1
 fi
 
 echo "=== Verifying native contract ==="
-"$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$OUTPUT_LIBRARY"
+"$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$BUILT_LIBRARY"
+if [[ "$OUTPUT_LIBRARY" != "$BUILT_LIBRARY" ]]; then
+    mkdir -p "$(dirname "$OUTPUT_LIBRARY")"
+    cp "$BUILT_LIBRARY" "$OUTPUT_LIBRARY"
+fi
 
 if [[ "$DEPLOY" == true ]]; then
     DEST="$SCRIPT_DIR/../unity_project/Assets/Plugins/macOS/libvisual_localizer.dylib"
@@ -45,4 +62,4 @@ if [[ "$DEPLOY" == true ]]; then
     echo "=== Copied to $DEST ==="
 fi
 
-echo "=== Done ==="
+echo "=== Built $OUTPUT_LIBRARY ==="

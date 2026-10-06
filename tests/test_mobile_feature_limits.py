@@ -37,7 +37,8 @@ def _fake_detectors(monkeypatch):
         def __init__(self, points, descriptors): self.result = points, descriptors
         def detectAndCompute(self, *_): return self.result
     monkeypatch.setattr(cv2, "ORB_create", lambda **_: Detector(orb_points, orb_desc))
-    monkeypatch.setattr(cv2, "AKAZE_create", lambda: Detector(akaze_points, akaze_desc))
+    akaze_namespace = cv2 if hasattr(cv2, "AKAZE_create") else cv2.xfeatures2d
+    monkeypatch.setattr(akaze_namespace, "AKAZE_create", lambda: Detector(akaze_points, akaze_desc))
     monkeypatch.setattr(cv2, "imread", lambda *_: np.zeros((64, 64), dtype=np.uint8))
     class Scene:
         def add_triangles(self, _): return 0

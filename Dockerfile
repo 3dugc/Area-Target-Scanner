@@ -8,8 +8,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY web_service/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt \
-    && python -c "import open3d"
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Open3D's Linux arm64 wheel requires the system Fortran runtime.
+# Keep runtime installation and import checks after the cached Python install.
+RUN apt-get update && apt-get install -y --no-install-recommends libgfortran5 \
+    && rm -rf /var/lib/apt/lists/*
+RUN python -c "import open3d, cv2; assert cv2.__version__.split('.')[0] == '5'; cv2.ORB_create(); cv2.xfeatures2d.AKAZE_create(); assert callable(cv2.solvePnPRansac)"
 
 COPY processing_pipeline/ /app/processing_pipeline/
 COPY web_service/ /app/web_service/

@@ -119,7 +119,8 @@ def build_feature_database(
     correspondences. Keyframes with fewer than 20 valid features are skipped.
 
     When ``extract_akaze`` is True, additionally extracts AKAZE features for
-    each keyframe using ``cv2.AKAZE_create()``, and obtains 3D points via the
+    each keyframe using the OpenCV AKAZE factory (xfeatures2d in OpenCV 5),
+    and obtains 3D points via the
     same ray-mesh intersection pipeline. AKAZE data is stored in the
     KeyframeData's ``akaze_*`` fields.
 
@@ -163,7 +164,12 @@ def build_feature_database(
 
     # --- Step 1: Create ORB detector (+ AKAZE if requested) ---
     orb = cv2.ORB_create(nfeatures=orb_nfeatures)
-    akaze = cv2.AKAZE_create() if extract_akaze else None
+    akaze = None
+    if extract_akaze:
+        akaze_factory = getattr(cv2, "AKAZE_create", None)
+        if akaze_factory is None:
+            akaze_factory = cv2.xfeatures2d.AKAZE_create
+        akaze = akaze_factory()
 
     # --- Step 2: Prepare ray-casting scene from mesh ---
     scene = o3d.t.geometry.RaycastingScene()

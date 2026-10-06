@@ -4,6 +4,8 @@ using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEditor;
+using UnityEditor.XR.Management;
 using UnityEngine;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
@@ -544,24 +546,30 @@ namespace AreaTargetPlugin.Tests
 
         /// <summary>
         /// Validates: Requirements 1.3, 1.4
-        /// XRGeneralSettingsPerBuildTarget Keys contains 02000000 (iOS) and Values references XRGeneralSettings_iOS.
+        /// The actual iOS XR settings have a manager with an ARKit loader,
+        /// independent of the Editor's serialized Keys/Values representation.
         /// </summary>
         [Test]
-        public void XRGeneralSettingsPerBuildTarget_KeysContainsiOS_ValuesReferencesGeneralSettings()
+        public void XRGeneralSettingsPerBuildTarget_IOSSettingsContainARKitLoader()
         {
             string projectPath = GetUnityProjectPath();
             string assetPath = Path.Combine(projectPath, "Assets", "XR", "XRGeneralSettingsPerBuildTarget.asset");
             Assert.IsTrue(File.Exists(assetPath), $"XRGeneralSettingsPerBuildTarget.asset should exist at {assetPath}");
 
-            string content = File.ReadAllText(assetPath);
+            var settings = AssetDatabase.LoadAssetAtPath<XRGeneralSettingsPerBuildTarget>(
+                "Assets/XR/XRGeneralSettingsPerBuildTarget.asset");
+            Assert.IsNotNull(settings, "The XR settings asset should be loadable");
+            var iosSettings = settings.SettingsForBuildTarget(BuildTargetGroup.iOS);
+            Assert.IsNotNull(iosSettings, "XR settings should exist for the actual iOS build target");
+            Assert.IsNotNull(iosSettings.Manager, "The iOS XR settings should have a manager");
 
-            // Keys should contain 02000000 (BuildTargetGroup.iOS = 2)
-            StringAssert.Contains("02000000", content,
-                "Keys should contain 02000000 for BuildTargetGroup.iOS");
-
-            // Values should reference XRGeneralSettings_iOS by its meta GUID
-            StringAssert.Contains("6de05aa3e7e84d20bcfba5c07e5e6f12", content,
-                "Values should reference XRGeneralSettings_iOS asset GUID");
+            bool hasArKitLoader = false;
+            foreach (var loader in iosSettings.Manager.activeLoaders)
+            {
+                if (loader != null && loader.GetType().FullName == "UnityEngine.XR.ARKit.ARKitLoader")
+                    hasArKitLoader = true;
+            }
+            Assert.IsTrue(hasArKitLoader, "The iOS XR manager should include the ARKit loader");
         }
 
         /// <summary>

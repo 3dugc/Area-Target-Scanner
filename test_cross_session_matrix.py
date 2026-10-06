@@ -412,7 +412,12 @@ def run_localization(query_frames, query_intrinsics, db_kfs):
     has_akaze_data = any(
         kf.get("akaze_descriptors") is not None for kf in db_kfs.values()
     )
-    akaze = cv2.AKAZE_create() if has_akaze_data else None
+    akaze = None
+    if has_akaze_data:
+        akaze_factory = getattr(cv2, "AKAZE_create", None)
+        if akaze_factory is None:
+            akaze_factory = cv2.xfeatures2d.AKAZE_create
+        akaze = akaze_factory()
 
     results = []
     for frame in query_frames:

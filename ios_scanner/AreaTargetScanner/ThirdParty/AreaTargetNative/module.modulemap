@@ -1,0 +1,4 @@
+module AreaTargetNative {
+  header "AreaTargetNative.h"
+  export *
+}
