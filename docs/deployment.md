@@ -50,6 +50,8 @@ Before publishing, the workflow runs Python pipeline/web/authentication tests an
 
 The pipeline runs as `appuser` under Gunicorn with one worker and four threads; the optimizer runs as `node`. The stack limits the pipeline to 3 CPUs / 5 GiB and the optimizer to 1 CPU / 768 MiB, matching the current server allocation. Pipeline job execution is limited to one worker with three queued jobs. Traefik reaches the pipeline through `proxy`; the optimizer stays on the internal `backend` network. Docker checks the public `/healthz` endpoint for liveness.
 
+Web uploads through `/api/upload` allow up to 1,000,000,000 total camera-image pixels, including 100 original 1920×1440 images (276,480,000 pixels). The web worker passes these original frames and dimensions to processing. The 512 MiB request, 500 MiB expanded ZIP, 32-million-pixel individual image, and 8,192-pixel image dimension limits still apply. Mobile API working-scan budgets retain their negotiated preparation policy.
+
 Watchtower is disabled for both services. Update the stack deliberately and pull both `latest` images after each release. GitHub Actions publishes images; it does not call Portainer.
 
 ## Persistent data and release flow

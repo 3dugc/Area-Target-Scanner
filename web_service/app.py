@@ -47,6 +47,7 @@ JOB_CLEANUP_INTERVAL_SECONDS = int(
 )
 JOB_DB_PATH = os.path.join(OUTPUT_DIR, "jobs.sqlite")
 MAX_RESULT_ZIP_BYTES = 512 * 1024 * 1024
+MAX_WEB_TOTAL_FRAME_PIXELS = 1_000_000_000
 
 TERMINAL_STATUSES = {"completed", "failed"}
 ACTIVE_STATUSES = {"queued", "extracting", "processing"}
@@ -724,7 +725,7 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             validate_scan(scan_root, uv_unwrap, prepare_uv=True,
                           max_total_frame_pixels=preparation.metadata.get('maximumTotalPixels', 200_000_000))
         else:
-            validate_frame_resources(scan_root)
+            validate_frame_resources(scan_root, max_total_frame_pixels=MAX_WEB_TOTAL_FRAME_PIXELS)
 
         # Optional: UV unwrap (xatlas re-unwrap + texture re-projection)
         if uv_unwrap:
