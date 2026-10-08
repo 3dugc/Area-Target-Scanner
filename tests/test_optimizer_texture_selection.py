@@ -71,4 +71,3 @@ def test_default_retains_core_jpeg_png_texture(tmp_path):
 def test_optimizer_receives_explicit_texture_selection(tmp_path, enabled):
     options = _downloaded_format(tmp_path, enabled)
     assert options["texture"]["enabled"] is enabled
-
