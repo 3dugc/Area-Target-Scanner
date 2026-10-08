@@ -19,7 +19,7 @@ Both images are built for `linux/amd64` and published to Tencent Container Regis
 
 Only `develop` and `latest` tags are pushed for each image. Commit IDs remain in image revision labels and CI reports for verification; they are not published as image tags.
 
-The optimizer source is pinned by the gitlink at `8ced6f3a908c5f2fcdec578238e65064e9f009e7`. Its companion image supports the OBJ/ZIP → GLB path used by this pipeline, including Sharp texture processing. Optional CAD, FBX and KTX toolchains are omitted. Review the pipeline API contract before changing the gitlink, and update `OPTIMIZER_COMMIT` in the deploy workflow at the same time. The separately deployed optimizer's current release has a different API contract.
+The optimizer source is pinned by the gitlink at `255b46e2d9ad15906e683efda02eefab3e8d2eb4`, a three-file WebP export fix on the compatible `8ced6f3a908c5f2fcdec578238e65064e9f009e7` baseline. Its source is maintained in the independent `3D-Model-Optimizer` repository. Its companion image supports the OBJ/ZIP → GLB path used by this pipeline, including Sharp texture processing. Optional CAD, FBX and KTX toolchains are omitted. Review the pipeline API contract before changing the gitlink, and update `OPTIMIZER_COMMIT` in the deploy workflow at the same time. The separately deployed optimizer's current release has a different API contract.
 
 The pinned revision's legacy `package-lock.json` contains invalid local symlink paths. Deployment therefore uses [`deploy/optimizer-package-lock.json`](../deploy/optimizer-package-lock.json), regenerated from that revision's unchanged `package.json`. CI checks the source commit first, overlays this lock, and runs `npm ci`, build and tests. The optimizer image installs from the same lock. When changing optimizer dependencies, regenerate and validate this deployment lock together with the pinned source.
 
@@ -72,3 +72,13 @@ Docker normally prefixes volume names with the stack name. Keep that name stable
 4. Deploy the `latest` image tag for both services, then rerun the HTTP smoke check.
 
 Tags are mutable. Record the two deployed image digests before an update so a rollback can restore the previous pair while preserving the existing volumes.
+
+### GLB 纹理兼容选项
+
+Web 上传默认保留源 JPEG/PNG 纹理，不执行纹理格式压缩，以便兼容标准 GLB 查看器。模型几何仍按原优化流程处理。上传页可显式勾选“压缩纹理为 WebP（需要查看器支持）”；对应 `/api/upload` 表单字段 `texture_compression=1`（或 `true`）。未提供字段、`0` 或 `false` 表示关闭，其他值返回400。当前优化器镜像未安装 toktx，压缩回退使用 WebP；WebP 编码与 `EXT_texture_webp` 声明由独立的 `3D-Model-Optimizer` 项目负责，查看器仍须支持该扩展。
+
+任务数据库保存该选择，状态响应包含布尔字段 `texture_compression`。缓存身份包含纹理选项，默认缓存版本升级为v5，避免复用此前的纹理格式结果。移动端未提交选项时也默认保留 JPEG/PNG；既有结果文件不原地改写，可重新提交原扫描生成兼容版本。
+
+### UV 图集方向
+
+服务端重新展开 UV 时，OBJ 的 V=0 对应贴图底部，而图像行从顶部开始。纹理烘焙和空洞填充结束后，写出前翻转一次图像行，保留 OBJ UV 与模型几何。默认缓存版本 v5 避免复用旧方向图集。原 iOS 图集（关闭重新展开 UV 时）保持原样。

@@ -214,14 +214,20 @@ final class AreaTargetProcessingModelTests: XCTestCase {
 
     func testStopDuringTransferIsRejectedUntilLocalPauseHasFinished() async throws {
         await api.setHoldUpload(true)
+        let uploadHeld = expectation(description: "The upload request is waiting for its response")
+        await api.setOnUploadHeld { uploadHeld.fulfill() }
         let model = model()
         let upload = Task { await model.start(scanDirectory: scan, displayName: "正在上传") }
         defer { model.pause(); upload.cancel() }
-        for _ in 0..<100 {
-            if await api.events.contains(where: { $0.0 == "submit" }) { break }
-            try await Task.sleep(nanoseconds: 1_000_000)
+        await fulfillment(of: [uploadHeld], timeout: 5)
+        let selectedJobID = model.selectedJobID
+        if selectedJobID == nil {
+            model.pause()
+            upload.cancel()
+            await api.setHoldUpload(false)
+            await upload.value
         }
-        let id = try XCTUnwrap(model.selectedJobID)
+        let id = try XCTUnwrap(selectedJobID)
         XCTAssertTrue(model.operationInProgress)
         model.stopLocalTracking(jobID: id)
         XCTAssertEqual(model.jobs.first?.phase, .uploading)
@@ -760,12 +766,17 @@ final class AreaTargetProcessingModelTests: XCTestCase {
 
     func testBackgroundCancelsLocalUploadAndPreservesReconcilableTask() async throws {
         await api.setHoldUpload(true)
+        let uploadHeld = expectation(description: "The upload request is waiting for its response")
+        await api.setOnUploadHeld { uploadHeld.fulfill() }
         let model = model()
         model.setAppActive(true)
         let operation = Task { await model.start(scanDirectory: self.scan, displayName: "测试") }
-        for _ in 0..<200 {
-            if model.jobs.first?.phase == .uploading { break }
-            try await Task.sleep(nanoseconds: 1_000_000)
+        defer { model.pause(); operation.cancel() }
+        await fulfillment(of: [uploadHeld], timeout: 5)
+        if model.selectedJobID == nil {
+            model.pause()
+            operation.cancel()
+            await api.setHoldUpload(false)
         }
         XCTAssertTrue(model.operationInProgress)
         model.setAppActive(false)
@@ -1129,6 +1140,8 @@ actor AreaFlowAPI: AreaTargetAPI {
     var lostResponse = false
     var rejectBeforeAccepting = false
     var holdUpload = false
+    private var onUploadHeld: (@Sendable () -> Void)?
+    func setOnUploadHeld(_ callback: @escaping @Sendable () -> Void) { onUploadHeld = callback }
     var expired = false
     private var holdStatus = false
     private var statusContinuation: CheckedContinuation<Void, Never>?
@@ -1148,7 +1161,10 @@ actor AreaFlowAPI: AreaTargetAPI {
     func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob {
         events.append(("submit", jobID, token))
-        if holdUpload { try await Task.sleep(nanoseconds: 30_000_000_000) }
+        if holdUpload {
+            onUploadHeld?()
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+        }
         if rejectBeforeAccepting {
             throw AreaTargetAPIError.server(statusCode: 429,
                 problem: .init(code: "queue_full", message: "队列已满", retryable: true), retryAfter: 10)
