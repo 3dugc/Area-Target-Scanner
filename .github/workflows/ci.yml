@@ -60,7 +60,7 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build web service image
-        run: docker build -t area-target-scanner-web-service-ci .
+        run: docker build --build-arg BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -t area-target-scanner-web-service-ci .
 
   native-macos:
     runs-on: macos-26
@@ -160,9 +160,11 @@ jobs:
           processing_pipeline/uv_unwrap.py
           web_service/app.py
           web_service/auth.py
+          web_service/build_version.py
           tools/deployment/smoke.py
           tests/test_deployment_smoke.py
           tests/test_service_auth.py
+          tests/test_build_version.py
           tests/service_auth_helpers.py
           tests/test_efficiency_profiles.py
           tests/test_uv_unwrap_worker.py
