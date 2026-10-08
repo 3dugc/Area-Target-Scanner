@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <climits>
+#include <cstdint>
+#include <cstring>
 #include <numeric>
 #include <unordered_map>
 
@@ -893,7 +895,21 @@ std::vector<KeyframeData*> VisualLocalizer::getGlobalCandidates(
 // ---------------------------------------------------------------------------
 int VisualLocalizer::hammingDistance(const unsigned char* a, const unsigned char* b,
                                      int len) {
+    if (len <= 0) return 0;
     int dist = 0;
+#if defined(__clang__) || defined(__GNUC__)
+    constexpr int word_bytes = static_cast<int>(sizeof(std::uint64_t));
+    int i = 0;
+    for (; i <= len - word_bytes; i += word_bytes) {
+        std::uint64_t first, second;
+        std::memcpy(&first, a + i, sizeof(first));
+        std::memcpy(&second, b + i, sizeof(second));
+        dist += __builtin_popcountll(static_cast<unsigned long long>(first ^ second));
+    }
+    for (; i < len; ++i) {
+        dist += __builtin_popcount(static_cast<unsigned int>(a[i] ^ b[i]));
+    }
+#else
     for (int i = 0; i < len; i++) {
         unsigned char xor_val = a[i] ^ b[i];
         // Brian Kernighan's popcount
@@ -902,6 +918,7 @@ int VisualLocalizer::hammingDistance(const unsigned char* a, const unsigned char
             xor_val &= static_cast<unsigned char>(xor_val - 1);
         }
     }
+#endif
     return dist;
 }
 
