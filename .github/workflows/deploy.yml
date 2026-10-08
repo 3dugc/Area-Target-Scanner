@@ -96,6 +96,7 @@ jobs:
             tests/test_web_scan_limits.py \
             tests/test_web_texture_options.py \
             tests/test_service_auth.py \
+            tests/test_build_version.py \
             tests/test_mobile_api.py \
             tests/test_scan_security.py \
             tests/test_scan_preparation.py \
@@ -205,8 +206,28 @@ jobs:
           push: false
           tags: area-target-scanner-ci:smoke
           labels: ${{ steps.scanner-meta.outputs.labels }}
+          build-args: |
+            BUILD_TIME=${{ fromJSON(steps.scanner-meta.outputs.json).labels['org.opencontainers.image.created'] }}
           cache-from: type=gha,scope=area-target-scanner
           cache-to: type=gha,mode=max,scope=area-target-scanner
+
+      - name: Verify packaged version matches the scanner image timestamp
+        run: |
+          image_time="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.created" }}' area-target-scanner-ci:smoke)"
+          docker run --rm --entrypoint python -e EXPECTED_BUILD_TIME="$image_time" area-target-scanner-ci:smoke -c '
+          import os
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+          instant = datetime.fromisoformat(os.environ["EXPECTED_BUILD_TIME"].replace("Z", "+00:00")).astimezone(timezone.utc).replace(microsecond=0)
+          utc = instant.isoformat().replace("+00:00", "Z")
+          local = instant.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+          for name in ("static/index.html", "templates/login.html"):
+              html = (Path("/app/web_service") / name).read_text(encoding="utf-8")
+              assert html.count(f"datetime=\"{utc}\"") == 1, name
+              assert f"版本：{local}（UTC+8）" in html, name
+              assert "开发版（未打包）" not in html, name
+          print("Both pages match the immutable image build timestamp:", utc)
+          '
 
       - name: Build compatible optimizer image for runtime verification
         uses: docker/build-push-action@v7

@@ -42,6 +42,11 @@ RUN mkdir -p /app/bin && \
 ENV PYTHONPATH=/app
 ENV AREA_TARGET_QUALITY_LIBRARY=/app/bin/libarea_target_quality.so
 
+# CI passes the same timestamp used by the OCI created label. Changing the
+# build argument also prevents Docker's cache from retaining an older version.
+ARG BUILD_TIME
+RUN python /app/web_service/build_version.py --build-time "$BUILD_TIME"
+
 EXPOSE 5000
 
 USER appuser
