@@ -38,7 +38,7 @@ UV_UNWRAP_POLL_INTERVAL_SECONDS = 0.25
 UV_WORKER_NICE = int(os.environ.get("UV_WORKER_NICE", "10"))
 PIPELINE_MAX_WORKERS = int(os.environ.get("PIPELINE_MAX_WORKERS", "1"))
 PIPELINE_MAX_QUEUE_SIZE = int(os.environ.get("PIPELINE_MAX_QUEUE_SIZE", "3"))
-PIPELINE_CACHE_VERSION = os.environ.get("PIPELINE_CACHE_VERSION", "v3")
+PIPELINE_CACHE_VERSION = os.environ.get("PIPELINE_CACHE_VERSION", "v5")
 STATUS_DB_READ_TTL_SECONDS = float(os.environ.get("STATUS_DB_READ_TTL_SECONDS", "1"))
 JOB_RETENTION_HOURS = int(os.environ.get("JOB_RETENTION_HOURS", "24"))
 FAILED_JOB_RETENTION_HOURS = int(os.environ.get("FAILED_JOB_RETENTION_HOURS", "6"))
@@ -47,6 +47,7 @@ JOB_CLEANUP_INTERVAL_SECONDS = int(
 )
 JOB_DB_PATH = os.path.join(OUTPUT_DIR, "jobs.sqlite")
 MAX_RESULT_ZIP_BYTES = 512 * 1024 * 1024
+MAX_WEB_TOTAL_FRAME_PIXELS = 1_000_000_000
 
 TERMINAL_STATUSES = {"completed", "failed"}
 ACTIVE_STATUSES = {"queued", "extracting", "processing"}
@@ -71,6 +72,7 @@ def _normalize_job_row(row):
         return None
     job = dict(row)
     job["uv_unwrap"] = bool(job.get("uv_unwrap"))
+    job["texture_compression"] = bool(job.get("texture_compression"))
     job["profile"] = job.get("profile") or "fast"
     return job
 
@@ -86,6 +88,7 @@ class JobStore:
         "error",
         "result_zip",
         "uv_unwrap",
+        "texture_compression",
         "profile",
         "input_hash",
         "source_job_id",
@@ -114,6 +117,7 @@ class JobStore:
     def _init_db(self):
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -124,6 +128,7 @@ class JobStore:
                     error TEXT,
                     result_zip TEXT,
                     uv_unwrap INTEGER NOT NULL DEFAULT 0,
+                    texture_compression INTEGER NOT NULL DEFAULT 0,
                     profile TEXT NOT NULL DEFAULT 'fast',
                     input_hash TEXT,
                     source_job_id TEXT,
@@ -133,6 +138,9 @@ class JobStore:
                 """
             )
             self._ensure_column(conn, "profile", "TEXT NOT NULL DEFAULT 'fast'")
+            if self._ensure_column(conn, "texture_compression", "INTEGER NOT NULL DEFAULT 0"):
+                # Before this option existed, every job enabled optimizer texture compression.
+                conn.execute("UPDATE jobs SET texture_compression=1")
             self._ensure_column(conn, "input_hash", "TEXT")
             self._ensure_column(conn, "source_job_id", "TEXT")
             for name, definition in (("token_hash", "TEXT"), ("error_code", "TEXT"),
@@ -156,10 +164,13 @@ class JobStore:
         }
         if name not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+            return True
+        return False
 
     def _insert(self, conn, job):
         values = {field: job.get(field) for field in self.fields}
         values['uv_unwrap'] = 1 if job.get('uv_unwrap') else 0
+        values['texture_compression'] = 1 if job.get('texture_compression') else 0
         values['profile'] = job.get('profile') or 'fast'
         names = sorted(self.fields)
         conn.execute('INSERT INTO jobs (' + ','.join(names) + ') VALUES (' +
@@ -189,6 +200,8 @@ class JobStore:
             return self.get(job_id)
         if "uv_unwrap" in updates:
             updates["uv_unwrap"] = 1 if updates["uv_unwrap"] else 0
+        if "texture_compression" in updates:
+            updates["texture_compression"] = 1 if updates["texture_compression"] else 0
 
         assignments = ", ".join(f"{key}=:{key}" for key in updates)
         params = dict(updates)
@@ -568,6 +581,14 @@ def _normalize_profile(value):
     return profile
 
 
+def _parse_texture_compression(value):
+    if value is None or value in {"0", "false"}:
+        return False
+    if value in {"1", "true"}:
+        return True
+    raise ValueError("texture_compression 必须是 0、1、false 或 true")
+
+
 def _sha256_file(path):
     digest = hashlib.sha256()
     with open(path, "rb") as f:
@@ -576,13 +597,13 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
-def _make_input_hash(zip_hash, profile, uv_unwrap):
+def _make_input_hash(zip_hash, profile, uv_unwrap, texture_compression=False):
     import cv2
 
     digest = hashlib.sha256()
     # Include both the descriptor producer and preparation policy in cache identity.
     from processing_pipeline.scan_preparation import POLICY_V2
-    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}"
+    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{int(texture_compression)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}"
     digest.update(payload.encode("utf-8"))
     return digest.hexdigest()
 
@@ -705,7 +726,9 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             return
 
         from processing_pipeline.scan_security import validate_frame_resources
-        protected = bool((_get_job_snapshot(job_id) or {}).get('token_hash'))
+        job_options = _get_job_snapshot(job_id) or {}
+        protected = bool(job_options.get('token_hash'))
+        texture_compression = bool(job_options.get('texture_compression'))
         if protected:
             from processing_pipeline.scan_security import validate_scan
             from processing_pipeline.scan_preparation import POLICY, POLICY_V2, prepare_scan
@@ -724,7 +747,7 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             validate_scan(scan_root, uv_unwrap, prepare_uv=True,
                           max_total_frame_pixels=preparation.metadata.get('maximumTotalPixels', 200_000_000))
         else:
-            validate_frame_resources(scan_root)
+            validate_frame_resources(scan_root, max_total_frame_pixels=MAX_WEB_TOTAL_FRAME_PIXELS)
 
         # Optional: UV unwrap (xatlas re-unwrap + texture re-projection)
         if uv_unwrap:
@@ -756,6 +779,7 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
             optimizer_url=optimizer_url,
             processing_profile=profile,
             mobile_feature_limits=protected,
+            texture_compression=texture_compression,
             **mobile_options,
         )
         os.makedirs(output_dir, exist_ok=True)
@@ -881,6 +905,7 @@ def upload():
 
     try:
         profile = _normalize_profile(request.form.get("profile", "fast"))
+        texture_compression = _parse_texture_compression(request.form.get("texture_compression"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -900,7 +925,7 @@ def upload():
         return jsonify({"error": "上传的文件不是有效的 ZIP 格式"}), 400
 
     zip_hash = _sha256_file(zip_path)
-    input_hash = _make_input_hash(zip_hash, profile, uv_unwrap)
+    input_hash = _make_input_hash(zip_hash, profile, uv_unwrap, texture_compression=texture_compression)
     reusable_job = _find_reusable_result(input_hash)
     if reusable_job:
         _safe_remove_path(job_dir)
@@ -912,6 +937,7 @@ def upload():
             "error": None,
             "result_zip": reusable_job["result_zip"],
             "uv_unwrap": uv_unwrap,
+            "texture_compression": texture_compression,
             "profile": profile,
             "input_hash": input_hash,
             "source_job_id": reusable_job["id"],
@@ -928,6 +954,7 @@ def upload():
         "error": None,
         "result_zip": None,
         "uv_unwrap": uv_unwrap,
+        "texture_compression": texture_compression,
         "profile": profile,
         "input_hash": input_hash,
         "source_job_id": None,

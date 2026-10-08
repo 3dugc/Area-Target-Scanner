@@ -17,7 +17,7 @@ env:
   SCANNER_IMAGE: hkccr.ccs.tencentyun.com/plugins/area-target-scanner
   OPTIMIZER_IMAGE: hkccr.ccs.tencentyun.com/plugins/area-target-optimizer
   # Match the model_optimizer gitlink; changing the API needs a compatibility review.
-  OPTIMIZER_COMMIT: 8ced6f3a908c5f2fcdec578238e65064e9f009e7
+  OPTIMIZER_COMMIT: 255b46e2d9ad15906e683efda02eefab3e8d2eb4
 
 jobs:
   preflight:
@@ -87,11 +87,14 @@ jobs:
             tests/test_validate_input.py \
             tests/test_optimizer_client.py \
             tests/test_optimize_model.py \
+            tests/test_optimizer_texture_selection.py \
             tests/test_pipeline_run.py \
             tests/test_optimized_pipeline_properties.py \
             tests/test_feature_extraction.py \
             tests/test_feature_db.py \
             tests/test_web_job_store.py \
+            tests/test_web_scan_limits.py \
+            tests/test_web_texture_options.py \
             tests/test_service_auth.py \
             tests/test_mobile_api.py \
             tests/test_scan_security.py \
@@ -106,6 +109,7 @@ jobs:
             tests/test_mobile_feature_limits.py \
             tests/test_uv_frame_calibration.py \
             tests/test_uv_texture_memory.py \
+            tests/test_uv_texture_origin.py \
             tests/test_deployment_smoke.py \
             tests/test_efficiency_profiles.py \
             tests/test_uv_unwrap_worker.py \

@@ -760,7 +760,11 @@ def render_texture_atlas(
     _emit_progress(on_progress, "0/4 UV 纹理展开 (填充纹理空洞)", 27)
     filled_pct = _normalize_and_fill_atlas(atlas, atlas_weight)
     logger.info("Atlas rendered: %.1f%% pixels filled (total %.1fs)", filled_pct, time.time() - t0)
-    return np.clip(atlas, 0, 255).astype(np.uint8)
+    # xatlas/OBJ V=0 addresses the bottom of the texture image, while image
+    # arrays and JPEG scanlines start at the top. Keep the OBJ UVs unchanged
+    # and reverse rows after filling, before the final conversion so the
+    # returned image stays contiguous for Pillow without an extra byte copy.
+    return np.clip(atlas[::-1], 0, 255).astype(np.uint8)
 
 
 def write_obj(path, vertices, normals, uvs, faces, mtl_name="model.mtl"):
