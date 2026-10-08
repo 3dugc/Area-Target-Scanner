@@ -280,11 +280,10 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         try tokens.save(String(repeating: "a", count: 64), jobID: job.id)
         let model = model()
         await api.setHoldStatus(true)
+        let statusHeld = expectation(description: "The missing status request is waiting for its response")
+        await api.setOnStatusHeld { statusHeld.fulfill() }
         let resume = Task { await model.resume(jobID: job.id) }
-        for _ in 0..<100 {
-            if await api.events.contains(where: { $0.0 == "status" }) { break }
-            try await Task.sleep(nanoseconds: 1_000_000)
-        }
+        await fulfillment(of: [statusHeld], timeout: 5)
         model.stopLocalTracking(jobID: job.id)
         await api.setHoldStatus(false)
         await resume.value
@@ -1133,6 +1132,8 @@ actor AreaFlowAPI: AreaTargetAPI {
     var expired = false
     private var holdStatus = false
     private var statusContinuation: CheckedContinuation<Void, Never>?
+    private var onStatusHeld: (@Sendable () -> Void)?
+    func setOnStatusHeld(_ callback: @escaping @Sendable () -> Void) { onStatusHeld = callback }
     func setHoldStatus(_ value: Bool) {
         holdStatus = value
         if !value { statusContinuation?.resume(); statusContinuation = nil }
@@ -1159,7 +1160,12 @@ actor AreaFlowAPI: AreaTargetAPI {
     }
     func status(jobID: String, token: String) async throws -> AreaTargetRemoteJob {
         events.append(("status", jobID, token))
-        if holdStatus { await withCheckedContinuation { statusContinuation = $0 } }
+        if holdStatus {
+            await withCheckedContinuation {
+                statusContinuation = $0
+                onStatusHeld?()
+            }
+        }
         if !accepted.contains(jobID) {
             throw AreaTargetAPIError.server(statusCode: 404,
                 problem: .init(code: "job_not_found", message: "任务不存在", retryable: false), retryAfter: nil)

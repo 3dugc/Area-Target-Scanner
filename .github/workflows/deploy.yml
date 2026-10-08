@@ -92,6 +92,7 @@ jobs:
             tests/test_feature_extraction.py \
             tests/test_feature_db.py \
             tests/test_web_job_store.py \
+            tests/test_web_scan_limits.py \
             tests/test_service_auth.py \
             tests/test_mobile_api.py \
             tests/test_scan_security.py \
