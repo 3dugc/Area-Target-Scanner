@@ -39,6 +39,16 @@ input[type="file"] { display: none; }
     </p>
   </div>
 
+  <div class="option-row" style="margin-bottom:1rem;">
+    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.9rem;color:#cbd5e1;">
+      <input type="checkbox" id="texture-compression" name="texture_compression" style="width:18px;height:18px;accent-color:#3b82f6;cursor:pointer;">
+      压缩纹理为 WebP（需要查看器支持）
+    </label>
+    <p style="color:#64748b;font-size:0.75rem;margin-top:0.25rem;margin-left:1.6rem;">
+      默认不压缩纹理；启用后可减小资产包
+    </p>
+  </div>
+
   <div class="upload-area" id="dropZone" style="pointer-events:none;" onclick="document.getElementById('fileInput').click()">
     <div class="upload-icon">📁</div>
     <p>点击或拖拽 ZIP 文件到此处</p>
@@ -54,6 +64,7 @@ input[type="file"] { display: none; }
       <div style="background:#334155;border-radius:6px;height:8px;overflow:hidden;">
         <div id="progressBar" style="background:linear-gradient(90deg,#3b82f6,#8b5cf6);height:100%;width:0%;transition:width 0.5s ease;border-radius:6px;"></div>
       </div>
+      <div id="textureCompressionStatus" role="status" style="margin-top:0.75rem;font-size:0.75rem;color:#94a3b8;"></div>
       <div id="statusMsg" style="margin-top:1rem;font-size:0.85rem;color:#94a3b8;"></div>
     </div>
     <a id="downloadBtn" href="#" style="display:none;text-decoration:none;background:#3b82f6;color:#fff;padding:0.75rem 1.5rem;border-radius:8px;text-align:center;font-weight:500;width:100%;display:none;">
@@ -73,6 +84,8 @@ const statusMsg = document.getElementById('statusMsg');
 const downloadBtn = document.getElementById('downloadBtn');
 const sessionUser = document.getElementById('sessionUser');
 const logoutBtn = document.getElementById('logoutBtn');
+const textureCompressionCheck = document.getElementById('texture-compression');
+const textureCompressionStatus = document.getElementById('textureCompressionStatus');
 let csrfToken = '';
 
 function needsLogin(response, data) {
@@ -127,14 +140,17 @@ async function uploadFile(file) {
   if(!await sessionReady) return;
   if(!file.name.endsWith('.zip')) { alert('请上传 ZIP 文件'); return; }
   dropZone.style.display = 'none';
-  document.querySelector('.option-row').style.display = 'none';
+  document.querySelectorAll('.option-row').forEach(row => row.style.display = 'none');
   jobPanel.style.display = 'block';
   statusMsg.textContent = '正在上传...';
 
   const uvUnwrap = document.getElementById('uvUnwrapCheck').checked;
+  const textureCompression = textureCompressionCheck.checked;
+  textureCompressionStatus.textContent = '纹理压缩：' + (textureCompression ? '开启（WebP）' : '关闭');
   const fd = new FormData();
   fd.append('file', file);
   fd.append('uv_unwrap', uvUnwrap ? '1' : '0');
+  fd.append('texture_compression', textureCompression ? '1' : '0');
   try {
     const res = await fetch('/api/upload', {
       method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken }
@@ -157,6 +173,9 @@ function pollStatus(jobId) {
       stepLabel.textContent = job.step || '';
       progressPct.textContent = job.progress + '%';
       progressBar.style.width = job.progress + '%';
+      if(typeof job.texture_compression === 'boolean') {
+        textureCompressionStatus.textContent = '纹理压缩：' + (job.texture_compression ? '开启（WebP）' : '关闭');
+      }
 
       if(job.status === 'completed') {
         clearInterval(iv);

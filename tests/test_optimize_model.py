@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import struct
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -39,9 +41,7 @@ class TestOptimizeModelSuccess:
         mock_client.wait_for_completion.return_value = "completed"
 
         def fake_download(task_id, output_path):
-            with open(output_path, "wb") as f:
-                f.write(b"fake-glb-content")
-            return output_path
+            return _write_fake_glb(output_path)
 
         mock_client.download.side_effect = fake_download
 
@@ -80,7 +80,7 @@ class TestOptimizeModelSuccess:
             mtl_path=scan_input.mtl_path,
             texture_path=scan_input.texture_path,
             preset="high_quality",
-            options={"draco": {"enabled": False}},
+            options={"draco": {"enabled": False}, "texture": {"enabled": False}},
         )
 
 
@@ -146,8 +146,10 @@ class TestOptimizeModelFailure:
 # -- helpers --
 
 def _write_fake_glb(path: str) -> str:
+    payload = json.dumps({"asset": {"version": "2.0"}}).encode()
+    payload += b" " * (-len(payload) % 4)
     with open(path, "wb") as f:
-        f.write(b"fake-glb-content")
+        f.write(struct.pack("<4sIIII", b"glTF", 2, 20 + len(payload), len(payload), 0x4E4F534A) + payload)
     return path
 
 

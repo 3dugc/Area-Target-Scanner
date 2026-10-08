@@ -201,6 +201,7 @@ class OptimizedPipeline:
         mobile_feature_limits: bool = False,
         mobile_preparation_policy: str = "mobile-scan-preparation-v1",
         mobile_preparation_capacity: int = 100,
+        texture_compression: bool = False,
     ) -> None:
         if mobile_preparation_policy not in {"mobile-scan-preparation-v1", "mobile-scan-preparation-v2"}:
             raise ValueError("Unsupported mobile preparation policy")
@@ -210,6 +211,7 @@ class OptimizedPipeline:
             raise ValueError("mobile_preparation_capacity must be 100 or 500")
         self.optimizer_url = optimizer_url
         self.optimizer_preset = optimizer_preset
+        self.texture_compression = texture_compression
         self.mobile_feature_limits = mobile_feature_limits
         self.mobile_preparation_policy = mobile_preparation_policy
         self.mobile_preparation_capacity = mobile_preparation_capacity
@@ -298,7 +300,10 @@ class OptimizedPipeline:
             mtl_path=scan_input.mtl_path,
             texture_path=scan_input.texture_path,
             preset=self.optimizer_preset,
-            options={"draco": {"enabled": False}},
+            # Preserve standard JPEG/PNG textures by default. Opt-in compression
+            # uses WebP on servers without toktx and requires viewer support.
+            options={"draco": {"enabled": False},
+                     "texture": {"enabled": self.texture_compression}},
         )
         final_status = client.wait_for_completion(task_id)
         if final_status != "completed":

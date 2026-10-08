@@ -167,6 +167,9 @@ jobs:
           tests/test_efficiency_profiles.py
           tests/test_uv_unwrap_worker.py
           tests/test_web_job_store.py
+          tests/test_optimizer_texture_selection.py
+          tests/test_uv_texture_origin.py
+          tests/test_web_texture_options.py
           tests/test_xatlas_native_helper.py
           --select=E,F,W
           --ignore=E501

@@ -282,5 +282,6 @@ def test_gradient_projection_and_overlapping_face_output_matches_baseline(tmp_pa
     # Overlap all three UV charts; frame choice and accumulation order stay unchanged.
     scene[1][:] = np.tile([[.1, .1], [.9, .1], [.1, .9]], (3, 1))
     result = uv.render_texture_atlas(*scene, atlas_size=263)
-    # Frozen pre-fix renderer output, covering gradients, averaging and global nearest ties.
-    assert hashlib.sha256(result.tobytes()).hexdigest() == "70622321edf441e89587223d4fbe28b877d40ccd57ec664327fde5b58450a5f4"
+    # Preserve the frozen rasterization/fill baseline after accounting for the
+    # corrected image origin. Camera-to-export color regressions cover the flip.
+    assert hashlib.sha256(result[::-1].tobytes()).hexdigest() == "70622321edf441e89587223d4fbe28b877d40ccd57ec664327fde5b58450a5f4"
