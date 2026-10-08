@@ -5,6 +5,137 @@ import UIKit
 
 @MainActor
 final class AreaTargetProcessingViewTests: XCTestCase {
+    func testPreparationShowsDefaultOffExperimentalMapCLAHEAndRebuildExplanation() async throws {
+        let fixture = try cloudFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let host = UIHostingController(rootView: AreaTargetProcessingView(model: fixture.model,
+            scanDirectory: fixture.scan, displayName: "原选大厅"))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.frame = window.bounds
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.view.layoutIfNeeded()
+        let nodes = accessibilityNodes(in: host.view)
+        func switches(in view: UIView) -> [UISwitch] {
+            (view as? UISwitch).map { [$0] } ?? view.subviews.flatMap { switches(in: $0) }
+        }
+        let controls = switches(in: host.view)
+        let controlRows = controls.map {
+            "UISwitch isOn=\($0.isOn) id=\($0.accessibilityIdentifier ?? "nil") label=\($0.accessibilityLabel ?? "nil") frame=\($0.convert($0.bounds, to: host.view))"
+        }
+        let nodeRows = nodes.map {
+            "\(type(of: $0)) id=\(($0 as? UIAccessibilityIdentification)?.accessibilityIdentifier ?? "nil") label=\($0.accessibilityLabel ?? "nil") value=\($0.accessibilityValue ?? "nil")"
+        }
+        let diagnostic = "jobs=\(fixture.model.jobs.count) scanExists=\(FileManager.default.fileExists(atPath: fixture.scan.path))\n"
+            + (controlRows + nodeRows).joined(separator: "\n")
+        let diagnosticAttachment = XCTAttachment(string: diagnostic)
+        diagnosticAttachment.name = "clahe-preparation-controls-and-accessibility"
+        diagnosticAttachment.lifetime = .keepAlways
+        add(diagnosticAttachment)
+        let screenshot = XCTAttachment(image: UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+            _ = host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        })
+        screenshot.name = "clahe-preparation-before-identifier-assertion"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTAssertEqual(controls.count, 1, "Preparation must render one real map enhancement switch")
+        XCTAssertFalse(try XCTUnwrap(controls.first).isOn, "The rendered switch must default to off")
+        let toggle = try XCTUnwrap(nodes.first { $0.accessibilityLabel == "光照增强（实验）" })
+        XCTAssertEqual(toggle.accessibilityValue, "0", "New builds must default to off")
+        XCTAssertTrue(nodes.contains { $0.accessibilityLabel?.contains("改变选项需要重新建图") == true })
+        XCTAssertTrue(fixture.model.jobs.isEmpty)
+        let events = await fixture.api.base.events
+        XCTAssertTrue(events.isEmpty, "Rendering the option must not start cloud work")
+    }
+
+    func testPendingMapCLAHEJobShowsFrozenChoiceWithoutOfferingNewTaskToggle() async throws {
+        let fixture = try cloudFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: fixture.scan.path,
+            displayName: "已冻结增强任务", createdAt: Date(), serverOrigin: .current)
+        job.phase = .paused
+        job.mapCLAHE = true
+        fixture.journal.jobs = [job]
+        let model = cloudModel(fixture, journal: fixture.journal)
+        let host = UIHostingController(rootView: AreaTargetProcessingView(model: model,
+            scanDirectory: fixture.scan, displayName: job.displayName))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.frame = window.bounds
+        try await Task.sleep(nanoseconds: 100_000_000)
+        host.view.layoutIfNeeded()
+        let nodes = accessibilityNodes(in: host.view)
+        XCTAssertTrue(nodes.contains { $0.accessibilityLabel?.contains("光照增强：开启") == true })
+        XCTAssertFalse(nodes.contains { $0.accessibilityLabel == "光照增强（实验）" },
+            "Pending tasks must show their frozen option rather than a new-build control")
+        func switches(in view: UIView) -> [UISwitch] {
+            (view as? UISwitch).map { [$0] } ?? view.subviews.flatMap { switches(in: $0) }
+        }
+        XCTAssertTrue(switches(in: host.view).isEmpty, "A pending task must not render an editable switch")
+        XCTAssertEqual(model.selectedJob?.mapCLAHE, true)
+        let events = await fixture.api.base.events
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func testLoginFreezesMapCLAHEUploadChoiceBeforeLaterSelectionChanges() async throws {
+        let fixture = try cloudFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var requirements = AreaFlowAPI.legacyRequirements
+        requirements.mapCLAHESupported = true
+        await fixture.api.base.setRequirements(requirements)
+        let actions = AreaTargetCloudActionCoordinator(model: fixture.model)
+        var nextBuildChoice = true
+        let intent = AreaTargetCloudIntent.upload(scanDirectory: fixture.scan, displayName: "原增强选择", mapCLAHE: nextBuildChoice)
+        await actions.perform(intent)
+        let request = try XCTUnwrap(actions.loginRequest)
+        nextBuildChoice = false
+        XCTAssertEqual(request.intent, .upload(scanDirectory: fixture.scan, displayName: "原增强选择", mapCLAHE: true))
+        XCTAssertNotEqual(request.intent, .upload(scanDirectory: fixture.scan, displayName: "原增强选择", mapCLAHE: nextBuildChoice))
+        await actions.authenticate(requestID: request.id, username: "scanner", password: "temporary password")
+        await actions.continueAfterLogin()
+        let job = try XCTUnwrap(fixture.model.selectedJob)
+        XCTAssertTrue(job.mapCLAHE)
+        XCTAssertEqual(job.remote?.mapCLAHE, true)
+        XCTAssertEqual(job.profile, "fast")
+        XCTAssertTrue(job.uvUnwrap)
+        let submitted = await fixture.api.base.submittedMapCLAHE
+        XCTAssertEqual(submitted, [true])
+    }
+
+    func testReauthenticationResumesCreatedEnabledJobInsteadOfChangingItsChoice() async throws {
+        let fixture = try cloudFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.api.saved = AreaFlowServiceAPI.fixtureSession
+        fixture.api.rejectNextSubmit = true
+        var requirements = AreaFlowAPI.legacyRequirements
+        requirements.mapCLAHESupported = true
+        await fixture.api.base.setRequirements(requirements)
+        let model = cloudModel(fixture)
+        let actions = AreaTargetCloudActionCoordinator(model: model)
+        await actions.perform(.upload(scanDirectory: fixture.scan, displayName: "增强重认证", mapCLAHE: true))
+        let original = try XCTUnwrap(model.selectedJob)
+        let originalZIP = try XCTUnwrap(original.archiveURL)
+        let request = try XCTUnwrap(actions.loginRequest)
+        XCTAssertTrue(original.mapCLAHE)
+        XCTAssertEqual(request.intent, .resume(jobID: original.id, origin: .current, displayName: original.displayName))
+        await actions.authenticate(requestID: request.id, username: "scanner", password: "temporary password")
+        await actions.continueAfterLogin()
+        XCTAssertEqual(model.jobs.count, 1)
+        XCTAssertEqual(model.selectedJobID, original.id)
+        XCTAssertEqual(model.selectedJob?.mapCLAHE, true)
+        XCTAssertEqual(model.selectedJob?.remote?.mapCLAHE, true)
+        XCTAssertEqual(fixture.api.submitIDs, [original.id, original.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: originalZIP.path))
+        let submitted = await fixture.api.base.submittedMapCLAHE
+        XCTAssertEqual(submitted, [true])
+        let count = await fixture.api.base.requirementsCallCount()
+        XCTAssertEqual(count, 2, "Saved ZIP resumes still recheck the opt-in capability")
+    }
+
     func testRequestedLoginSheetRendersUsernameAndSecurePasswordFields() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("AreaLoginView-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -383,6 +514,7 @@ final class AreaTargetProcessingViewTests: XCTestCase {
         var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: fixture.scan.path,
             displayName: "停止的原任务", createdAt: Date(), serverOrigin: .current)
         job.phase = .paused
+        job.mapCLAHE = true
         fixture.journal.jobs = [job]
         try fixture.tokens.save(String(repeating: "a", count: 64), jobID: job.id)
         let model = cloudModel(fixture, journal: fixture.journal)
@@ -393,6 +525,7 @@ final class AreaTargetProcessingViewTests: XCTestCase {
         await actions.authenticate(requestID: request.id, username: "scanner", password: "temporary password")
         await actions.continueAfterLogin()
         XCTAssertEqual(model.jobs.first?.phase, .stopped)
+        XCTAssertEqual(model.jobs.first?.mapCLAHE, true)
         XCTAssertEqual(model.jobs.count, 1)
         let events = await fixture.api.base.events
         XCTAssertTrue(events.isEmpty)
@@ -588,7 +721,7 @@ private final class AreaViewServiceAPI: AreaTargetAPI {
     func validateServiceSession() async throws -> AreaTargetServiceSession? { saved }
     func signOut() async throws { saved = nil }
     func fetchProcessingRequirements() async throws -> AreaTargetProcessingRequirements { try await base.fetchProcessingRequirements() }
-    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
+    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool, mapCLAHE: Bool = false,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob {
         submitIDs.append(jobID)
         if rejectNextSubmit {
@@ -596,7 +729,7 @@ private final class AreaViewServiceAPI: AreaTargetAPI {
             saved = nil
             throw AreaTargetAPIError.authenticationRequired
         }
-        return try await base.submit(archiveURL: archiveURL, jobID: jobID, token: token, profile: profile, uvUnwrap: uvUnwrap, progress: progress)
+        return try await base.submit(archiveURL: archiveURL, jobID: jobID, token: token, profile: profile, uvUnwrap: uvUnwrap, mapCLAHE: mapCLAHE, progress: progress)
     }
     func status(jobID: String, token: String) async throws -> AreaTargetRemoteJob {
         if rejectNextStatus {

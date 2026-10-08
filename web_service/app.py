@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from web_service.auth import register_auth
-from web_service.mobile_api import register_mobile_api
+from web_service.mobile_api import MAP_CLAHE_FINGERPRINT, parse_map_clahe, register_mobile_api
 
 app = Flask(__name__, static_folder="static")
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
@@ -73,6 +73,7 @@ def _normalize_job_row(row):
     job = dict(row)
     job["uv_unwrap"] = bool(job.get("uv_unwrap"))
     job["texture_compression"] = bool(job.get("texture_compression"))
+    job["map_clahe"] = bool(job.get("map_clahe", False))
     job["profile"] = job.get("profile") or "fast"
     return job
 
@@ -89,6 +90,7 @@ class JobStore:
         "result_zip",
         "uv_unwrap",
         "texture_compression",
+        "map_clahe",
         "profile",
         "input_hash",
         "source_job_id",
@@ -129,6 +131,7 @@ class JobStore:
                     result_zip TEXT,
                     uv_unwrap INTEGER NOT NULL DEFAULT 0,
                     texture_compression INTEGER NOT NULL DEFAULT 0,
+                    map_clahe INTEGER NOT NULL DEFAULT 0,
                     profile TEXT NOT NULL DEFAULT 'fast',
                     input_hash TEXT,
                     source_job_id TEXT,
@@ -141,6 +144,7 @@ class JobStore:
             if self._ensure_column(conn, "texture_compression", "INTEGER NOT NULL DEFAULT 0"):
                 # Before this option existed, every job enabled optimizer texture compression.
                 conn.execute("UPDATE jobs SET texture_compression=1")
+            self._ensure_column(conn, "map_clahe", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "input_hash", "TEXT")
             self._ensure_column(conn, "source_job_id", "TEXT")
             for name, definition in (("token_hash", "TEXT"), ("error_code", "TEXT"),
@@ -171,6 +175,7 @@ class JobStore:
         values = {field: job.get(field) for field in self.fields}
         values['uv_unwrap'] = 1 if job.get('uv_unwrap') else 0
         values['texture_compression'] = 1 if job.get('texture_compression') else 0
+        values['map_clahe'] = 1 if job.get('map_clahe', False) else 0
         values['profile'] = job.get('profile') or 'fast'
         names = sorted(self.fields)
         conn.execute('INSERT INTO jobs (' + ','.join(names) + ') VALUES (' +
@@ -202,6 +207,8 @@ class JobStore:
             updates["uv_unwrap"] = 1 if updates["uv_unwrap"] else 0
         if "texture_compression" in updates:
             updates["texture_compression"] = 1 if updates["texture_compression"] else 0
+        if "map_clahe" in updates:
+            updates["map_clahe"] = 1 if updates["map_clahe"] else 0
 
         assignments = ", ".join(f"{key}=:{key}" for key in updates)
         params = dict(updates)
@@ -597,13 +604,15 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
-def _make_input_hash(zip_hash, profile, uv_unwrap, texture_compression=False):
+def _make_input_hash(zip_hash, profile, uv_unwrap, texture_compression=False, *, map_clahe=False):
     import cv2
 
     digest = hashlib.sha256()
     # Include both the descriptor producer and preparation policy in cache identity.
     from processing_pipeline.scan_preparation import POLICY_V2
     payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{int(texture_compression)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}"
+    if map_clahe:
+        payload += MAP_CLAHE_FINGERPRINT
     digest.update(payload.encode("utf-8"))
     return digest.hexdigest()
 
@@ -624,7 +633,9 @@ def _find_reusable_result(input_hash):
     return None
 
 
-def _submit_pipeline_job(job_id, zip_path, uv_unwrap, profile):
+def _submit_pipeline_job(job_id, zip_path, uv_unwrap, profile, map_clahe=False):
+    if map_clahe:
+        return pipeline_executor.submit(run_pipeline, job_id, zip_path, uv_unwrap, profile, True)
     return pipeline_executor.submit(run_pipeline, job_id, zip_path, uv_unwrap, profile)
 
 
@@ -692,7 +703,7 @@ def _start_cleanup_thread():
     return thread
 
 
-def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
+def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast", map_clahe=False):
     """Run the optimized pipeline in the bounded pipeline executor."""
     extract_dir = os.path.join(UPLOAD_DIR, job_id, "extracted")
     output_dir = os.path.join(OUTPUT_DIR, job_id)
@@ -729,6 +740,7 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
         job_options = _get_job_snapshot(job_id) or {}
         protected = bool(job_options.get('token_hash'))
         texture_compression = bool(job_options.get('texture_compression'))
+        map_clahe = bool(job_options.get('map_clahe', False))
         if protected:
             from processing_pipeline.scan_security import validate_scan
             from processing_pipeline.scan_preparation import POLICY, POLICY_V2, prepare_scan
@@ -775,6 +787,8 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast"):
         if preparation is not None and preparation.metadata['policy'] == POLICY_V2:
             mobile_options = {'mobile_preparation_policy': POLICY_V2,
                               'mobile_preparation_capacity': preparation.metadata['capacityTier']}
+        if map_clahe:
+            mobile_options['map_clahe'] = True
         pipeline = OptimizedPipeline(
             optimizer_url=optimizer_url,
             processing_profile=profile,
@@ -906,6 +920,7 @@ def upload():
     try:
         profile = _normalize_profile(request.form.get("profile", "fast"))
         texture_compression = _parse_texture_compression(request.form.get("texture_compression"))
+        map_clahe = parse_map_clahe(request.form.getlist("map_clahe"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -925,7 +940,8 @@ def upload():
         return jsonify({"error": "上传的文件不是有效的 ZIP 格式"}), 400
 
     zip_hash = _sha256_file(zip_path)
-    input_hash = _make_input_hash(zip_hash, profile, uv_unwrap, texture_compression=texture_compression)
+    input_hash = _make_input_hash(zip_hash, profile, uv_unwrap, texture_compression=texture_compression,
+                                  map_clahe=map_clahe)
     reusable_job = _find_reusable_result(input_hash)
     if reusable_job:
         _safe_remove_path(job_dir)
@@ -938,6 +954,7 @@ def upload():
             "result_zip": reusable_job["result_zip"],
             "uv_unwrap": uv_unwrap,
             "texture_compression": texture_compression,
+            "map_clahe": map_clahe,
             "profile": profile,
             "input_hash": input_hash,
             "source_job_id": reusable_job["id"],
@@ -955,6 +972,7 @@ def upload():
         "result_zip": None,
         "uv_unwrap": uv_unwrap,
         "texture_compression": texture_compression,
+        "map_clahe": map_clahe,
         "profile": profile,
         "input_hash": input_hash,
         "source_job_id": None,
@@ -972,7 +990,10 @@ def upload():
         jobs[job_id] = stored_job
         _job_cache_read_at[job_id] = time.monotonic()
 
-    _submit_pipeline_job(job_id, zip_path, uv_unwrap, profile)
+    arguments = (job_id, zip_path, uv_unwrap, profile)
+    if map_clahe:
+        arguments += (True,)
+    _submit_pipeline_job(*arguments)
 
     return jsonify({"job_id": job_id})
 

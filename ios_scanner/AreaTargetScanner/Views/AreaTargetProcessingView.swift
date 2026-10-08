@@ -14,6 +14,7 @@ struct AreaTargetProcessingView: View {
     @State private var showingTasks = false
     @State private var sharePayload: SharePayload?
     @State private var stoppingJob: AreaTargetProcessingJob?
+    @State private var mapCLAHE = false
 
     init(model: AreaTargetProcessingModel, scanDirectory: URL?, displayName: String,
          entryPoint: EntryPoint = .preparation, selectScan: (() -> Void)? = nil,
@@ -32,6 +33,14 @@ struct AreaTargetProcessingView: View {
     }
 
     private var serviceOrigin: AreaTargetServerOrigin { currentJob?.serverOrigin ?? .current }
+
+    private var canChooseMapCLAHE: Bool {
+        if let job = currentJob {
+            return [.downloaded, .failed, .stopped].contains(job.phase)
+                && FileManager.default.fileExists(atPath: job.scanDirectoryPath)
+        }
+        return scanDirectory != nil && entryPoint == .preparation && !showingTasks
+    }
 
     var body: some View {
         NavigationStack {
@@ -52,6 +61,7 @@ struct AreaTargetProcessingView: View {
                     else if model.jobs.isEmpty && (scanDirectory == nil || entryPoint == .tasks || showingTasks) {
                         AreaTargetEmptyState(title: "暂无处理任务", message: "从扫描记录选择场景，然后上传处理。", symbol: "icloud")
                     }
+                    if canChooseMapCLAHE { mapCLAHESelection }
                     if model.isRestoringAssets {
                         HStack { ProgressView(); Text("正在检查本机资产…") }
                     }
@@ -139,6 +149,29 @@ struct AreaTargetProcessingView: View {
         .disabled(model.operationInProgress || model.isAuthenticating || cloudActions.isExecuting)
     }
 
+    private var mapCLAHESelection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(currentJob == nil ? "建图选项" : "重新建图选项").font(.headline)
+            Toggle("光照增强（实验）", isOn: $mapCLAHE)
+                .accessibilityIdentifier("area-target-map-clahe-toggle")
+            Text("增强建图图像的对比度，地图体积和处理时间可能增加。改变选项需要重新建图。")
+                .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+            if let job = currentJob {
+                Text("重新建图会创建新任务，已有任务和下载的地图会保留。")
+                    .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+                if job.phase == .downloaded {
+                    Button("按所选选项重新建图") {
+                        let intent = AreaTargetCloudIntent.upload(scanDirectory: job.scanDirectory,
+                            displayName: job.displayName, mapCLAHE: mapCLAHE)
+                        Task { await cloudActions.perform(intent) }
+                    }.frame(minHeight: 44).accessibilityIdentifier("area-target-rebuild")
+                }
+            }
+        }
+        .disabled(model.operationInProgress || model.isRestoringAssets || model.isAuthenticating
+            || cloudActions.isExecuting || cloudActions.loginRequest != nil)
+    }
+
     private var taskHistory: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(model.jobs) { job in
@@ -149,6 +182,8 @@ struct AreaTargetProcessingView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(job.displayName).font(.headline).foregroundStyle(.primary)
                             Text(job.phase.title).font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel))
+                            Text("光照增强：\(job.mapCLAHE ? "开启" : "关闭")")
+                                .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                             Text(job.createdAt.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                         }
@@ -166,6 +201,8 @@ struct AreaTargetProcessingView: View {
     private func taskDetails(_ job: AreaTargetProcessingJob) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             AreaTargetSectionHeading(title: job.phase.title, subtitle: job.displayName)
+            Text("光照增强：\(job.mapCLAHE ? "开启" : "关闭")")
+                .font(.subheadline).accessibilityIdentifier("area-target-task-map-clahe")
             if [.uploading, .downloading].contains(job.phase) {
                 ProgressView(value: job.transferProgress)
                 Text("\(Int(job.transferProgress * 100))%").font(.caption.monospacedDigit())
@@ -229,19 +266,25 @@ struct AreaTargetProcessingView: View {
                     }
                     if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
                         AreaTargetActionButton(title: "重新处理此扫描", symbol: "icloud.and.arrow.up") {
-                            Task { await cloudActions.perform(.upload(scanDirectory: job.scanDirectory, displayName: job.displayName)) }
+                            let intent = AreaTargetCloudIntent.upload(scanDirectory: job.scanDirectory,
+                                displayName: job.displayName, mapCLAHE: mapCLAHE)
+                            Task { await cloudActions.perform(intent) }
                         }.accessibilityIdentifier("area-target-process-again")
                     }
                 case .failed:
                     if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
                         AreaTargetActionButton(title: "重新上传处理", symbol: "icloud.and.arrow.up") {
-                            Task { await cloudActions.perform(.upload(scanDirectory: job.scanDirectory, displayName: job.displayName)) }
+                            let intent = AreaTargetCloudIntent.upload(scanDirectory: job.scanDirectory,
+                                displayName: job.displayName, mapCLAHE: mapCLAHE)
+                            Task { await cloudActions.perform(intent) }
                         }.accessibilityIdentifier("area-target-restart")
                     }
                 }
             } else if let scanDirectory, entryPoint == .preparation, !showingTasks {
                 AreaTargetActionButton(title: "上传并处理", symbol: "icloud.and.arrow.up") {
-                    Task { await cloudActions.perform(.upload(scanDirectory: scanDirectory, displayName: displayName)) }
+                    let intent = AreaTargetCloudIntent.upload(scanDirectory: scanDirectory,
+                        displayName: displayName, mapCLAHE: mapCLAHE)
+                    Task { await cloudActions.perform(intent) }
                 }.accessibilityIdentifier("area-target-submit")
             }
             if !model.operationInProgress, let job = currentJob, job.canStopLocalTracking {
@@ -257,7 +300,7 @@ struct AreaTargetProcessingView: View {
 }
 
 enum AreaTargetCloudIntent: Equatable {
-    case upload(scanDirectory: URL, displayName: String)
+    case upload(scanDirectory: URL, displayName: String, mapCLAHE: Bool = false)
     case resume(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
     case refresh(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
     case download(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
@@ -271,7 +314,7 @@ enum AreaTargetCloudIntent: Equatable {
 
     var displayName: String {
         switch self {
-        case .upload(let directory, let name): return name.isEmpty ? ScanHistoryItem.displayName(for: directory.lastPathComponent) : name
+        case .upload(let directory, let name, _): return name.isEmpty ? ScanHistoryItem.displayName(for: directory.lastPathComponent) : name
         case .resume(_, _, let name), .refresh(_, _, let name), .download(_, _, let name): return name
         }
     }
@@ -287,7 +330,7 @@ enum AreaTargetCloudIntent: Equatable {
     @MainActor
     func isValid(in model: AreaTargetProcessingModel) -> Bool {
         switch self {
-        case .upload(let directory, _):
+        case .upload(let directory, _, _):
             var isDirectory: ObjCBool = false
             return FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
                 && !model.jobs.contains { $0.scanDirectoryPath == directory.path && $0.isPending }
@@ -369,7 +412,8 @@ final class AreaTargetCloudActionCoordinator: ObservableObject {
         isExecuting = true
         defer { isExecuting = false }
         switch request.intent {
-        case .upload(let directory, let name): await model.start(scanDirectory: directory, displayName: name)
+        case .upload(let directory, let name, let mapCLAHE):
+            await model.start(scanDirectory: directory, displayName: name, mapCLAHE: mapCLAHE)
         case .resume(let id, _, _): await model.resume(jobID: id)
         case .refresh(let id, _, _): await model.refresh(jobID: id)
         case .download(let id, _, _): await model.download(jobID: id)
@@ -380,7 +424,7 @@ final class AreaTargetCloudActionCoordinator: ObservableObject {
         var retry = request.intent
         // A rejected upload may already own a durable job ID and capability. Resume
         // that identity after login rather than starting another submission.
-        if case .upload(let directory, _) = retry,
+        if case .upload(let directory, _, _) = retry,
            let job = model.jobs.first(where: { $0.scanDirectoryPath == directory.path && $0.isPending }) {
             retry = .resume(jobID: job.id, origin: job.serverOrigin, displayName: job.displayName)
         }
