@@ -112,6 +112,7 @@ struct AreaTargetRemoteJob: Codable, Equatable {
     let message: String
     let profile: String
     let uvUnwrap: Bool
+    var mapCLAHE = false
     let createdAt: Date
     let finishedAt: Date?
     let expiresAt: Date?
@@ -119,8 +120,27 @@ struct AreaTargetRemoteJob: Codable, Equatable {
     let result: AreaTargetResult?
     enum CodingKeys: String, CodingKey {
         case status, progress, stage, message, profile, error, result
-        case jobID = "job_id", uvUnwrap = "uv_unwrap", createdAt = "created_at"
+        case jobID = "job_id", uvUnwrap = "uv_unwrap", mapCLAHE = "map_clahe", createdAt = "created_at"
         case finishedAt = "finished_at", expiresAt = "expires_at"
+    }
+}
+
+extension AreaTargetRemoteJob {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(jobID: try values.decode(String.self, forKey: .jobID),
+            status: try values.decode(AreaTargetRemoteStatus.self, forKey: .status),
+            progress: try values.decode(Int.self, forKey: .progress),
+            stage: try values.decode(String.self, forKey: .stage),
+            message: try values.decode(String.self, forKey: .message),
+            profile: try values.decode(String.self, forKey: .profile),
+            uvUnwrap: try values.decode(Bool.self, forKey: .uvUnwrap),
+            mapCLAHE: values.contains(.mapCLAHE) ? try values.decode(Bool.self, forKey: .mapCLAHE) : false,
+            createdAt: try values.decode(Date.self, forKey: .createdAt),
+            finishedAt: try values.decodeIfPresent(Date.self, forKey: .finishedAt),
+            expiresAt: try values.decodeIfPresent(Date.self, forKey: .expiresAt),
+            error: try values.decodeIfPresent(AreaTargetAPIProblem.self, forKey: .error),
+            result: try values.decodeIfPresent(AreaTargetResult.self, forKey: .result))
     }
 }
 
@@ -245,8 +265,12 @@ struct AreaTargetProcessingRequirements: Codable, Equatable {
     let profiles: [String: Profile]
     let safety: Safety
     var capacityTier: Int? = nil
+    var mapCLAHESupported = false
     var criticalFrameProtection: AreaTargetCriticalFrameProtectionCapability? = nil
-    private enum CodingKeys: String, CodingKey { case schemaVersion, policy, policyVersion, profiles, safety, capacityTier, criticalFrameProtection }
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, policy, policyVersion, profiles, safety, capacityTier, criticalFrameProtection
+        case mapCLAHESupported = "map_clahe_supported"
+    }
 
     func preparationPolicy(for profile: String) -> Profile? {
         guard schemaVersion == 1, ["fast", "quality"].contains(profile), let value = profiles[profile],
@@ -276,6 +300,7 @@ extension AreaTargetProcessingRequirements {
         profiles = try values.decode([String: Profile].self, forKey: .profiles)
         safety = try values.decode(Safety.self, forKey: .safety)
         capacityTier = try values.decodeIfPresent(Int.self, forKey: .capacityTier)
+        mapCLAHESupported = values.contains(.mapCLAHESupported) ? try values.decode(Bool.self, forKey: .mapCLAHESupported) : false
         criticalFrameProtection = values.contains(.criticalFrameProtection) ? try values.decode(AreaTargetCriticalFrameProtectionCapability.self, forKey: .criticalFrameProtection) : nil
     }
 }
@@ -395,7 +420,7 @@ protocol AreaTargetAPI {
     func signOut() async throws
     func fetchProcessingRequirements() async throws -> AreaTargetProcessingRequirements
     func fetchProcessingRequirements(policy: String) async throws -> AreaTargetProcessingRequirements
-    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
+    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool, mapCLAHE: Bool,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob
     func status(jobID: String, token: String) async throws -> AreaTargetRemoteJob
     func download(jobID: String, token: String, result: AreaTargetResult,
@@ -403,6 +428,11 @@ protocol AreaTargetAPI {
 }
 
 extension AreaTargetAPI {
+    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
+                progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob {
+        try await submit(archiveURL: archiveURL, jobID: jobID, token: token, profile: profile,
+                         uvUnwrap: uvUnwrap, mapCLAHE: false, progress: progress)
+    }
     var requiresServiceAuthentication: Bool { false }
     func savedServiceSession() throws -> AreaTargetServiceSession? { nil }
     func signIn(username: String, password: String) async throws -> AreaTargetServiceSession { throw AreaTargetAPIError.invalidResponse }
@@ -535,13 +565,13 @@ final class AreaTargetAPIClient: AreaTargetAPI {
         }
     }
 
-    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
+    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool, mapCLAHE: Bool = false,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob {
         try Self.validateIdentity(jobID, token: token)
         guard ["fast", "quality"].contains(profile) else { throw AreaTargetAPIError.invalidRequest("profile") }
         try Task.checkCancellation()
         let boundary = "AreaTarget-" + UUID().uuidString.lowercased()
-        let body = try Self.makeMultipartFile(archiveURL: archiveURL, profile: profile, uvUnwrap: uvUnwrap, boundary: boundary)
+        let body = try Self.makeMultipartFile(archiveURL: archiveURL, profile: profile, uvUnwrap: uvUnwrap, mapCLAHE: mapCLAHE, boundary: boundary)
         defer { try? FileManager.default.removeItem(at: body) }
         var request = request(jobID: nil, token: token)
         request.httpMethod = "POST"
@@ -551,7 +581,7 @@ final class AreaTargetAPIClient: AreaTargetAPI {
         let transfer = try await perform(request: request, uploadFile: body, progress: progress)
         let bytes = try Self.responseData(transfer, accepted: [200, 202])
         let job = try Self.decodeJob(bytes, jobID: jobID)
-        guard job.profile == profile, job.uvUnwrap == uvUnwrap else { throw AreaTargetAPIError.invalidResponse }
+        guard job.profile == profile, job.uvUnwrap == uvUnwrap, job.mapCLAHE == mapCLAHE else { throw AreaTargetAPIError.invalidResponse }
         return job
     }
 
@@ -601,7 +631,7 @@ final class AreaTargetAPIClient: AreaTargetAPI {
     }
 
     /// Builds an upload body in a separate owned file; never reads the scan ZIP into memory.
-    static func makeMultipartFile(archiveURL: URL, profile: String, uvUnwrap: Bool, boundary: String) throws -> URL {
+    static func makeMultipartFile(archiveURL: URL, profile: String, uvUnwrap: Bool, mapCLAHE: Bool = false, boundary: String) throws -> URL {
         guard ["fast", "quality"].contains(profile), !boundary.isEmpty,
               boundary.utf8.allSatisfy({ (45...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }) else {
             throw AreaTargetAPIError.invalidRequest("multipart")
@@ -616,6 +646,9 @@ final class AreaTargetAPIClient: AreaTargetAPI {
             func write(_ text: String) throws { try handle.write(contentsOf: Data(text.utf8)) }
             try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"profile\"\r\n\r\n\(profile)\r\n")
             try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"uv_unwrap\"\r\n\r\n\(uvUnwrap ? "1" : "0")\r\n")
+            if mapCLAHE {
+                try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"map_clahe\"\r\n\r\n1\r\n")
+            }
             try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"scan.zip\"\r\nContent-Type: application/zip\r\n\r\n")
             let input = try FileHandle(forReadingFrom: archiveURL)
             defer { try? input.close() }

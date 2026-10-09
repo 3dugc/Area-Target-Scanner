@@ -6,6 +6,16 @@ final class AreaTargetAPIClientTests: XCTestCase {
     let jobID = "5c372062-9130-40ed-9efe-5ef336c7e332"
     let token = String(repeating: "a", count: 64)
 
+    func testMapCLAHECapabilityRoundTripPreservesExplicitBoolean() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: requirementsJSON()) as? [String: Any])
+        object["map_clahe_supported"] = true
+        let requirements = try JSONDecoder().decode(AreaTargetProcessingRequirements.self,
+            from: JSONSerialization.data(withJSONObject: object))
+        let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(requirements)) as? [String: Any])
+        XCTAssertEqual(encoded["map_clahe_supported"] as? Bool, true,
+            "The top-level capability must survive decoding and encoding")
+    }
+
     func testServiceAuthenticationFailurePromptsSignInWithoutMentioningTaskCredentials() {
         let error = AreaTargetAPIError.server(statusCode: 401,
             problem: .init(code: "authentication_required", message: "Please sign in", retryable: false), retryAfter: nil)
@@ -271,6 +281,103 @@ final class AreaTargetAPIClientTests: XCTestCase {
         }
     }
 
+    func testMapCLAHERequirementsMissingMeansUnsupportedAndOnlyBooleansAreAccepted() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: requirementsJSON()) as? [String: Any])
+        let historical = try JSONDecoder().decode(AreaTargetProcessingRequirements.self,
+            from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertFalse(historical.mapCLAHESupported)
+        object["map_clahe_supported"] = true
+        XCTAssertTrue(try JSONDecoder().decode(AreaTargetProcessingRequirements.self,
+            from: JSONSerialization.data(withJSONObject: object)).mapCLAHESupported)
+        for invalid in [NSNull(), 0, 1, "true"] as [Any] {
+            object["map_clahe_supported"] = invalid
+            XCTAssertThrowsError(try JSONDecoder().decode(AreaTargetProcessingRequirements.self,
+                from: JSONSerialization.data(withJSONObject: object)))
+        }
+    }
+
+    func testMapCLAHERemoteMissingMeansDisabledAndOnlyBooleansAreAccepted() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: jobJSON()) as? [String: Any])
+        object["created_at"] = "2026-10-04T00:00:00Z"
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        XCTAssertFalse(try decoder.decode(AreaTargetRemoteJob.self, from: JSONSerialization.data(withJSONObject: object)).mapCLAHE)
+        object["map_clahe"] = true
+        XCTAssertTrue(try decoder.decode(AreaTargetRemoteJob.self, from: JSONSerialization.data(withJSONObject: object)).mapCLAHE)
+        for invalid in [NSNull(), 0, 1, "true"] as [Any] {
+            object["map_clahe"] = invalid
+            XCTAssertThrowsError(try decoder.decode(AreaTargetRemoteJob.self, from: JSONSerialization.data(withJSONObject: object)))
+        }
+    }
+
+    func testEnabledMapCLAHEMultipartSendsOnlyOneLiteralOneField() throws {
+        let input = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".zip")
+        try Data("original archive marker".utf8).write(to: input)
+        defer { try? FileManager.default.removeItem(at: input) }
+        let body = try AreaTargetAPIClient.makeMultipartFile(archiveURL: input, profile: "quality", uvUnwrap: true,
+            mapCLAHE: true, boundary: "map-clahe-fixture")
+        defer { try? FileManager.default.removeItem(at: body) }
+        let text = try String(contentsOf: body, encoding: .utf8)
+        XCTAssertEqual(text.components(separatedBy: "name=\"map_clahe\"").count - 1, 1)
+        XCTAssertTrue(text.contains("name=\"map_clahe\"\r\n\r\n1\r\n"))
+        XCTAssertTrue(text.contains("original archive marker"))
+        XCTAssertEqual(try String(contentsOf: input, encoding: .utf8), "original archive marker")
+    }
+
+    func testEnabledMapCLAHERejectsServerEchoMissingOrDisabled() async throws {
+        let input = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".zip")
+        try Data("scan bytes".utf8).write(to: input)
+        defer { try? FileManager.default.removeItem(at: input) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AreaTargetTestURLProtocol.self]
+        for flag in [nil, false, true] as [Bool?] {
+            AreaTargetTestURLProtocol.handler = { _ in
+                var object = try XCTUnwrap(JSONSerialization.jsonObject(with: self.jobJSON()) as? [String: Any])
+                if let flag { object["map_clahe"] = flag }
+                return (202, try JSONSerialization.data(withJSONObject: object))
+            }
+            do {
+                let remote = try await authenticatedClient(configuration: configuration).submit(archiveURL: input,
+                    jobID: jobID, token: token, profile: "fast", uvUnwrap: true, mapCLAHE: true, progress: { _ in })
+                XCTAssertEqual(flag, true)
+                XCTAssertTrue(remote.mapCLAHE)
+            } catch {
+                XCTAssertNotEqual(flag, true)
+                XCTAssertEqual(error as? AreaTargetAPIError, .invalidResponse)
+            }
+        }
+    }
+
+    func testExplicitDisabledMapCLAHEKeepsOriginalMultipartBytes() throws {
+        let input = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".zip")
+        try Data("original archive marker".utf8).write(to: input)
+        defer { try? FileManager.default.removeItem(at: input) }
+        let original = try AreaTargetAPIClient.makeMultipartFile(archiveURL: input, profile: "fast", uvUnwrap: true,
+            boundary: "unchanged-off-body")
+        let disabled = try AreaTargetAPIClient.makeMultipartFile(archiveURL: input, profile: "fast", uvUnwrap: true,
+            mapCLAHE: false, boundary: "unchanged-off-body")
+        defer { try? FileManager.default.removeItem(at: original); try? FileManager.default.removeItem(at: disabled) }
+        XCTAssertEqual(try Data(contentsOf: disabled), try Data(contentsOf: original))
+        XCTAssertFalse(try String(contentsOf: disabled, encoding: .utf8).contains("name=\"map_clahe\""))
+    }
+
+    func testDisabledMapCLAHERejectsUnexpectedEnabledServerEcho() async throws {
+        let input = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".zip")
+        try Data("scan bytes".utf8).write(to: input)
+        defer { try? FileManager.default.removeItem(at: input) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AreaTargetTestURLProtocol.self]
+        AreaTargetTestURLProtocol.handler = { _ in
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: self.jobJSON()) as? [String: Any])
+            object["map_clahe"] = true
+            return (202, try JSONSerialization.data(withJSONObject: object))
+        }
+        do {
+            _ = try await authenticatedClient(configuration: configuration).submit(archiveURL: input,
+                jobID: jobID, token: token, profile: "fast", uvUnwrap: true, mapCLAHE: false, progress: { _ in })
+            XCTFail("Accepted server option different from the frozen disabled choice")
+        } catch { XCTAssertEqual(error as? AreaTargetAPIError, .invalidResponse) }
+    }
+
     func testMultipartIsFreshFileBackedAndUsesLiteralFields() throws {
         let input = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".zip")
         try Data("archive marker".utf8).write(to: input)
@@ -282,6 +389,7 @@ final class AreaTargetAPIClientTests: XCTestCase {
         XCTAssertTrue(text.contains("name=\"file\"; filename=\"scan.zip\"\r\nContent-Type: application/zip"))
         XCTAssertTrue(text.contains("name=\"profile\"\r\n\r\nquality\r\n"))
         XCTAssertTrue(text.contains("name=\"uv_unwrap\"\r\n\r\n1\r\n"))
+        XCTAssertFalse(text.contains("name=\"map_clahe\""), "Default off must omit the extension for older services")
         XCTAssertTrue(text.contains("archive marker"))
         XCTAssertTrue(text.hasSuffix("--fixture-boundary--\r\n"))
     }

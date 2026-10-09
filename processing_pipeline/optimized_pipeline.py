@@ -202,7 +202,11 @@ class OptimizedPipeline:
         mobile_preparation_policy: str = "mobile-scan-preparation-v1",
         mobile_preparation_capacity: int = 100,
         texture_compression: bool = False,
+        map_clahe: bool = False,
     ) -> None:
+        if type(map_clahe) is not bool:
+            raise ValueError("map_clahe must be a bool")
+        self.map_clahe = map_clahe
         if mobile_preparation_policy not in {"mobile-scan-preparation-v1", "mobile-scan-preparation-v2"}:
             raise ValueError("Unsupported mobile preparation policy")
         if (isinstance(mobile_preparation_capacity, bool)
@@ -358,6 +362,8 @@ class OptimizedPipeline:
 
         # Reuse existing ORB + ray-casting + BoW logic
         feature_options = dict(FEATURE_PROFILE_OPTIONS[self.processing_profile])
+        if self.map_clahe:
+            feature_options["map_clahe"] = True
         if self.mobile_feature_limits or mobile_v2:
             feature_options["max_keyframes"] = None if mobile_v2 else 80
             if feature_options["extract_akaze"]:
@@ -421,6 +427,8 @@ class OptimizedPipeline:
             "optimizedWith": "3D-Model-Optimizer",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "producer": {"opencvVersion": cv2.__version__},
+            "mapPreprocessing": ({"mode": "clahe", "clipLimit": 2.0, "tileGridSize": [8, 8]}
+                                 if self.map_clahe else {"mode": "none"}),
         }
         if features.selection_report is not None:
             manifest.setdefault("producer", {})["keyframeSelection"] = features.selection_report

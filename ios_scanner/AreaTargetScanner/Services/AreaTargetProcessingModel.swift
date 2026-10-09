@@ -178,12 +178,16 @@ final class AreaTargetProcessingModel: ObservableObject {
         else { stopMonitoring(); pause() }
     }
 
-    func start(scanDirectory: URL, displayName: String) async {
+    func start(scanDirectory: URL, displayName: String, mapCLAHE: Bool = false) async {
         await restoration?.value
         guard !operationInProgress, !isAuthenticating, !storageUnavailable, requireSignIn(origin: .current) else { return }
         message = nil
         if let existing = jobs.first(where: { $0.scanDirectoryPath == scanDirectory.path && $0.isPending }) {
             selectedJobID = existing.id
+            if existing.mapCLAHE != mapCLAHE {
+                let state = existing.mapCLAHE ? "开启" : "关闭"
+                message = "该扫描已有未完成任务，光照增强已\(state)。继续原任务会保留此选择，调整选项需要新建任务重新建图。"
+            }
             return
         }
         var isDirectory: ObjCBool = false
@@ -196,8 +200,9 @@ final class AreaTargetProcessingModel: ObservableObject {
             let token = try Self.makeToken()
             try tokenStore.save(token, jobID: id)
             let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let job = AreaTargetProcessingJob(id: id, scanDirectoryPath: scanDirectory.path,
+            var job = AreaTargetProcessingJob(id: id, scanDirectoryPath: scanDirectory.path,
                 displayName: String((name.isEmpty ? scanDirectory.lastPathComponent : name).prefix(120)), createdAt: Date(), serverOrigin: .current)
+            job.mapCLAHE = mapCLAHE
             do { try replace(job) }
             catch { try? tokenStore.remove(jobID: id); throw error }
             selectedJobID = id
@@ -382,6 +387,21 @@ final class AreaTargetProcessingModel: ObservableObject {
         do {
             let token = try requiredToken(jobID)
             guard var job = jobs.first(where: { $0.id == jobID }), let cancellation else { return }
+            // Opt-in uploads need a fresh capability check even when reusing a saved ZIP.
+            var negotiatedMapRequirements: AreaTargetProcessingRequirements?
+            if job.mapCLAHE {
+                try edit(jobID) { $0.detail = "正在确认云端光照增强能力…" }
+                let requirements = try await processingRequirements(for: job)
+                try Task.checkCancellation()
+                guard self.generation == generation, !cancellation.isCancelled else { throw CancellationError() }
+                guard requirements.mapCLAHESupported else {
+                    let detail = "云端当前不支持光照增强（实验）。请使用关闭选项新建任务，或在服务支持后重新建图。"
+                    try edit(jobID) { $0.phase = .failed; $0.detail = detail }
+                    message = detail
+                    return
+                }
+                negotiatedMapRequirements = requirements
+            }
             var archiveURL: URL
             if let existing = job.archiveURL {
                 guard FileManager.default.fileExists(atPath: existing.path), let digest = job.archiveSHA256,
@@ -392,13 +412,8 @@ final class AreaTargetProcessingModel: ObservableObject {
             } else {
                 try edit(jobID) { $0.phase = .preparing; $0.detail = "正在获取云端预处理要求…" }
                 let requirements: AreaTargetProcessingRequirements
-                do { requirements = try await api(for: job).fetchProcessingRequirements(policy: "mobile-scan-preparation-v2") }
-                catch {
-                    if case AreaTargetAPIError.server(let status, let problem, _) = error,
-                       status == 400, problem.code == "unsupported_preparation_policy" {
-                        requirements = try await api(for: job).fetchProcessingRequirements()
-                    } else { throw error }
-                }
+                if let negotiatedMapRequirements { requirements = negotiatedMapRequirements }
+                else { requirements = try await processingRequirements(for: job) }
                 guard requirements.preparationPolicy(for: job.profile) != nil else { throw AreaTargetAPIError.invalidResponse }
                 try Task.checkCancellation()
                 guard self.generation == generation, !cancellation.isCancelled else { throw CancellationError() }
@@ -465,7 +480,7 @@ final class AreaTargetProcessingModel: ObservableObject {
             try edit(jobID) { $0.phase = .uploading; $0.transferProgress = 0; $0.detail = "正在上传扫描数据…" }
             sending = true
             let remote = try await api(for: job).submit(archiveURL: archiveURL, jobID: jobID, token: token,
-                profile: job.profile, uvUnwrap: job.uvUnwrap) { [weak self] progress in
+                profile: job.profile, uvUnwrap: job.uvUnwrap, mapCLAHE: job.mapCLAHE) { [weak self] progress in
                 Task { @MainActor in self?.updateProgress(progress, jobID: jobID, generation: generation) }
             }
             try Task.checkCancellation()
@@ -489,10 +504,22 @@ final class AreaTargetProcessingModel: ObservableObject {
         }
     }
 
+    private func processingRequirements(for job: AreaTargetProcessingJob) async throws -> AreaTargetProcessingRequirements {
+        do { return try await api(for: job).fetchProcessingRequirements(policy: "mobile-scan-preparation-v2") }
+        catch {
+            if case AreaTargetAPIError.server(let status, let problem, _) = error,
+               status == 400, problem.code == "unsupported_preparation_policy" {
+                return try await api(for: job).fetchProcessingRequirements()
+            }
+            throw error
+        }
+    }
+
     private func accept(_ remote: AreaTargetRemoteJob, jobID: String) throws {
         guard let stored = jobs.first(where: { $0.id == jobID }), stored.phase != .stopped else { return }
-        let archive = jobs.first { $0.id == jobID }?.archiveURL
-        guard remote.jobID == jobID else { throw AreaTargetAPIError.invalidResponse }
+        guard remote.jobID == jobID, remote.profile == stored.profile, remote.uvUnwrap == stored.uvUnwrap,
+              remote.mapCLAHE == stored.mapCLAHE else { throw AreaTargetAPIError.invalidResponse }
+        let archive = stored.archiveURL
         try edit(jobID) {
             $0.accepted = true
             $0.archivePath = nil

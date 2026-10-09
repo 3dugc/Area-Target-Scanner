@@ -50,6 +50,16 @@ input[type="file"] { display: none; }
     </p>
   </div>
 
+  <div class="option-row" style="margin-bottom:1rem;">
+    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.9rem;color:#cbd5e1;">
+      <input type="checkbox" id="mapClaheCheck" style="width:18px;height:18px;accent-color:#3b82f6;cursor:pointer;">
+      光照增强（实验）
+    </label>
+    <p style="color:#64748b;font-size:0.75rem;margin-top:0.25rem;margin-left:1.6rem;">
+      可能增加地图大小与建图耗时；更改此选项需要重新建图。
+    </p>
+  </div>
+
   <div class="upload-area" id="dropZone" style="pointer-events:none;" onclick="document.getElementById('fileInput').click()">
     <div class="upload-icon">📁</div>
     <p>点击或拖拽 ZIP 文件到此处</p>
@@ -148,11 +158,13 @@ async function uploadFile(file) {
 
   const uvUnwrap = document.getElementById('uvUnwrapCheck').checked;
   const textureCompression = textureCompressionCheck.checked;
+  const mapClahe = document.getElementById('mapClaheCheck').checked;
   textureCompressionStatus.textContent = '纹理压缩：' + (textureCompression ? '开启（WebP）' : '关闭');
   const fd = new FormData();
   fd.append('file', file);
   fd.append('uv_unwrap', uvUnwrap ? '1' : '0');
   fd.append('texture_compression', textureCompression ? '1' : '0');
+  if(mapClahe) fd.append('map_clahe', '1');
   try {
     const res = await fetch('/api/upload', {
       method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken }

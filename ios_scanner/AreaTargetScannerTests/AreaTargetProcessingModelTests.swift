@@ -31,6 +31,322 @@ final class AreaTargetProcessingModelTests: XCTestCase {
             tokenStore: tokens, assetStore: assets, pollInterval: 0.02, uploadDirectory: root.appendingPathComponent("uploads"))
     }
 
+    func testNewJobPersistsDefaultDisabledMapCLAHE() throws {
+        let job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(),
+            scanDirectoryPath: scan.path, displayName: "默认关闭光照增强", createdAt: Date())
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
+        XCTAssertEqual(document["mapCLAHE"] as? Bool, false,
+            "New jobs must persist the disabled map CLAHE choice before submission")
+        XCTAssertEqual(job.profile, "fast", "The remote develop default must remain unchanged")
+        XCTAssertTrue(job.uvUnwrap)
+    }
+
+    private func setMapCLAHECapability(_ enabled: Bool) async {
+        var requirements = AreaFlowAPI.legacyRequirements
+        requirements.mapCLAHESupported = enabled
+        await api.setRequirements(requirements)
+    }
+
+    func testMapCLAHEIdentityPreservesExactHistoricalV1V2BytesWhenDisabled() throws {
+        let v1 = try JSONDecoder().decode(AreaTargetClientPreparation.self, from: Data(#"{"schemaVersion":1,"policy":"mobile-scan-preparation-v1","policyVersion":1,"profile":"fast","preparedBy":"client","originalFrameCount":120,"selectedFrameCount":2,"selectedIndices":[0,119],"processedPixelCount":3840000,"resizedFrameCount":2,"maximumOutputLongEdge":1600,"scaleDigest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}"#.utf8))
+        let v2 = AreaTargetClientPreparation(schemaVersion: 1, policy: "mobile-scan-preparation-v2", policyVersion: 2,
+            profile: "fast", preparedBy: "client", originalFrameCount: 2, selectedFrameCount: 2, selectedIndices: [0, 1],
+            processedPixelCount: 20_000, resizedFrameCount: 0, maximumOutputLongEdge: 100, scaleDigest: String(repeating: "d", count: 64),
+            receivedFrameCount: 2, capacityTier: 100, selectionVersion: "upload-all-v2",
+            selectionDigest: try AreaTargetClientPreparation.uploadSelectionDigest(capacityTier: 100, indices: [0, 1]),
+            criticalFrameProtection: .init(version: "critical-frame-protection-v1", riskVersion: "gray-quality-risk-v1", protectedIndices: [1], candidateFrameCount: 1))
+        for preparation in [nil, v1, v2] as [AreaTargetClientPreparation?] {
+            var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+                displayName: "原关闭地图", createdAt: Date())
+            job.clientPreparation = preparation
+            let historical = "profile=fast;uv_unwrap=1;" + (preparation?.identityConfiguration ?? "client_preparation=unrecorded")
+            XCTAssertEqual(Array(job.localizationBuildConfiguration.utf8), Array(historical.utf8))
+            job.mapCLAHE = true
+            XCTAssertEqual(job.localizationBuildConfiguration,
+                historical + ";map_clahe=1;map_clahe_clip_limit=2.0;map_clahe_tile_grid=8x8")
+            job.mapCLAHE = false
+            XCTAssertEqual(Array(job.localizationBuildConfiguration.utf8), Array(historical.utf8))
+        }
+    }
+
+    func testMapCLAHEJournalReopenPreservesFrozenFlagRemoteEchoAndStoppedOrigin() throws {
+        let url = root.appendingPathComponent("persist/map-jobs.json")
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "增强地图", createdAt: Date(timeIntervalSince1970: 1), serverOrigin: .current)
+        job.mapCLAHE = true
+        job.phase = .stopped
+        job.accepted = true
+        job.remote = .init(jobID: job.id, status: .queued, progress: 0, stage: "queued", message: "等待处理",
+            profile: "fast", uvUnwrap: true, mapCLAHE: true, createdAt: job.createdAt, finishedAt: nil,
+            expiresAt: nil, error: nil, result: nil)
+        try AreaTargetJobStore(url: url).save([job])
+        XCTAssertEqual(try AreaTargetJobStore(url: url).load(), [job])
+        var records = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
+        records[0].removeValue(forKey: "mapCLAHE")
+        var remote = try XCTUnwrap(records[0]["remote"] as? [String: Any])
+        remote.removeValue(forKey: "map_clahe")
+        records[0]["remote"] = remote
+        let historicalBytes = try JSONSerialization.data(withJSONObject: records)
+        try historicalBytes.write(to: url)
+        let restored = try XCTUnwrap(AreaTargetJobStore(url: url).load().first)
+        XCTAssertFalse(restored.mapCLAHE)
+        XCTAssertEqual(restored.remote?.mapCLAHE, false)
+        XCTAssertEqual(restored.phase, .stopped)
+        XCTAssertEqual(restored.serverOrigin, .current)
+        XCTAssertEqual(try Data(contentsOf: url), historicalBytes, "Reading old records must preserve their stored bytes")
+        for invalid in [NSNull(), 0, 1, "true"] as [Any] {
+            records[0]["mapCLAHE"] = invalid
+            let bytes = try JSONSerialization.data(withJSONObject: records)
+            try bytes.write(to: url)
+            XCTAssertThrowsError(try AreaTargetJobStore(url: url).load())
+            XCTAssertEqual(try Data(contentsOf: url), bytes, "Rejected records remain available for diagnosis")
+        }
+    }
+
+    func testHistoricalJobMissingMapCLAHEDecodesDisabledAndRejectsNullOrNonBoolean() throws {
+        var original = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(),
+            scanDirectoryPath: scan.path, displayName: "历史地图", createdAt: Date())
+        original.profile = "fast"; original.uvUnwrap = false
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        object.removeValue(forKey: "mapCLAHE")
+        let historical = try JSONDecoder().decode(AreaTargetProcessingJob.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertFalse(historical.mapCLAHE)
+        XCTAssertEqual(historical.profile, "fast")
+        XCTAssertFalse(historical.uvUnwrap)
+        for invalid in [NSNull(), 0, 1, "true"] as [Any] {
+            object["mapCLAHE"] = invalid
+            XCTAssertThrowsError(try JSONDecoder().decode(AreaTargetProcessingJob.self,
+                from: JSONSerialization.data(withJSONObject: object)))
+        }
+    }
+
+    func testNewTaskDefaultsToDisabledMapCLAHEAcrossJournalAndSubmission() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "默认光照增强关闭")
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertFalse(job.mapCLAHE)
+        XCTAssertEqual(journal.jobs.first?.mapCLAHE, false)
+        XCTAssertEqual(job.remote?.mapCLAHE, false)
+        XCTAssertFalse(job.localizationBuildConfiguration.contains("map_clahe"),
+            "Default off preserves the pre-option localization report identity")
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [false])
+        XCTAssertEqual(job.phase, .processing, "Missing server capability must remain compatible with default off")
+    }
+
+    func testEnabledMapCLAHEFreezesJournalAndSubmissionWithoutChangingProfileOrUV() async throws {
+        await setMapCLAHECapability(true)
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "光照增强", mapCLAHE: true)
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertTrue(job.mapCLAHE)
+        XCTAssertEqual(journal.jobs.first?.mapCLAHE, true)
+        XCTAssertEqual(job.remote?.mapCLAHE, true)
+        XCTAssertEqual(job.profile, "fast")
+        XCTAssertTrue(job.uvUnwrap)
+        XCTAssertTrue(job.localizationBuildConfiguration.contains("map_clahe=1"))
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [true])
+        XCTAssertEqual(job.phase, .processing)
+    }
+
+    func testUnsupportedMapCLAHEStopsBeforeArchivingAndKeepsRequestedSelection() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "旧云端", mapCLAHE: true)
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertTrue(job.mapCLAHE)
+        XCTAssertEqual(job.phase, .failed)
+        XCTAssertFalse(job.accepted)
+        XCTAssertNil(job.archiveURL)
+        XCTAssertEqual(archive.calls, 0)
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertTrue(submitted.isEmpty)
+        XCTAssertTrue(model.message?.contains("光照增强") == true)
+        XCTAssertTrue(model.message?.contains("不支持") == true)
+        XCTAssertTrue(model.message?.contains("服务支持后重新建图") == true)
+    }
+
+    func testPendingTaskKeepsFrozenMapCLAHEChoiceWhenAnotherIsRequested() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "默认关闭任务")
+        let original = try XCTUnwrap(model.selectedJob)
+        await model.start(scanDirectory: scan, displayName: "启用请求", mapCLAHE: true)
+        XCTAssertEqual(model.selectedJobID, original.id)
+        XCTAssertEqual(model.jobs, [original])
+        XCTAssertEqual(archive.calls, 1)
+        XCTAssertTrue(model.message?.contains("光照增强已关闭") == true)
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [false])
+    }
+
+    func testPausedEnabledMapCLAHEResumesSameArchiveAndRechecksCapability() async throws {
+        await setMapCLAHECapability(true)
+        await api.setRejectBeforeAccepting(true)
+        let initial = model()
+        await initial.start(scanDirectory: scan, displayName: "增强重传", mapCLAHE: true)
+        let original = try XCTUnwrap(initial.selectedJob)
+        let zip = try XCTUnwrap(original.archiveURL)
+        XCTAssertEqual(original.phase, .paused)
+        let before = await api.requirementsCallCount()
+        XCTAssertEqual(before, 1)
+        let restored = model()
+        await api.setRejectBeforeAccepting(false)
+        await restored.resume(jobID: original.id)
+        XCTAssertEqual(restored.selectedJob?.id, original.id)
+        XCTAssertEqual(restored.selectedJob?.mapCLAHE, true)
+        XCTAssertEqual(restored.selectedJob?.remote?.mapCLAHE, true)
+        XCTAssertEqual(restored.selectedJob?.phase, .processing)
+        XCTAssertEqual(restored.selectedJob?.localizationBuildConfiguration, original.localizationBuildConfiguration)
+        XCTAssertEqual(archive.calls, 1, "An enabled resume must reuse the original prepared ZIP")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: zip.path), "The accepted upload archive is released normally")
+        let after = await api.requirementsCallCount()
+        XCTAssertEqual(after, 2, "Cached archives still require a fresh capability check before resubmission")
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [true, true])
+    }
+
+    func testCachedEnabledArchiveCannotResubmitAfterCapabilityDisappears() async throws {
+        await setMapCLAHECapability(true)
+        await api.setRejectBeforeAccepting(true)
+        let initial = model()
+        await initial.start(scanDirectory: scan, displayName: "增强能力变化", mapCLAHE: true)
+        let original = try XCTUnwrap(initial.selectedJob)
+        let zip = try XCTUnwrap(original.archiveURL)
+        let restored = model()
+        await setMapCLAHECapability(false)
+        await api.setRejectBeforeAccepting(false)
+        await restored.resume(jobID: original.id)
+        XCTAssertEqual(restored.selectedJob?.mapCLAHE, true)
+        XCTAssertEqual(restored.selectedJob?.phase, .failed)
+        XCTAssertEqual(restored.selectedJob?.archiveURL, zip)
+        XCTAssertEqual(restored.selectedJob?.archiveSHA256, original.archiveSHA256)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: zip.path))
+        XCTAssertEqual(archive.calls, 1)
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [true], "No second submission and no silent default-off fallback")
+        let count = await api.requirementsCallCount()
+        XCTAssertEqual(count, 2)
+    }
+
+    func testAcceptedEnabledTaskReconcilesFrozenFlagWithoutUploadingAgain() async throws {
+        await setMapCLAHECapability(true)
+        await api.setLostResponse(true)
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "增强上传响应丢失", mapCLAHE: true)
+        let id = try XCTUnwrap(model.selectedJobID)
+        XCTAssertEqual(model.selectedJob?.phase, .submissionUnknown)
+        await setMapCLAHECapability(false)
+        await model.resume(jobID: id)
+        XCTAssertEqual(model.selectedJob?.phase, .processing)
+        XCTAssertEqual(model.selectedJob?.mapCLAHE, true)
+        XCTAssertEqual(model.selectedJob?.remote?.mapCLAHE, true)
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [true])
+        let count = await api.requirementsCallCount()
+        XCTAssertEqual(count, 1, "An already accepted server job is reconciled rather than resubmitted")
+    }
+
+    func testMapCLAHERebuildCreatesNewTaskAndRetainsDisabledMap() async throws {
+        await setMapCLAHECapability(true)
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "原关闭地图")
+        let oldID = try XCTUnwrap(model.selectedJobID)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: oldID)
+        await model.download(jobID: oldID)
+        let original = try XCTUnwrap(model.selectedJob)
+        let asset = try XCTUnwrap(original.savedAsset)
+        await api.setRemoteStatus(.queued)
+        await model.start(scanDirectory: scan, displayName: "新增强地图", mapCLAHE: true)
+        let rebuilt = try XCTUnwrap(model.selectedJob)
+        XCTAssertNotEqual(rebuilt.id, oldID)
+        XCTAssertTrue(rebuilt.mapCLAHE)
+        XCTAssertEqual(model.jobs.count, 2)
+        XCTAssertEqual(model.jobs.first(where: { $0.id == oldID }), original)
+        XCTAssertEqual(journal.jobs.first(where: { $0.id == oldID }), original)
+        XCTAssertEqual(assets.values[oldID], asset)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: asset.bundleURL.path))
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [false, true])
+    }
+
+    func testRefreshRejectsRemoteMapCLAHEDifferentFromFrozenTask() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "配置回显")
+        let original = try XCTUnwrap(model.selectedJob)
+        await api.setRemoteMapCLAHEOverride(true)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: original.id)
+        let rejected = try XCTUnwrap(model.selectedJob)
+        XCTAssertEqual(rejected.detail, "云端返回的信息无法验证，请稍后查询状态。")
+        XCTAssertEqual(model.message, rejected.detail)
+        XCTAssertNotEqual(rejected.detail, original.detail)
+        var frozen = original
+        frozen.detail = rejected.detail
+        XCTAssertEqual(rejected, frozen,
+            "Only the error detail may change; frozen options, phase, remote, archive and asset remain untouched")
+    }
+
+    func testSubmitMismatchKeepsArchiveAndUnacceptedFrozenTask() async throws {
+        await api.setRemoteMapCLAHEOverride(true)
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "关闭选项回显错误")
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertFalse(job.mapCLAHE)
+        XCTAssertFalse(job.accepted)
+        XCTAssertNil(job.remote)
+        XCTAssertEqual(job.phase, .submissionUnknown)
+        let zip = try XCTUnwrap(job.archiveURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: zip.path))
+        XCTAssertNotNil(job.archiveSHA256)
+        XCTAssertEqual(journal.jobs.first?.mapCLAHE, false)
+    }
+
+    func testResumeMismatchDoesNotReconcileOrResubmitAcceptedEnabledTask() async throws {
+        await setMapCLAHECapability(true)
+        await api.setLostResponse(true)
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "增强回显错误", mapCLAHE: true)
+        let original = try XCTUnwrap(model.selectedJob)
+        await api.setRemoteMapCLAHEOverride(false)
+        await model.resume(jobID: original.id)
+        XCTAssertEqual(model.selectedJob, original)
+        XCTAssertNotNil(model.message)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(original.archiveURL).path))
+        let submitted = await api.submittedMapCLAHE
+        XCTAssertEqual(submitted, [true])
+    }
+
+    func testDownloadMismatchDoesNotPublishAssetOrAcceptDifferentMap() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "原关闭任务")
+        let original = try XCTUnwrap(model.selectedJob)
+        await api.setRemoteStatus(.completed)
+        await api.setRemoteMapCLAHEOverride(true)
+        await model.download(jobID: original.id)
+        XCTAssertFalse(try XCTUnwrap(model.selectedJob).mapCLAHE)
+        XCTAssertEqual(model.selectedJob?.remote, original.remote)
+        XCTAssertNil(model.selectedJob?.savedAsset)
+        XCTAssertTrue(assets.values.isEmpty)
+        let events = await api.events
+        XCTAssertFalse(events.contains { $0.0 == "download" })
+    }
+
+    func testRefreshAlsoRejectsProfileAndUVChangedFromFrozenTask() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "原配置")
+        let original = try XCTUnwrap(model.selectedJob)
+        await api.setRemoteProfileOverride("quality")
+        await model.refresh(jobID: original.id)
+        XCTAssertEqual(model.selectedJob?.profile, "fast")
+        XCTAssertEqual(model.selectedJob?.remote, original.remote)
+        await api.setRemoteProfileOverride(nil)
+        await api.setRemoteUVUnwrapOverride(false)
+        await model.refresh(jobID: original.id)
+        XCTAssertEqual(model.selectedJob?.uvUnwrap, true)
+        XCTAssertEqual(model.selectedJob?.remote, original.remote)
+    }
+
     func testSignedOutStartDoesNotCreateTaskTokenOrArchive() async throws {
         let client = AreaTargetAPIClient(sessionStore: AreaServiceTestSessions())
         let model = AreaTargetProcessingModel(api: client, archiver: archive, jobStore: journal,
@@ -1134,7 +1450,18 @@ actor AreaFlowAPI: AreaTargetAPI {
         guard let requirements else { throw AreaTargetAPIError.transport("requirements offline") }
         return requirements
     }
+    var submittedMapCLAHE: [Bool] = []
+    private var jobProfiles: [String: String] = [:]
+    private var jobUVUnwrap: [String: Bool] = [:]
+    private var jobMapCLAHE: [String: Bool] = [:]
+    private var remoteMapCLAHEOverride: Bool?
+    private var remoteProfileOverride: String?
+    private var remoteUVUnwrapOverride: Bool?
+    func setRemoteMapCLAHEOverride(_ value: Bool?) { remoteMapCLAHEOverride = value }
+    func setRemoteProfileOverride(_ value: String?) { remoteProfileOverride = value }
+    func setRemoteUVUnwrapOverride(_ value: Bool?) { remoteUVUnwrapOverride = value }
     var accepted: Set<String> = []
+
     var remoteStatus: AreaTargetRemoteStatus = .queued
     var remoteProblem: AreaTargetAPIProblem?
     var lostResponse = false
@@ -1158,9 +1485,14 @@ actor AreaFlowAPI: AreaTargetAPI {
     func setRejectBeforeAccepting(_ value: Bool) { rejectBeforeAccepting = value }
     func setHoldUpload(_ value: Bool) { holdUpload = value }
     func setExpired(_ value: Bool) { expired = value }
-    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
+    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool, mapCLAHE: Bool = false,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob {
         events.append(("submit", jobID, token))
+        submittedMapCLAHE.append(mapCLAHE)
+        jobProfiles[jobID] = profile
+        jobUVUnwrap[jobID] = uvUnwrap
+        jobMapCLAHE[jobID] = mapCLAHE
+
         if holdUpload {
             onUploadHeld?()
             try await Task.sleep(nanoseconds: 30_000_000_000)
@@ -1206,7 +1538,8 @@ actor AreaFlowAPI: AreaTargetAPI {
             url: "/api/v1/jobs/\(jobID)/result", expiresAt: Date().addingTimeInterval(86400))
         return AreaTargetRemoteJob(jobID: jobID, status: remoteStatus, progress: remoteStatus == .completed ? 100 : 0,
             stage: remoteStatus == .completed ? "completed" : remoteStatus == .failed ? "failed" : "queued",
-            message: remoteStatus == .completed ? "完成" : "等待处理", profile: "fast", uvUnwrap: true,
+            message: remoteStatus == .completed ? "完成" : "等待处理", profile: remoteProfileOverride ?? jobProfiles[jobID] ?? "fast", uvUnwrap: remoteUVUnwrapOverride ?? jobUVUnwrap[jobID] ?? true,
+            mapCLAHE: remoteMapCLAHEOverride ?? jobMapCLAHE[jobID] ?? false,
             createdAt: Date(), finishedAt: remoteStatus == .completed || remoteStatus == .failed ? Date() : nil,
             expiresAt: remoteStatus == .completed ? result.expiresAt : nil,
             error: remoteStatus == .failed ? (remoteProblem ?? .init(code: "processing_interrupted", message: "服务重启中断了任务，请重新提交", retryable: true)) : nil,
@@ -1233,9 +1566,9 @@ final class AreaFlowServiceAPI: AreaTargetAPI {
     func validateServiceSession() async throws -> AreaTargetServiceSession? { saved }
     func signOut() async throws { saved = nil }
     func fetchProcessingRequirements() async throws -> AreaTargetProcessingRequirements { try await base.fetchProcessingRequirements() }
-    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool,
+    func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool, mapCLAHE: Bool = false,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob {
-        try await base.submit(archiveURL: archiveURL, jobID: jobID, token: token, profile: profile, uvUnwrap: uvUnwrap, progress: progress)
+        try await base.submit(archiveURL: archiveURL, jobID: jobID, token: token, profile: profile, uvUnwrap: uvUnwrap, mapCLAHE: mapCLAHE, progress: progress)
     }
     func status(jobID: String, token: String) async throws -> AreaTargetRemoteJob {
         statusCalls += 1
