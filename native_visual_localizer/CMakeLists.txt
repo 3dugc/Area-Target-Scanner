@@ -31,6 +31,14 @@ target_link_libraries(visual_localizer PRIVATE ${OpenCV_LIBS})
 include(CTest)
 
 if(BUILD_TESTING AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(hamming_popcount_equivalence_test
+        tests/hamming_popcount_equivalence_test.cpp
+        src/visual_localizer_impl.cpp
+        src/pose_contract.cpp
+    )
+    target_include_directories(hamming_popcount_equivalence_test PRIVATE src include)
+    target_link_libraries(hamming_popcount_equivalence_test PRIVATE ${OpenCV_LIBS})
+    add_test(NAME hamming_popcount_equivalence COMMAND hamming_popcount_equivalence_test)
     add_executable(visual_localizer_pose_contract_test
         tests/pose_contract_test.cpp
         src/pose_contract.cpp
