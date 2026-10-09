@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "apiVersion": 2,
+  "units": "meters",
+  "transformConvention": {
+    "direction": "T_A_B maps B to A",
+    "vectors": "column",
+    "matrixLayout": "row-major-16"
+  },
+  "coordinateFrames": {
+    "C": {"handedness": "right", "role": "rectified-optical-camera", "axes": ["right", "down", "forward"]},
+    "S": {"handedness": "right", "role": "original-scan-map", "axes": "preserved-from-known-map-producer"},
+    "W": {"handedness": "right", "role": "canonical-tracking-world", "axes": "adapter-normalized-with-explicit-basis"}
+  },
+  "abiPrefix": {"fields": ["struct_size", "api_version"], "types": ["uint32_t", "uint32_t"]},
+  "hostRuntime": {
+    "bufferOwnership": "borrowed-during-synchronous-call",
+    "workerOwnership": "host-single-serial-worker",
+    "pendingPolicy": "latest-slot",
+    "resetBarrier": ["stop-accepting", "increment-generation", "clear-pending-and-output", "wait-in-flight", "reset-or-dispose", "resume"],
+    "identityBinding": ["map_generation", "capture_clock_epoch", "camera_id"]
+  },
+  "image": {
+    "pixelFormat": "RectifiedGray8",
+    "orientation": "canonical-optical",
+    "cameraBasis": "optical-x-right-y-down-z-forward",
+    "width": 640, "height": 480, "rowStride": 648, "byteLength": 311040,
+    "intrinsics": {"fx": 600, "fy": 500, "cx": 320, "cy": 240}
+  },
+  "projection": {"opticalPoint": [2, 1, 4], "expectedPixel": [620, 365]},
+  "pose": {
+    "worldFromCamera": [0,-1,0,3, 1,0,0,-2, 0,0,1,1, 0,0,0,1],
+    "cameraFromScan": [0,0,1,1, 0,1,0,0, -1,0,0,2, 0,0,0,1],
+    "expectedWorldFromScan": [0,-1,0,3, 0,0,1,-1, -1,0,0,3, 0,0,0,1],
+    "legacyARCameraFromOpticalBasis": [1,0,0,0, 0,-1,0,0, 0,0,-1,0, 0,0,0,1],
+    "expectedLegacyARCameraFromScan": [0,0,1,1, 0,-1,0,0, 1,0,0,-2, 0,0,0,1]
+  },
+  "basisConversion": {
+    "renderWorldFromWorldBasis": [1,0,0,0, 0,1,0,0, 0,0,-1,0, 0,0,0,1],
+    "renderScanFromScanBasis": [0,0,1,0, 0,1,0,0, 1,0,0,0, 0,0,0,1],
+    "expectedRenderWorldFromRenderScan": [0,-1,0,3, 1,0,0,-1, 0,0,1,-3, 0,0,0,1]
+  },
+  "imageCases": [
+    {
+      "operation": {"kind": "scale", "scaleX": 0.5, "scaleY": 0.75},
+      "source": {"width": 640, "height": 480, "orientation": "optical-raster", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": 600, "fy": 500, "cx": 320, "cy": 240}},
+      "rectified": {"width": 320, "height": 360, "orientation": "canonical-optical", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": 300, "fy": 375, "cx": 160, "cy": 180}},
+      "rectifiedPixelFromSourcePixel": [0.5,0,0, 0,0.75,0, 0,0,1],
+      "rectifiedCameraFromSourceCamera": [1,0,0, 0,1,0, 0,0,1],
+      "sourceOpticalPoint": [2,1,4], "expectedRectifiedPixel": [310,273.75]
+    },
+    {
+      "operation": {"kind": "crop", "x": 100, "y": 50, "width": 400, "height": 350},
+      "source": {"width": 640, "height": 480, "orientation": "optical-raster", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": 600, "fy": 500, "cx": 320, "cy": 240}},
+      "rectified": {"width": 400, "height": 350, "orientation": "canonical-optical", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": 600, "fy": 500, "cx": 220, "cy": 190}},
+      "rectifiedPixelFromSourcePixel": [1,0,-100, 0,1,-50, 0,0,1],
+      "rectifiedCameraFromSourceCamera": [1,0,0, 0,1,0, 0,0,1],
+      "sourceOpticalPoint": [2,1,4], "expectedRectifiedPixel": [520,315]
+    },
+    {
+      "operation": {"kind": "rotate90", "direction": "clockwise"},
+      "source": {"width": 640, "height": 480, "orientation": "optical-raster", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": 600, "fy": 500, "cx": 320, "cy": 240}},
+      "rectified": {"width": 480, "height": 640, "orientation": "canonical-optical", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": 500, "fy": 600, "cx": 239, "cy": 320}},
+      "rectifiedPixelFromSourcePixel": [0,-1,479, 1,0,0, 0,0,1],
+      "rectifiedCameraFromSourceCamera": [0,-1,0, 1,0,0, 0,0,1],
+      "sourceOpticalPoint": [2,1,4], "expectedRectifiedPixel": [114,620]
+    },
+    {
+      "operation": {"kind": "unmirror", "direction": "horizontal"},
+      "source": {"width": 640, "height": 480, "orientation": "horizontally-mirrored-optical-raster", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": -600, "fy": 500, "cx": 319, "cy": 240}},
+      "rectified": {"width": 640, "height": 480, "orientation": "canonical-optical", "cameraBasis": "optical-x-right-y-down-z-forward", "intrinsics": {"fx": 600, "fy": 500, "cx": 320, "cy": 240}},
+      "rectifiedPixelFromSourcePixel": [-1,0,639, 0,1,0, 0,0,1],
+      "rectifiedCameraFromSourceCamera": [1,0,0, 0,1,0, 0,0,1],
+      "sourceOpticalPoint": [2,1,4], "expectedRectifiedPixel": [620,365]
+    }
+  ],
+  "timing": {
+    "clockMapping": {"mapping": "affine", "sourceClock": "device-exposure-monotonic", "sessionClock": "host-session-monotonic", "sourceEpoch": 7, "sessionEpoch": 11, "scale": 1, "offsetNs": -900000000, "maxErrorNs": 100000},
+    "capture": {"provenance": "sensor-exposure", "sourceTimestampNs": 1000000000, "captureTimestampNs": 100000000, "captureClockEpoch": 11, "frameId": 42, "cameraId": 2},
+    "policy": {"maxResultAgeNs": 100000000, "maxTrackingSkewNs": 2000000, "maxAlignmentAgeNs": 1000000000},
+    "host": {"clockEpoch": 11, "submitTimestampNs": 110000000, "deliveryTimestampNs": 140000000},
+    "session": {"previousCaptureTimestampNs": 90000000, "alignmentCaptureTimestampNs": 90000000, "expectedAlignmentAgeNs": 10000000},
+    "tracking": {"frameId": 42, "cameraId": 2, "captureTimestampNs": 100000000, "captureClockEpoch": 11, "poseTimestampNs": 100050000, "trackingEpoch": 4, "clockMappingValid": true, "poseValid": true, "extrinsicsValid": true, "quality": "normal", "expectedSkewNs": 50000, "worldFromCamera": [0,-1,0,3, 1,0,0,-2, 0,0,1,1, 0,0,0,1]}
+  }
+}

@@ -131,6 +131,16 @@ namespace AreaTargetPlugin
             Debug.Log($"[GLBMeshLoader] Loaded: {positions.Length} verts, {indices.Length / 3} tris" +
                       $"{(normals != null ? $", {normals.Length} normals" : "")}");
 
+            // The asset is right-handed scan coordinates. The displayed Session
+            // transform uses Unity scan coordinates: reflect local Z and winding once.
+            for (int i = 0; i < positions.Length; i++) positions[i].z = -positions[i].z;
+            if (normals != null)
+                for (int i = 0; i < normals.Length; i++) normals[i].z = -normals[i].z;
+            for (int i = 0; i + 2 < indices.Length; i += 3)
+            {
+                int old = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = old;
+            }
+
             // Build Unity Mesh
             var mesh = new Mesh();
             mesh.name = debugName;

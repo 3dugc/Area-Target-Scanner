@@ -1,0 +1,101 @@
+[
+  {
+    "file": "deleted-other-scene-light.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "deleted-tasks-empty-light.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "interrupted-tasks-light.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "interrupted-other-scene-light.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "busy-current-task-large-text.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "busy-current-task-light.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "busy-tasks-large-text.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "busy-tasks-light.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "busy-other-scene-dark.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "busy-other-scene-large-text.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  },
+  {
+    "file": "busy-other-scene-light.png",
+    "test": "WorkspaceRenderTests/testDifferentSceneShowsBusyJobThenInterruptedAndDeletedTasksOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline task and fake API with a suspended workspace check"
+  }
+]

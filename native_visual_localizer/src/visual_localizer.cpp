@@ -147,6 +147,13 @@ VL_API void vl_reset(VLHandle handle) {
     }
 }
 
+VL_API int vl_set_recovery_mode(VLHandle handle, int mode) {
+    if (!handle) return 0;
+    try {
+        return static_cast<VisualLocalizer*>(handle)->setRecoveryMode(mode) ? 1 : 0;
+    } catch (...) { return 0; }
+}
+
 // ---------------------------------------------------------------------------
 // vl_process_frame_out — out-parameter version to avoid struct-return ABI
 //                        issues on iOS ARM64 with IL2CPP

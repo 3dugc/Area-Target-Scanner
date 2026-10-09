@@ -7,6 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A7D910090000000000000001 /* AreaTargetDeviceReplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D910090000000000000002 /* AreaTargetDeviceReplayTests.swift */; };
+		24745D1316471F1AE3AD99C3 /* LocalizationCoreMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3832B1439E39EF3714F303AB /* LocalizationCoreMetadataTests.swift */; };
+		AF30EC0F8E6B15B3C1EACEEA /* LocalizationCoreMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4206272A75C044C98486D04E /* LocalizationCoreMetadata.swift */; };
+		2D6FB17B00B342819EF81135 /* ImmersalLocalizationSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C3247035618C4C068F67F0 /* ImmersalLocalizationSessionTests.swift */; };
+		ED93F2FA4FBF4E5E87291615 /* LocalizationAlignmentPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9EFA017C916B05ED94F95BF /* LocalizationAlignmentPolicyTests.swift */; };
+		5AD43A52CB11B225BBA2B9A1 /* LocalizationAlignmentPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEEA611E6EE99876902B4655 /* LocalizationAlignmentPolicy.swift */; };
+		7E3BF5AF40EE182A3DE6886E /* ScanCaptureQualityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4F97AAAA5EF1A878DCAC44 /* ScanCaptureQualityTests.swift */; };
+		EC73B612499EF7DD0DB532B4 /* ScanCaptureQuality.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B57E8F1EDD0A70496BF6DD1 /* ScanCaptureQuality.swift */; };
+		9145DAF6BCEB41339EE9B2C5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5B2B6A349692436B8D0F9C1A /* Assets.xcassets */; };
 		A10001 /* AreaTargetScannerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10001 /* AreaTargetScannerApp.swift */; };
 		A10002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10002 /* ContentView.swift */; };
 		A10003 /* CameraIntrinsics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10003 /* CameraIntrinsics.swift */; };
@@ -57,22 +66,91 @@
 		A30006 /* ImmersalJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30006 /* ImmersalJobStore.swift */; };
 		A30007 /* ImmersalMappingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30007 /* ImmersalMappingModel.swift */; };
 		A30008 /* ImmersalMappingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30008 /* ImmersalMappingView.swift */; };
-		A40001 /* AreaTargetProcessingJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40001 /* AreaTargetProcessingJob.swift */; };
-		A40002 /* AreaTargetAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40002 /* AreaTargetAPIClient.swift */; };
-		A40003 /* AreaTargetProcessingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40003 /* AreaTargetProcessingModel.swift */; };
-		A40004 /* AreaTargetJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40004 /* AreaTargetJobStore.swift */; };
-		A40005 /* AreaTargetScanArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40005 /* AreaTargetScanArchive.swift */; };
-		A40006 /* AreaTargetAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40006 /* AreaTargetAssetStore.swift */; };
-		A40007 /* ScanSourceFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40007 /* ScanSourceFingerprint.swift */; };
-		A40008 /* AreaTargetProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40008 /* AreaTargetProcessingView.swift */; };
-		A40009 /* AreaTargetAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40009 /* AreaTargetAPIClientTests.swift */; };
-		A40010 /* AreaTargetProcessingModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40010 /* AreaTargetProcessingModelTests.swift */; };
-		A40011 /* AreaTargetProcessingViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40011 /* AreaTargetProcessingViewTests.swift */; };
-		A40012 /* AreaTargetScanArchiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40012 /* AreaTargetScanArchiveTests.swift */; };
-		A40013 /* AreaTargetAssetStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40013 /* AreaTargetAssetStoreTests.swift */; };
-		A40014 /* ScanSourceFingerprintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40014 /* ScanSourceFingerprintTests.swift */; };
-		A60001 /* ScanCaptureQuality.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60001 /* ScanCaptureQuality.swift */; };
-		A60002 /* gray_quality.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B60002 /* gray_quality.cpp */; };
+		A40001 /* ScannerWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40001 /* ScannerWorkspaceTests.swift */; };
+		A40002 /* ScannerWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40002 /* ScannerWorkspace.swift */; };
+		A40003 /* ScanMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40003 /* ScanMetadataTests.swift */; };
+		A40004 /* ScanMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40004 /* ScanMetadataStore.swift */; };
+		A40005 /* WorkspaceComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40005 /* WorkspaceComponents.swift */; };
+		A40006 /* ScanHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40006 /* ScanHomeView.swift */; };
+		A40007 /* ScanProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40007 /* ScanProcessingView.swift */; };
+		A40008 /* ImmersalEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40008 /* ImmersalEntryTests.swift */; };
+		A40009 /* WorkspaceRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40009 /* WorkspaceRenderTests.swift */; };
+		A50001 /* ImmersalMapStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50001 /* ImmersalMapStore.swift */; };
+		A50004 /* ImmersalLocalizationQualityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50004 /* ImmersalLocalizationQualityTests.swift */; };
+		A50009 /* ImmersalOfflineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50009 /* ImmersalOfflineTests.swift */; };
+		A50002 /* ImmersalMapStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50002 /* ImmersalMapStoreTests.swift */; };
+		A50003 /* ImmersalLocalizationQuality.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50003 /* ImmersalLocalizationQuality.swift */; };
+		A50005 /* ImmersalOfflineLocalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50005 /* ImmersalOfflineLocalizer.swift */; };
+		A50006 /* ImmersalLocalizationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50006 /* ImmersalLocalizationSession.swift */; };
+		A50007 /* ImmersalMapTestModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50007 /* ImmersalMapTestModel.swift */; };
+		A50F01 /* ImmersalLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = B50F01; };
+		A50008 /* ImmersalMapTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50008 /* ImmersalMapTestView.swift */; };
+		A50010 /* ImmersalMapTestModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50010 /* ImmersalMapTestModelTests.swift */; };
+		A50011 /* ImmersalOfflineRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50011 /* ImmersalOfflineRenderTests.swift */; };
+		A50012 /* ImmersalScanMeshLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50012 /* ImmersalScanMeshLoader.swift */; };
+		A50013 /* ImmersalScanMeshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50013 /* ImmersalScanMeshTests.swift */; };
+		A50016 /* ImmersalMeshAlignment.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50016 /* ImmersalMeshAlignment.swift */; };
+		A50017 /* ImmersalMeshAlignmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50017 /* ImmersalMeshAlignmentTests.swift */; };
+		A50018 /* ImmersalMeshOverlayPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50018 /* ImmersalMeshOverlayPreparation.swift */; };
+		A50020 /* ImmersalMeshOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50020 /* ImmersalMeshOverlayTests.swift */; };
+		A50014 /* ImmersalAlignmentFrames.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50014 /* ImmersalAlignmentFrames.swift */; };
+		A50015 /* ImmersalAlignmentFramesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50015 /* ImmersalAlignmentFramesTests.swift */; };
+		A50019 /* ImmersalMeshOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50019 /* ImmersalMeshOverlayView.swift */; };
+		A50021 /* ImmersalMeshSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50021 /* ImmersalMeshSessionTests.swift */; };
+		E39AC55E827B3172830EAA64 /* AreaTargetAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8E5BB94904B74C3FB05704 /* AreaTargetAPIClient.swift */; };
+		800973AB9710AEA8C17E58C3 /* AreaTargetAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D10DCE68DE331AEA9F6C520 /* AreaTargetAssetStore.swift */; };
+		63AEC3554352EFDE1627C3F3 /* AreaTargetScanArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83993E75EF2FA18BFA9D46E4 /* AreaTargetScanArchive.swift */; };
+		4905FCC8EB6D239DBE467047 /* AreaTargetAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AFBC59994D3E74078056DF0 /* AreaTargetAPIClientTests.swift */; };
+		E8B7F28EC7EDF5539E83777C /* AreaTargetAssetStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C251DAEF095281ED351DDD3B /* AreaTargetAssetStoreTests.swift */; };
+		5D17E88F3BC1C01BBDE1553A /* AreaTargetProcessingModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8FE96B08D4A26E994D1156 /* AreaTargetProcessingModelTests.swift */; };
+		D4F07ADAEA09FAF78EB6BE0C /* AreaTargetScanArchiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4644117F1E11286E7C5E8F75 /* AreaTargetScanArchiveTests.swift */; };
+		4B67B8C913AED8076EF7AE7D /* AreaTargetJobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12E67D021142AB1471CAE21 /* AreaTargetJobStore.swift */; };
+		317910BD00458A3312B209DC /* AreaTargetProcessingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D794083D99F7E5215FC7E54 /* AreaTargetProcessingModel.swift */; };
+		8F485613A6BB52EC1368A4ED /* AreaTargetProcessingJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE53F6BF36F2DBF4E5659E5 /* AreaTargetProcessingJob.swift */; };
+		597F8A7F15A9EA83960D3E80 /* AreaTargetProcessingViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0BCA1C0D3DC2FF04F04FB40 /* AreaTargetProcessingViewTests.swift */; };
+		E977F4F6A806DC64F65F72E8 /* AreaTargetProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3021EC90379F1A4D08064E27 /* AreaTargetProcessingView.swift */; };
+		8B2BD9120ECF8CE31039D4BF /* AreaTargetLiveAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 854CF3C354B7CAA497ED534D /* AreaTargetLiveAPITests.swift */; };
+		B4F339FCE70907C9E7EDF272 /* AreaTargetFeatureDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = C254A9317AEC53FA75C0FAFB /* AreaTargetFeatureDatabase.swift */; };
+		66D81D865BD722F991713923 /* AreaTargetOfflineLocalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1919A7B0B5906AFFE75EFA6 /* AreaTargetOfflineLocalizer.swift */; };
+		D204A88DF62C9E359BF21B8F /* LocalizationComparison.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F6EDDD7EF22541972C6442 /* LocalizationComparison.swift */; };
+		3B48D8F6A79F2D5238B1E61E /* LocalizationEvaluation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D89CE474B744316805D66E /* LocalizationEvaluation.swift */; };
+		FB844A09AE3F8C4FC19EB2CE /* LocalizationReportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5F44F75C780685605E8647 /* LocalizationReportStore.swift */; };
+		7BCA566058D04104F0787D51 /* ScanSourceFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85DA634915AF2ECB95DD68F /* ScanSourceFingerprint.swift */; };
+		24A9F655A0582DE87C084508 /* AreaTargetFeatureDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E3BC921C3D6FC832C94316C /* AreaTargetFeatureDatabaseTests.swift */; };
+		C71D657AEA97384D294DCD59 /* AreaTargetOfflineLocalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 279EF7826EEE312F25BFC9B6 /* AreaTargetOfflineLocalizerTests.swift */; };
+		C712178E948821F481731E68 /* AreaTargetRecognitionModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF61EB253C44772302099424 /* AreaTargetRecognitionModeTests.swift */; };
+		99567FE4C977A9DB33A8C4C0 /* LocalizationComparisonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9AB2E17F3EFE9BCA729264B /* LocalizationComparisonTests.swift */; };
+		EE090E06D24D12748B9EAC27 /* LocalizationEvaluationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC9616C8E88FFA914E415F72 /* LocalizationEvaluationTests.swift */; };
+		2EFAE63FA94331E5AC1DF639 /* LocalizationReportStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5687D90A853334A8B936FD27 /* LocalizationReportStoreTests.swift */; };
+		37E34D669B06E1F9C168BBFE /* ScanSourceFingerprintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A224D3264C6F79C5F43F327 /* ScanSourceFingerprintTests.swift */; };
+		DFB860C6CA5EB4EF9B4B0EF1 /* AreaTargetNative.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BDB60A7DB1F7F37C1A75655; };
+		F5F86C146A914E01F57906DD /* AreaTargetNative.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4BDB60A7DB1F7F37C1A75655; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy); }; };
+		B41A63B52A943F260A892F19 /* LocalizationWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB20547AFF41F134F7E035F /* LocalizationWorkflowTests.swift */; };
+		8F5E3DF07981E316A2E4EA20 /* AreaTargetLocalizationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74306EDEF9D8583E7E15B6F /* AreaTargetLocalizationSession.swift */; };
+		7E22DC62E596ED09632FD363 /* AreaTargetLocalizationSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46B58E07A899100AE560FE6F /* AreaTargetLocalizationSessionTests.swift */; };
+		6F134E7A3C711063A6D129B2 /* LocalizationComparisonSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9981A3417E7C0AD6E437835F /* LocalizationComparisonSession.swift */; };
+		8502F75B188CF1D4858CD854 /* LocalizationReplayAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B8FED381D8B0AD00EB8D98 /* LocalizationReplayAdapters.swift */; };
+		C03E6222A3CB3980E13DE2CC /* AreaTargetMapTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F420950635926EDEA541451 /* AreaTargetMapTestView.swift */; };
+		73AD355DBCD1BEC6D8C9250E /* LocalizationComparisonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414D5F637252968AD50E351D /* LocalizationComparisonView.swift */; };
+		66AC383EB1F3721D441933B5 /* LocalizationEvaluationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D25A751C1D37A86C37FB11A2 /* LocalizationEvaluationView.swift */; };
+		61FA9991A5B40F2A950D0BBB /* LocalizationReplayAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F953DB0E3DAC29E4A998C2C3 /* LocalizationReplayAdapterTests.swift */; };
+		4C5410250174B66B5D307B70 /* LocalizationComparisonSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C3C97E8B742542609B0DDEB /* LocalizationComparisonSessionTests.swift */; };
+		4CE4EDD78FC952548F1B1F1C /* LocalizationRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B1A9FAFEF426B4E2D46C31 /* LocalizationRenderTests.swift */; };
+		C4222199095024629A6F8939 /* LocalizationRecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C28587BE83517D691A0BDB7F /* LocalizationRecordingStore.swift */; };
+		2AC04A15DA36A8BA8C43F93D /* LocalizationRecordingStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8F643762905B234AE25F2E7 /* LocalizationRecordingStoreTests.swift */; };
+		F14D9795135E61E60B3FFD68 /* LocalizationBenchmarkAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3827CFF24646659ECFBA2496 /* LocalizationBenchmarkAnalysis.swift */; };
+		FE0BF4B19C4AC2C5E11F0CAD /* LocalizationVideoRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FB6E9E61C0C0B443279B1DE /* LocalizationVideoRecorder.swift */; };
+		81C2FB311A6705AD2C403E1F /* LocalizationBenchmarkSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56B8FB1F623E35DE224EB5FA /* LocalizationBenchmarkSession.swift */; };
+		C0A045FF3AA9E4A4A998800E /* LocalizationBenchmarkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4205943055CD1395DBD60BA /* LocalizationBenchmarkView.swift */; };
+		12FEB7BB35980278176A7D2A /* LocalizationBenchmarkAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA94A54829B840B334C55D0 /* LocalizationBenchmarkAnalysisView.swift */; };
+		3D8B3ABBA4CB8AE9CCE9AE43 /* LocalizationVideoRecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E003D5C06AF57D6D9C0AAD /* LocalizationVideoRecorderTests.swift */; };
+		EFCF281AEF980290E1CB37D5 /* LocalizationBenchmarkAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E1C4DCB1873E986C4907611 /* LocalizationBenchmarkAnalysisTests.swift */; };
+		FE4B114AC8D45CD3D6E5FE08 /* LocalizationBenchmarkSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A1654247FDB10D3EEA25A5 /* LocalizationBenchmarkSessionTests.swift */; };
+		CE0B66C1252DD2C71A45F679 /* LocalizationBenchmarkEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7F6C4E952911612FA6B5BC2 /* LocalizationBenchmarkEntryTests.swift */; };
+		E7C0027F5772E6F643C5A560 /* ScannerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCDCA89EE12B7A5BC45FDE4 /* ScannerSettings.swift */; };
+		2116912CF52C345A109B8CFB /* ScannerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41ACB9CE9F9AA89C2303A8C /* ScannerSettingsView.swift */; };
+		6D2E1436141130227688F903 /* ScannerSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1C836F3BE356E17CC04FEA /* ScannerSettingsTests.swift */; };
+		8ADA5EC7ABEF6FD173FC8EFD /* ScannerSettingsViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2EECB37E235CEAD454EF559 /* ScannerSettingsViewTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +164,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A7D910090000000000000002 /* AreaTargetDeviceReplayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetDeviceReplayTests.swift; sourceTree = "<group>"; };
+		3832B1439E39EF3714F303AB /* LocalizationCoreMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationCoreMetadataTests.swift; sourceTree = "<group>"; };
+		4206272A75C044C98486D04E /* LocalizationCoreMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationCoreMetadata.swift; sourceTree = "<group>"; };
+		79C3247035618C4C068F67F0 /* ImmersalLocalizationSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalLocalizationSessionTests.swift; sourceTree = "<group>"; };
+		D9EFA017C916B05ED94F95BF /* LocalizationAlignmentPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationAlignmentPolicyTests.swift; sourceTree = "<group>"; };
+		AEEA611E6EE99876902B4655 /* LocalizationAlignmentPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationAlignmentPolicy.swift; sourceTree = "<group>"; };
+		8E4F97AAAA5EF1A878DCAC44 /* ScanCaptureQualityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCaptureQualityTests.swift; sourceTree = "<group>"; };
+		2B57E8F1EDD0A70496BF6DD1 /* ScanCaptureQuality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCaptureQuality.swift; sourceTree = "<group>"; };
+		5B2B6A349692436B8D0F9C1A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10001 /* AreaTargetScannerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetScannerApp.swift; sourceTree = "<group>"; };
 		B10002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B10003 /* CameraIntrinsics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraIntrinsics.swift; sourceTree = "<group>"; };
@@ -140,22 +227,90 @@
 		B30006 /* ImmersalJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalJobStore.swift; sourceTree = "<group>"; };
 		B30007 /* ImmersalMappingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingModel.swift; sourceTree = "<group>"; };
 		B30008 /* ImmersalMappingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMappingView.swift; sourceTree = "<group>"; };
-		B40001 /* AreaTargetProcessingJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingJob.swift; sourceTree = "<group>"; };
-		B40002 /* AreaTargetAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAPIClient.swift; sourceTree = "<group>"; };
-		B40003 /* AreaTargetProcessingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingModel.swift; sourceTree = "<group>"; };
-		B40004 /* AreaTargetJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetJobStore.swift; sourceTree = "<group>"; };
-		B40005 /* AreaTargetScanArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetScanArchive.swift; sourceTree = "<group>"; };
-		B40006 /* AreaTargetAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAssetStore.swift; sourceTree = "<group>"; };
-		B40007 /* ScanSourceFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSourceFingerprint.swift; sourceTree = "<group>"; };
-		B40008 /* AreaTargetProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingView.swift; sourceTree = "<group>"; };
-		B40009 /* AreaTargetAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAPIClientTests.swift; sourceTree = "<group>"; };
-		B40010 /* AreaTargetProcessingModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingModelTests.swift; sourceTree = "<group>"; };
-		B40011 /* AreaTargetProcessingViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingViewTests.swift; sourceTree = "<group>"; };
-		B40012 /* AreaTargetScanArchiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetScanArchiveTests.swift; sourceTree = "<group>"; };
-		B40013 /* AreaTargetAssetStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAssetStoreTests.swift; sourceTree = "<group>"; };
-		B40014 /* ScanSourceFingerprintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSourceFingerprintTests.swift; sourceTree = "<group>"; };
-		B60001 /* ScanCaptureQuality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanCaptureQuality.swift; sourceTree = "<group>"; };
-		B60002 /* gray_quality.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "../native_visual_localizer/src/gray_quality.cpp"; sourceTree = SOURCE_ROOT; };
+		B40001 /* ScannerWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerWorkspaceTests.swift; sourceTree = "<group>"; };
+		B40002 /* ScannerWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerWorkspace.swift; sourceTree = "<group>"; };
+		B40003 /* ScanMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanMetadataTests.swift; sourceTree = "<group>"; };
+		B40004 /* ScanMetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanMetadataStore.swift; sourceTree = "<group>"; };
+		B40005 /* WorkspaceComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceComponents.swift; sourceTree = "<group>"; };
+		B40006 /* ScanHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanHomeView.swift; sourceTree = "<group>"; };
+		B40007 /* ScanProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanProcessingView.swift; sourceTree = "<group>"; };
+		B40008 /* ImmersalEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalEntryTests.swift; sourceTree = "<group>"; };
+		B40009 /* WorkspaceRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceRenderTests.swift; sourceTree = "<group>"; };
+		B50001 /* ImmersalMapStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMapStore.swift; sourceTree = "<group>"; };
+		B50004 /* ImmersalLocalizationQualityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalLocalizationQualityTests.swift; sourceTree = "<group>"; };
+		B50009 /* ImmersalOfflineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalOfflineTests.swift; sourceTree = "<group>"; };
+		B50002 /* ImmersalMapStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMapStoreTests.swift; sourceTree = "<group>"; };
+		B50003 /* ImmersalLocalizationQuality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalLocalizationQuality.swift; sourceTree = "<group>"; };
+		B50005 /* ImmersalOfflineLocalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalOfflineLocalizer.swift; sourceTree = "<group>"; };
+		B50006 /* ImmersalLocalizationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalLocalizationSession.swift; sourceTree = "<group>"; };
+		B50007 /* ImmersalMapTestModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMapTestModel.swift; sourceTree = "<group>"; };
+		B50F01 /* ImmersalLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = AreaTargetScanner/ThirdParty/Immersal/ImmersalLogo.png; sourceTree = SOURCE_ROOT; };
+		B50008 /* ImmersalMapTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMapTestView.swift; sourceTree = "<group>"; };
+		B50010 /* ImmersalMapTestModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMapTestModelTests.swift; sourceTree = "<group>"; };
+		B50011 /* ImmersalOfflineRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalOfflineRenderTests.swift; sourceTree = "<group>"; };
+		B50012 /* ImmersalScanMeshLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalScanMeshLoader.swift; sourceTree = "<group>"; };
+		B50013 /* ImmersalScanMeshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalScanMeshTests.swift; sourceTree = "<group>"; };
+		B50016 /* ImmersalMeshAlignment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMeshAlignment.swift; sourceTree = "<group>"; };
+		B50017 /* ImmersalMeshAlignmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMeshAlignmentTests.swift; sourceTree = "<group>"; };
+		B50018 /* ImmersalMeshOverlayPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMeshOverlayPreparation.swift; sourceTree = "<group>"; };
+		B50020 /* ImmersalMeshOverlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMeshOverlayTests.swift; sourceTree = "<group>"; };
+		B50014 /* ImmersalAlignmentFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalAlignmentFrames.swift; sourceTree = "<group>"; };
+		B50015 /* ImmersalAlignmentFramesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalAlignmentFramesTests.swift; sourceTree = "<group>"; };
+		B50019 /* ImmersalMeshOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMeshOverlayView.swift; sourceTree = "<group>"; };
+		B50021 /* ImmersalMeshSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersalMeshSessionTests.swift; sourceTree = "<group>"; };
+		1D8E5BB94904B74C3FB05704 /* AreaTargetAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAPIClient.swift; sourceTree = "<group>"; };
+		6D10DCE68DE331AEA9F6C520 /* AreaTargetAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAssetStore.swift; sourceTree = "<group>"; };
+		83993E75EF2FA18BFA9D46E4 /* AreaTargetScanArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetScanArchive.swift; sourceTree = "<group>"; };
+		5AFBC59994D3E74078056DF0 /* AreaTargetAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAPIClientTests.swift; sourceTree = "<group>"; };
+		C251DAEF095281ED351DDD3B /* AreaTargetAssetStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetAssetStoreTests.swift; sourceTree = "<group>"; };
+		1E8FE96B08D4A26E994D1156 /* AreaTargetProcessingModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingModelTests.swift; sourceTree = "<group>"; };
+		4644117F1E11286E7C5E8F75 /* AreaTargetScanArchiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetScanArchiveTests.swift; sourceTree = "<group>"; };
+		B12E67D021142AB1471CAE21 /* AreaTargetJobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetJobStore.swift; sourceTree = "<group>"; };
+		9D794083D99F7E5215FC7E54 /* AreaTargetProcessingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingModel.swift; sourceTree = "<group>"; };
+		9DE53F6BF36F2DBF4E5659E5 /* AreaTargetProcessingJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingJob.swift; sourceTree = "<group>"; };
+		B0BCA1C0D3DC2FF04F04FB40 /* AreaTargetProcessingViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingViewTests.swift; sourceTree = "<group>"; };
+		3021EC90379F1A4D08064E27 /* AreaTargetProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetProcessingView.swift; sourceTree = "<group>"; };
+		854CF3C354B7CAA497ED534D /* AreaTargetLiveAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetLiveAPITests.swift; sourceTree = "<group>"; };
+		C254A9317AEC53FA75C0FAFB /* AreaTargetFeatureDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetFeatureDatabase.swift; sourceTree = "<group>"; };
+		A1919A7B0B5906AFFE75EFA6 /* AreaTargetOfflineLocalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetOfflineLocalizer.swift; sourceTree = "<group>"; };
+		01F6EDDD7EF22541972C6442 /* LocalizationComparison.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationComparison.swift; sourceTree = "<group>"; };
+		04D89CE474B744316805D66E /* LocalizationEvaluation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationEvaluation.swift; sourceTree = "<group>"; };
+		6F5F44F75C780685605E8647 /* LocalizationReportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationReportStore.swift; sourceTree = "<group>"; };
+		A85DA634915AF2ECB95DD68F /* ScanSourceFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSourceFingerprint.swift; sourceTree = "<group>"; };
+		3E3BC921C3D6FC832C94316C /* AreaTargetFeatureDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetFeatureDatabaseTests.swift; sourceTree = "<group>"; };
+		279EF7826EEE312F25BFC9B6 /* AreaTargetOfflineLocalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetOfflineLocalizerTests.swift; sourceTree = "<group>"; };
+		FF61EB253C44772302099424 /* AreaTargetRecognitionModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetRecognitionModeTests.swift; sourceTree = "<group>"; };
+		C9AB2E17F3EFE9BCA729264B /* LocalizationComparisonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationComparisonTests.swift; sourceTree = "<group>"; };
+		FC9616C8E88FFA914E415F72 /* LocalizationEvaluationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationEvaluationTests.swift; sourceTree = "<group>"; };
+		5687D90A853334A8B936FD27 /* LocalizationReportStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationReportStoreTests.swift; sourceTree = "<group>"; };
+		2A224D3264C6F79C5F43F327 /* ScanSourceFingerprintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSourceFingerprintTests.swift; sourceTree = "<group>"; };
+		4BDB60A7DB1F7F37C1A75655 /* AreaTargetNative.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = AreaTargetNative.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		3AB20547AFF41F134F7E035F /* LocalizationWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationWorkflowTests.swift; sourceTree = "<group>"; };
+		A74306EDEF9D8583E7E15B6F /* AreaTargetLocalizationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetLocalizationSession.swift; sourceTree = "<group>"; };
+		46B58E07A899100AE560FE6F /* AreaTargetLocalizationSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetLocalizationSessionTests.swift; sourceTree = "<group>"; };
+		9981A3417E7C0AD6E437835F /* LocalizationComparisonSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationComparisonSession.swift; sourceTree = "<group>"; };
+		04B8FED381D8B0AD00EB8D98 /* LocalizationReplayAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationReplayAdapters.swift; sourceTree = "<group>"; };
+		5F420950635926EDEA541451 /* AreaTargetMapTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AreaTargetMapTestView.swift; sourceTree = "<group>"; };
+		414D5F637252968AD50E351D /* LocalizationComparisonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationComparisonView.swift; sourceTree = "<group>"; };
+		D25A751C1D37A86C37FB11A2 /* LocalizationEvaluationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationEvaluationView.swift; sourceTree = "<group>"; };
+		F953DB0E3DAC29E4A998C2C3 /* LocalizationReplayAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationReplayAdapterTests.swift; sourceTree = "<group>"; };
+		3C3C97E8B742542609B0DDEB /* LocalizationComparisonSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationComparisonSessionTests.swift; sourceTree = "<group>"; };
+		D6B1A9FAFEF426B4E2D46C31 /* LocalizationRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationRenderTests.swift; sourceTree = "<group>"; };
+		C28587BE83517D691A0BDB7F /* LocalizationRecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationRecordingStore.swift; sourceTree = "<group>"; };
+		D8F643762905B234AE25F2E7 /* LocalizationRecordingStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationRecordingStoreTests.swift; sourceTree = "<group>"; };
+		3827CFF24646659ECFBA2496 /* LocalizationBenchmarkAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationBenchmarkAnalysis.swift; sourceTree = "<group>"; };
+		0FB6E9E61C0C0B443279B1DE /* LocalizationVideoRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationVideoRecorder.swift; sourceTree = "<group>"; };
+		56B8FB1F623E35DE224EB5FA /* LocalizationBenchmarkSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationBenchmarkSession.swift; sourceTree = "<group>"; };
+		B4205943055CD1395DBD60BA /* LocalizationBenchmarkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationBenchmarkView.swift; sourceTree = "<group>"; };
+		EDA94A54829B840B334C55D0 /* LocalizationBenchmarkAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationBenchmarkAnalysisView.swift; sourceTree = "<group>"; };
+		17E003D5C06AF57D6D9C0AAD /* LocalizationVideoRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationVideoRecorderTests.swift; sourceTree = "<group>"; };
+		2E1C4DCB1873E986C4907611 /* LocalizationBenchmarkAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationBenchmarkAnalysisTests.swift; sourceTree = "<group>"; };
+		34A1654247FDB10D3EEA25A5 /* LocalizationBenchmarkSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationBenchmarkSessionTests.swift; sourceTree = "<group>"; };
+		B7F6C4E952911612FA6B5BC2 /* LocalizationBenchmarkEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationBenchmarkEntryTests.swift; sourceTree = "<group>"; };
+		ABCDCA89EE12B7A5BC45FDE4 /* ScannerSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerSettings.swift; sourceTree = "<group>"; };
+		D41ACB9CE9F9AA89C2303A8C /* ScannerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerSettingsView.swift; sourceTree = "<group>"; };
+		5F1C836F3BE356E17CC04FEA /* ScannerSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerSettingsTests.swift; sourceTree = "<group>"; };
+		A2EECB37E235CEAD454EF559 /* ScannerSettingsViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerSettingsViewTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -163,6 +318,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DFB860C6CA5EB4EF9B4B0EF1 /* AreaTargetNative.framework in Frameworks */,
 				A20F01 /* ZIPFoundation */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -190,6 +346,7 @@
 		H10002 /* AreaTargetScanner */ = {
 			isa = PBXGroup;
 			children = (
+				5B2B6A349692436B8D0F9C1A /* Assets.xcassets */,
 				B10001 /* AreaTargetScannerApp.swift */,
 				B10002 /* ContentView.swift */,
 				B10014 /* ScanViewModel.swift */,
@@ -206,7 +363,9 @@
 		H10003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				B40001 /* AreaTargetProcessingJob.swift */,
+				ABCDCA89EE12B7A5BC45FDE4 /* ScannerSettings.swift */,
+				9DE53F6BF36F2DBF4E5659E5 /* AreaTargetProcessingJob.swift */,
+				B40002 /* ScannerWorkspace.swift */,
 				B30005 /* ImmersalMappingJob.swift */,
 				B20002 /* ScanLocation.swift */,
 				B10003 /* CameraIntrinsics.swift */,
@@ -222,14 +381,37 @@
 		H10004 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				B60001 /* ScanCaptureQuality.swift */,
-				B60002 /* gray_quality.cpp */,
-				B40002 /* AreaTargetAPIClient.swift */,
-				B40003 /* AreaTargetProcessingModel.swift */,
-				B40004 /* AreaTargetJobStore.swift */,
-				B40005 /* AreaTargetScanArchive.swift */,
-				B40006 /* AreaTargetAssetStore.swift */,
-				B40007 /* ScanSourceFingerprint.swift */,
+				56B8FB1F623E35DE224EB5FA /* LocalizationBenchmarkSession.swift */,
+				0FB6E9E61C0C0B443279B1DE /* LocalizationVideoRecorder.swift */,
+				3827CFF24646659ECFBA2496 /* LocalizationBenchmarkAnalysis.swift */,
+				C28587BE83517D691A0BDB7F /* LocalizationRecordingStore.swift */,
+				4206272A75C044C98486D04E /* LocalizationCoreMetadata.swift */,
+				AEEA611E6EE99876902B4655 /* LocalizationAlignmentPolicy.swift */,
+				2B57E8F1EDD0A70496BF6DD1 /* ScanCaptureQuality.swift */,
+				04B8FED381D8B0AD00EB8D98 /* LocalizationReplayAdapters.swift */,
+				9981A3417E7C0AD6E437835F /* LocalizationComparisonSession.swift */,
+				A74306EDEF9D8583E7E15B6F /* AreaTargetLocalizationSession.swift */,
+				A85DA634915AF2ECB95DD68F /* ScanSourceFingerprint.swift */,
+				6F5F44F75C780685605E8647 /* LocalizationReportStore.swift */,
+				04D89CE474B744316805D66E /* LocalizationEvaluation.swift */,
+				01F6EDDD7EF22541972C6442 /* LocalizationComparison.swift */,
+				A1919A7B0B5906AFFE75EFA6 /* AreaTargetOfflineLocalizer.swift */,
+				C254A9317AEC53FA75C0FAFB /* AreaTargetFeatureDatabase.swift */,
+				9D794083D99F7E5215FC7E54 /* AreaTargetProcessingModel.swift */,
+				B12E67D021142AB1471CAE21 /* AreaTargetJobStore.swift */,
+				83993E75EF2FA18BFA9D46E4 /* AreaTargetScanArchive.swift */,
+				6D10DCE68DE331AEA9F6C520 /* AreaTargetAssetStore.swift */,
+				1D8E5BB94904B74C3FB05704 /* AreaTargetAPIClient.swift */,
+				B50014 /* ImmersalAlignmentFrames.swift */,
+				B50018 /* ImmersalMeshOverlayPreparation.swift */,
+				B50016 /* ImmersalMeshAlignment.swift */,
+				B50012 /* ImmersalScanMeshLoader.swift */,
+				B50007 /* ImmersalMapTestModel.swift */,
+				B50006 /* ImmersalLocalizationSession.swift */,
+				B50005 /* ImmersalOfflineLocalizer.swift */,
+				B50003 /* ImmersalLocalizationQuality.swift */,
+				B50001 /* ImmersalMapStore.swift */,
+				B40004 /* ScanMetadataStore.swift */,
 				B30007 /* ImmersalMappingModel.swift */,
 				B30006 /* ImmersalJobStore.swift */,
 				B30003 /* ImmersalKeychainStore.swift */,
@@ -253,7 +435,18 @@
 		H10005 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				B40008 /* AreaTargetProcessingView.swift */,
+				D41ACB9CE9F9AA89C2303A8C /* ScannerSettingsView.swift */,
+				EDA94A54829B840B334C55D0 /* LocalizationBenchmarkAnalysisView.swift */,
+				B4205943055CD1395DBD60BA /* LocalizationBenchmarkView.swift */,
+				D25A751C1D37A86C37FB11A2 /* LocalizationEvaluationView.swift */,
+				414D5F637252968AD50E351D /* LocalizationComparisonView.swift */,
+				5F420950635926EDEA541451 /* AreaTargetMapTestView.swift */,
+				3021EC90379F1A4D08064E27 /* AreaTargetProcessingView.swift */,
+				B50019 /* ImmersalMeshOverlayView.swift */,
+				B50008 /* ImmersalMapTestView.swift */,
+				B40007 /* ScanProcessingView.swift */,
+				B40006 /* ScanHomeView.swift */,
+				B40005 /* WorkspaceComponents.swift */,
 				B30008 /* ImmersalMappingView.swift */,
 				B10010 /* PointCloudPreviewView.swift */,
 				B10011 /* ScanProgressView.swift */,
@@ -267,12 +460,50 @@
 		H10006 /* AreaTargetScannerTests */ = {
 			isa = PBXGroup;
 			children = (
-				B40009 /* AreaTargetAPIClientTests.swift */,
-				B40010 /* AreaTargetProcessingModelTests.swift */,
-				B40011 /* AreaTargetProcessingViewTests.swift */,
-				B40012 /* AreaTargetScanArchiveTests.swift */,
-				B40013 /* AreaTargetAssetStoreTests.swift */,
-				B40014 /* ScanSourceFingerprintTests.swift */,
+				A2EECB37E235CEAD454EF559 /* ScannerSettingsViewTests.swift */,
+				5F1C836F3BE356E17CC04FEA /* ScannerSettingsTests.swift */,
+				B7F6C4E952911612FA6B5BC2 /* LocalizationBenchmarkEntryTests.swift */,
+				34A1654247FDB10D3EEA25A5 /* LocalizationBenchmarkSessionTests.swift */,
+				2E1C4DCB1873E986C4907611 /* LocalizationBenchmarkAnalysisTests.swift */,
+				17E003D5C06AF57D6D9C0AAD /* LocalizationVideoRecorderTests.swift */,
+				D8F643762905B234AE25F2E7 /* LocalizationRecordingStoreTests.swift */,
+				3832B1439E39EF3714F303AB /* LocalizationCoreMetadataTests.swift */,
+				79C3247035618C4C068F67F0 /* ImmersalLocalizationSessionTests.swift */,
+				D9EFA017C916B05ED94F95BF /* LocalizationAlignmentPolicyTests.swift */,
+				8E4F97AAAA5EF1A878DCAC44 /* ScanCaptureQualityTests.swift */,
+				D6B1A9FAFEF426B4E2D46C31 /* LocalizationRenderTests.swift */,
+				3C3C97E8B742542609B0DDEB /* LocalizationComparisonSessionTests.swift */,
+				F953DB0E3DAC29E4A998C2C3 /* LocalizationReplayAdapterTests.swift */,
+				46B58E07A899100AE560FE6F /* AreaTargetLocalizationSessionTests.swift */,
+				3AB20547AFF41F134F7E035F /* LocalizationWorkflowTests.swift */,
+				2A224D3264C6F79C5F43F327 /* ScanSourceFingerprintTests.swift */,
+				5687D90A853334A8B936FD27 /* LocalizationReportStoreTests.swift */,
+				FC9616C8E88FFA914E415F72 /* LocalizationEvaluationTests.swift */,
+				C9AB2E17F3EFE9BCA729264B /* LocalizationComparisonTests.swift */,
+				279EF7826EEE312F25BFC9B6 /* AreaTargetOfflineLocalizerTests.swift */,
+				A7D910090000000000000002 /* AreaTargetDeviceReplayTests.swift */,
+				FF61EB253C44772302099424 /* AreaTargetRecognitionModeTests.swift */,
+				3E3BC921C3D6FC832C94316C /* AreaTargetFeatureDatabaseTests.swift */,
+				854CF3C354B7CAA497ED534D /* AreaTargetLiveAPITests.swift */,
+				B0BCA1C0D3DC2FF04F04FB40 /* AreaTargetProcessingViewTests.swift */,
+				4644117F1E11286E7C5E8F75 /* AreaTargetScanArchiveTests.swift */,
+				1E8FE96B08D4A26E994D1156 /* AreaTargetProcessingModelTests.swift */,
+				C251DAEF095281ED351DDD3B /* AreaTargetAssetStoreTests.swift */,
+				5AFBC59994D3E74078056DF0 /* AreaTargetAPIClientTests.swift */,
+				B50021 /* ImmersalMeshSessionTests.swift */,
+				B50015 /* ImmersalAlignmentFramesTests.swift */,
+				B50020 /* ImmersalMeshOverlayTests.swift */,
+				B50017 /* ImmersalMeshAlignmentTests.swift */,
+				B50013 /* ImmersalScanMeshTests.swift */,
+				B50011 /* ImmersalOfflineRenderTests.swift */,
+				B50010 /* ImmersalMapTestModelTests.swift */,
+				B50002 /* ImmersalMapStoreTests.swift */,
+				B50009 /* ImmersalOfflineTests.swift */,
+				B50004 /* ImmersalLocalizationQualityTests.swift */,
+				B40009 /* WorkspaceRenderTests.swift */,
+				B40008 /* ImmersalEntryTests.swift */,
+				B40003 /* ScanMetadataTests.swift */,
+				B40001 /* ScannerWorkspaceTests.swift */,
 				B30004 /* ImmersalMappingTests.swift */,
 				B30001 /* ImmersalAPIClientTests.swift */,
 				B20006 /* DualExportViewModelTests.swift */,
@@ -293,6 +524,7 @@
 		H10007 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				4BDB60A7DB1F7F37C1A75655 /* AreaTargetNative.framework */,
 				F10001 /* AreaTargetScanner.app */,
 				F10002 /* AreaTargetScannerTests.xctest */,
 			);
@@ -320,13 +552,23 @@
 		};
 /* End PBXGroup section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		EE3F8773C371A7C0096441B7 /* Build Area Target Native */ = {isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (); inputPaths = (); outputPaths = ("$(BUILT_PRODUCTS_DIR)/AreaTargetNative.framework/AreaTargetNative"); name = "Build Area Target Native"; runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = "set -eu\npython3 \"$SRCROOT/../tools/ios/build_area_target_native.py\" --platform \"$PLATFORM_NAME\" --output-dir \"$BUILT_PRODUCTS_DIR\"\n"; };
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		45A01CE0AA67B84DD11B2F93 /* Embed Frameworks */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 10; files = (F5F86C146A914E01F57906DD /* AreaTargetNative.framework in Embed Frameworks */); name = "Embed Frameworks"; runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXNativeTarget section */
 		E10001 /* AreaTargetScanner */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = J10003 /* Build configuration list for PBXNativeTarget "AreaTargetScanner" */;
 			buildPhases = (
+				EE3F8773C371A7C0096441B7 /* Build Area Target Native */,
 				I10001 /* Sources */,
 				G10001 /* Frameworks */,
+				45A01CE0AA67B84DD11B2F93 /* Embed Frameworks */,
 				K10001 /* Resources */,
 			);
 			buildRules = (
@@ -402,6 +644,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9145DAF6BCEB41339EE9B2C5 /* Assets.xcassets in Resources */,
+				A50F01 /* ImmersalLogo.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -420,16 +664,52 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A60001 /* ScanCaptureQuality.swift in Sources */,
-				A60002 /* gray_quality.cpp in Sources */,
-				A40001 /* AreaTargetProcessingJob.swift in Sources */,
-				A40002 /* AreaTargetAPIClient.swift in Sources */,
-				A40003 /* AreaTargetProcessingModel.swift in Sources */,
-				A40004 /* AreaTargetJobStore.swift in Sources */,
-				A40005 /* AreaTargetScanArchive.swift in Sources */,
-				A40006 /* AreaTargetAssetStore.swift in Sources */,
-				A40007 /* ScanSourceFingerprint.swift in Sources */,
-				A40008 /* AreaTargetProcessingView.swift in Sources */,
+				2116912CF52C345A109B8CFB /* ScannerSettingsView.swift in Sources */,
+				E7C0027F5772E6F643C5A560 /* ScannerSettings.swift in Sources */,
+				12FEB7BB35980278176A7D2A /* LocalizationBenchmarkAnalysisView.swift in Sources */,
+				C0A045FF3AA9E4A4A998800E /* LocalizationBenchmarkView.swift in Sources */,
+				81C2FB311A6705AD2C403E1F /* LocalizationBenchmarkSession.swift in Sources */,
+				FE0BF4B19C4AC2C5E11F0CAD /* LocalizationVideoRecorder.swift in Sources */,
+				F14D9795135E61E60B3FFD68 /* LocalizationBenchmarkAnalysis.swift in Sources */,
+				C4222199095024629A6F8939 /* LocalizationRecordingStore.swift in Sources */,
+				AF30EC0F8E6B15B3C1EACEEA /* LocalizationCoreMetadata.swift in Sources */,
+				5AD43A52CB11B225BBA2B9A1 /* LocalizationAlignmentPolicy.swift in Sources */,
+				EC73B612499EF7DD0DB532B4 /* ScanCaptureQuality.swift in Sources */,
+				66AC383EB1F3721D441933B5 /* LocalizationEvaluationView.swift in Sources */,
+				73AD355DBCD1BEC6D8C9250E /* LocalizationComparisonView.swift in Sources */,
+				C03E6222A3CB3980E13DE2CC /* AreaTargetMapTestView.swift in Sources */,
+				8502F75B188CF1D4858CD854 /* LocalizationReplayAdapters.swift in Sources */,
+				6F134E7A3C711063A6D129B2 /* LocalizationComparisonSession.swift in Sources */,
+				8F5E3DF07981E316A2E4EA20 /* AreaTargetLocalizationSession.swift in Sources */,
+				7BCA566058D04104F0787D51 /* ScanSourceFingerprint.swift in Sources */,
+				FB844A09AE3F8C4FC19EB2CE /* LocalizationReportStore.swift in Sources */,
+				3B48D8F6A79F2D5238B1E61E /* LocalizationEvaluation.swift in Sources */,
+				D204A88DF62C9E359BF21B8F /* LocalizationComparison.swift in Sources */,
+				66D81D865BD722F991713923 /* AreaTargetOfflineLocalizer.swift in Sources */,
+				B4F339FCE70907C9E7EDF272 /* AreaTargetFeatureDatabase.swift in Sources */,
+				E977F4F6A806DC64F65F72E8 /* AreaTargetProcessingView.swift in Sources */,
+				8F485613A6BB52EC1368A4ED /* AreaTargetProcessingJob.swift in Sources */,
+				317910BD00458A3312B209DC /* AreaTargetProcessingModel.swift in Sources */,
+				4B67B8C913AED8076EF7AE7D /* AreaTargetJobStore.swift in Sources */,
+				63AEC3554352EFDE1627C3F3 /* AreaTargetScanArchive.swift in Sources */,
+				800973AB9710AEA8C17E58C3 /* AreaTargetAssetStore.swift in Sources */,
+				E39AC55E827B3172830EAA64 /* AreaTargetAPIClient.swift in Sources */,
+				A50019 /* ImmersalMeshOverlayView.swift in Sources */,
+				A50014 /* ImmersalAlignmentFrames.swift in Sources */,
+				A50018 /* ImmersalMeshOverlayPreparation.swift in Sources */,
+				A50016 /* ImmersalMeshAlignment.swift in Sources */,
+				A50012 /* ImmersalScanMeshLoader.swift in Sources */,
+				A50008 /* ImmersalMapTestView.swift in Sources */,
+				A50007 /* ImmersalMapTestModel.swift in Sources */,
+				A50006 /* ImmersalLocalizationSession.swift in Sources */,
+				A50005 /* ImmersalOfflineLocalizer.swift in Sources */,
+				A50003 /* ImmersalLocalizationQuality.swift in Sources */,
+				A50001 /* ImmersalMapStore.swift in Sources */,
+				A40007 /* ScanProcessingView.swift in Sources */,
+				A40006 /* ScanHomeView.swift in Sources */,
+				A40005 /* WorkspaceComponents.swift in Sources */,
+				A40004 /* ScanMetadataStore.swift in Sources */,
+				A40002 /* ScannerWorkspace.swift in Sources */,
 				A30008 /* ImmersalMappingView.swift in Sources */,
 				A30007 /* ImmersalMappingModel.swift in Sources */,
 				A30006 /* ImmersalJobStore.swift in Sources */,
@@ -472,12 +752,50 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A40009 /* AreaTargetAPIClientTests.swift in Sources */,
-				A40010 /* AreaTargetProcessingModelTests.swift in Sources */,
-				A40011 /* AreaTargetProcessingViewTests.swift in Sources */,
-				A40012 /* AreaTargetScanArchiveTests.swift in Sources */,
-				A40013 /* AreaTargetAssetStoreTests.swift in Sources */,
-				A40014 /* ScanSourceFingerprintTests.swift in Sources */,
+				8ADA5EC7ABEF6FD173FC8EFD /* ScannerSettingsViewTests.swift in Sources */,
+				6D2E1436141130227688F903 /* ScannerSettingsTests.swift in Sources */,
+				CE0B66C1252DD2C71A45F679 /* LocalizationBenchmarkEntryTests.swift in Sources */,
+				FE4B114AC8D45CD3D6E5FE08 /* LocalizationBenchmarkSessionTests.swift in Sources */,
+				EFCF281AEF980290E1CB37D5 /* LocalizationBenchmarkAnalysisTests.swift in Sources */,
+				3D8B3ABBA4CB8AE9CCE9AE43 /* LocalizationVideoRecorderTests.swift in Sources */,
+				2AC04A15DA36A8BA8C43F93D /* LocalizationRecordingStoreTests.swift in Sources */,
+				24745D1316471F1AE3AD99C3 /* LocalizationCoreMetadataTests.swift in Sources */,
+				2D6FB17B00B342819EF81135 /* ImmersalLocalizationSessionTests.swift in Sources */,
+				ED93F2FA4FBF4E5E87291615 /* LocalizationAlignmentPolicyTests.swift in Sources */,
+				7E3BF5AF40EE182A3DE6886E /* ScanCaptureQualityTests.swift in Sources */,
+				4CE4EDD78FC952548F1B1F1C /* LocalizationRenderTests.swift in Sources */,
+				4C5410250174B66B5D307B70 /* LocalizationComparisonSessionTests.swift in Sources */,
+				61FA9991A5B40F2A950D0BBB /* LocalizationReplayAdapterTests.swift in Sources */,
+				7E22DC62E596ED09632FD363 /* AreaTargetLocalizationSessionTests.swift in Sources */,
+				B41A63B52A943F260A892F19 /* LocalizationWorkflowTests.swift in Sources */,
+				37E34D669B06E1F9C168BBFE /* ScanSourceFingerprintTests.swift in Sources */,
+				2EFAE63FA94331E5AC1DF639 /* LocalizationReportStoreTests.swift in Sources */,
+				EE090E06D24D12748B9EAC27 /* LocalizationEvaluationTests.swift in Sources */,
+				99567FE4C977A9DB33A8C4C0 /* LocalizationComparisonTests.swift in Sources */,
+				C71D657AEA97384D294DCD59 /* AreaTargetOfflineLocalizerTests.swift in Sources */,
+				A7D910090000000000000001 /* AreaTargetDeviceReplayTests.swift in Sources */,
+				C712178E948821F481731E68 /* AreaTargetRecognitionModeTests.swift in Sources */,
+				24A9F655A0582DE87C084508 /* AreaTargetFeatureDatabaseTests.swift in Sources */,
+				8B2BD9120ECF8CE31039D4BF /* AreaTargetLiveAPITests.swift in Sources */,
+				597F8A7F15A9EA83960D3E80 /* AreaTargetProcessingViewTests.swift in Sources */,
+				D4F07ADAEA09FAF78EB6BE0C /* AreaTargetScanArchiveTests.swift in Sources */,
+				5D17E88F3BC1C01BBDE1553A /* AreaTargetProcessingModelTests.swift in Sources */,
+				E8B7F28EC7EDF5539E83777C /* AreaTargetAssetStoreTests.swift in Sources */,
+				4905FCC8EB6D239DBE467047 /* AreaTargetAPIClientTests.swift in Sources */,
+				A50021 /* ImmersalMeshSessionTests.swift in Sources */,
+				A50015 /* ImmersalAlignmentFramesTests.swift in Sources */,
+				A50020 /* ImmersalMeshOverlayTests.swift in Sources */,
+				A50017 /* ImmersalMeshAlignmentTests.swift in Sources */,
+				A50013 /* ImmersalScanMeshTests.swift in Sources */,
+				A50011 /* ImmersalOfflineRenderTests.swift in Sources */,
+				A50010 /* ImmersalMapTestModelTests.swift in Sources */,
+				A50002 /* ImmersalMapStoreTests.swift in Sources */,
+				A50009 /* ImmersalOfflineTests.swift in Sources */,
+				A50004 /* ImmersalLocalizationQualityTests.swift in Sources */,
+				A40009 /* WorkspaceRenderTests.swift in Sources */,
+				A40008 /* ImmersalEntryTests.swift in Sources */,
+				A40003 /* ScanMetadataTests.swift in Sources */,
+				A40001 /* ScannerWorkspaceTests.swift in Sources */,
 				A30004 /* ImmersalMappingTests.swift in Sources */,
 				A30001 /* ImmersalAPIClientTests.swift in Sources */,
 				A20006 /* DualExportViewModelTests.swift in Sources */,
@@ -577,16 +895,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = PK435YWZ25;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/AreaTargetScanner/ThirdParty/xatlas",
-					"$(SRCROOT)/../native_visual_localizer/include",
 				);
 				INFOPLIST_FILE = AreaTargetScanner/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Area Target Scanner";
@@ -603,6 +919,9 @@
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "AreaTargetScanner/AreaTargetScanner-Bridging-Header.h";
+				FRAMEWORK_SEARCH_PATHS = ("$(inherited)", "$(BUILT_PRODUCTS_DIR)");
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = ("$(inherited)", "$(SRCROOT)/AreaTargetScanner/ThirdParty/Immersal/libPosePlugin.a", "-lc++", "-framework", "Security");
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -612,16 +931,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = PK435YWZ25;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/AreaTargetScanner/ThirdParty/xatlas",
-					"$(SRCROOT)/../native_visual_localizer/include",
 				);
 				INFOPLIST_FILE = AreaTargetScanner/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Area Target Scanner";
@@ -638,6 +955,9 @@
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "AreaTargetScanner/AreaTargetScanner-Bridging-Header.h";
+				FRAMEWORK_SEARCH_PATHS = ("$(inherited)", "$(BUILT_PRODUCTS_DIR)");
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = ("$(inherited)", "$(SRCROOT)/AreaTargetScanner/ThirdParty/Immersal/libPosePlugin.a", "-lc++", "-framework", "Security");
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -647,14 +967,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				FRAMEWORK_SEARCH_PATHS = ("$(inherited)", "$(BUILT_PRODUCTS_DIR)");
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PK435YWZ25;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/../native_visual_localizer/include",
-				);
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.areatarget.scanner.tests;
@@ -672,14 +989,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				FRAMEWORK_SEARCH_PATHS = ("$(inherited)", "$(BUILT_PRODUCTS_DIR)");
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = PK435YWZ25;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/../native_visual_localizer/include",
-				);
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.areatarget.scanner.tests;

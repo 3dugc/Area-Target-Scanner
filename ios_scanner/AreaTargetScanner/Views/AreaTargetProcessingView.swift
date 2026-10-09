@@ -8,21 +8,36 @@ struct AreaTargetProcessingView: View {
     let displayName: String
     var entryPoint: EntryPoint = .preparation
     var selectScan: (() -> Void)? = nil
+    var comparisonJob: (AreaTargetProcessingJob) -> ImmersalMappingJob?
+    @ObservedObject var settings: ScannerSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var cloudActions: AreaTargetCloudActionCoordinator
     @State private var showingTasks = false
     @State private var sharePayload: SharePayload?
     @State private var stoppingJob: AreaTargetProcessingJob?
+    @State private var mapCLAHE = false
+    @State private var showingSettings = false
+    @State private var testingJob: AreaTargetProcessingJob?
+    @State private var comparisonDestination: ComparisonDestination?
+    private struct ComparisonDestination: Identifiable {
+        let id = UUID()
+        let area: AreaTargetProcessingJob
+        let immersal: ImmersalMappingJob
+    }
 
     init(model: AreaTargetProcessingModel, scanDirectory: URL?, displayName: String,
          entryPoint: EntryPoint = .preparation, selectScan: (() -> Void)? = nil,
+         comparisonJob: @escaping (AreaTargetProcessingJob) -> ImmersalMappingJob? = { _ in nil },
+         settings: ScannerSettings = .shared,
          cloudActions: AreaTargetCloudActionCoordinator? = nil) {
         self.model = model
         self.scanDirectory = scanDirectory
         self.displayName = displayName
         self.entryPoint = entryPoint
         self.selectScan = selectScan
+        self.comparisonJob = comparisonJob
+        self.settings = settings
         _cloudActions = StateObject(wrappedValue: cloudActions ?? AreaTargetCloudActionCoordinator(model: model))
     }
 
@@ -31,7 +46,15 @@ struct AreaTargetProcessingView: View {
         return scanDirectory.flatMap { model.job(for: $0.path) }
     }
 
-    private var serviceOrigin: AreaTargetServerOrigin { currentJob?.serverOrigin ?? .current }
+    private var serviceOrigin: AreaTargetServerOrigin { canChooseMapCLAHE ? .current : currentJob?.serverOrigin ?? .current }
+
+    private var canChooseMapCLAHE: Bool {
+        if let job = currentJob {
+            return [.downloaded, .failed, .stopped].contains(job.phase)
+                && FileManager.default.fileExists(atPath: job.scanDirectoryPath)
+        }
+        return scanDirectory != nil && entryPoint == .preparation && !showingTasks
+    }
 
     var body: some View {
         NavigationStack {
@@ -51,6 +74,10 @@ struct AreaTargetProcessingView: View {
                     if let job = currentJob { taskDetails(job) }
                     else if model.jobs.isEmpty && (scanDirectory == nil || entryPoint == .tasks || showingTasks) {
                         AreaTargetEmptyState(title: "暂无处理任务", message: "从扫描记录选择场景，然后上传处理。", symbol: "icloud")
+                    }
+                    if canChooseMapCLAHE { mapCLAHESelection }
+                    if let job = currentJob, job.phase == .downloaded, let asset = job.savedAsset {
+                        downloadedActions(job, asset: asset)
                     }
                     if model.isRestoringAssets {
                         HStack { ProgressView(); Text("正在检查本机资产…") }
@@ -100,6 +127,11 @@ struct AreaTargetProcessingView: View {
                     await cloudActions.authenticate(requestID: request.id, username: username, password: password)
                 })
         }
+        .sheet(isPresented: $showingSettings) { ScannerSettingsView(settings: settings) }
+        .fullScreenCover(item: $testingJob) { AreaTargetMapTestView(job: $0) }
+        .fullScreenCover(item: $comparisonDestination) {
+            LocalizationBenchmarkView(areaJob: $0.area, immersalJob: $0.immersal, scanDirectory: $0.area.scanDirectory)
+        }
         .onAppear { cloudActions.setScenePhase(scenePhase) }
         .onChange(of: scenePhase) { phase in
             cloudActions.setScenePhase(phase)
@@ -139,6 +171,54 @@ struct AreaTargetProcessingView: View {
         .disabled(model.operationInProgress || model.isAuthenticating || cloudActions.isExecuting)
     }
 
+    private var mapCLAHESelection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(currentJob == nil ? "新任务设置" : "重新建图设置").font(.headline)
+            Text("建图模式：\(settings.processingProfile.title)").accessibilityIdentifier("area-target-new-task-profile")
+            Text("UV 与纹理重建：\(settings.uvUnwrap ? "开启" : "关闭")")
+                .font(.subheadline).accessibilityIdentifier("area-target-new-task-uv")
+            Button("更改设置") { showingSettings = true }
+                .frame(minHeight: 44).accessibilityIdentifier("area-target-change-settings")
+            Text(settings.processingProfile.detail).font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("area-target-profile-description")
+            Toggle("光照增强（实验）", isOn: $mapCLAHE)
+                .accessibilityIdentifier("area-target-map-clahe-toggle")
+            Text("增强建图图像的对比度，地图体积和处理时间可能增加。改变选项需要重新建图。")
+                .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+            if let job = currentJob {
+                Text("重新建图会创建新任务，已有任务和下载的地图会保留。")
+                    .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+                if job.phase == .downloaded {
+                    Button("按设置重新建图") {
+                        let intent = AreaTargetCloudIntent.upload(scanDirectory: job.scanDirectory,
+                            displayName: job.displayName, profile: settings.processingProfile, uvUnwrap: settings.uvUnwrap, mapCLAHE: mapCLAHE)
+                        Task { await cloudActions.perform(intent) }
+                    }.frame(minHeight: 44).accessibilityIdentifier("area-target-rebuild")
+                }
+            }
+        }
+        .disabled(model.operationInProgress || model.isRestoringAssets || model.isAuthenticating
+            || cloudActions.isExecuting || cloudActions.loginRequest != nil)
+    }
+
+    private func downloadedActions(_ job: AreaTargetProcessingJob, asset: AreaTargetSavedAsset) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let paired = comparisonJob(job) {
+                Button { comparisonDestination = ComparisonDestination(area: job, immersal: paired) } label: {
+                    Label("与 Immersal 录像比较", systemImage: "chart.bar").frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.bordered).accessibilityIdentifier("area-target-compare")
+            } else {
+                Text("用同一份原扫描完成 Immersal 建图后，可在这里对比两套算法。旧任务需要重新上传以记录共同来源。")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                sharePayload = SharePayload(activityItems: [asset.bundleURL])
+            } label: {
+                Label("导出资产包", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.bordered).accessibilityIdentifier("area-target-share-result")
+        }.disabled(model.operationInProgress || model.isRestoringAssets)
+    }
+
     private var taskHistory: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(model.jobs) { job in
@@ -149,6 +229,12 @@ struct AreaTargetProcessingView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(job.displayName).font(.headline).foregroundStyle(.primary)
                             Text(job.phase.title).font(.subheadline).foregroundStyle(Color(uiColor: .secondaryLabel))
+                            Text("建图模式：\(AreaTargetProcessingProfile(rawValue: job.profile)?.title ?? job.profile)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text("UV 与纹理重建：\(job.uvUnwrap ? "开启" : "关闭")")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text("光照增强：\(job.mapCLAHE ? "开启" : "关闭")")
+                                .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                             Text(job.createdAt.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                         }
@@ -166,6 +252,12 @@ struct AreaTargetProcessingView: View {
     private func taskDetails(_ job: AreaTargetProcessingJob) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             AreaTargetSectionHeading(title: job.phase.title, subtitle: job.displayName)
+            Label("建图模式：\(AreaTargetProcessingProfile(rawValue: job.profile)?.title ?? job.profile)", systemImage: "slider.horizontal.3")
+                .font(.subheadline).accessibilityIdentifier("area-target-task-profile")
+            Text("UV 与纹理重建：\(job.uvUnwrap ? "开启" : "关闭")")
+                .font(.subheadline).accessibilityIdentifier("area-target-task-uv")
+            Text("光照增强：\(job.mapCLAHE ? "开启" : "关闭")")
+                .font(.subheadline).accessibilityIdentifier("area-target-task-map-clahe")
             if [.uploading, .downloading].contains(job.phase) {
                 ProgressView(value: job.transferProgress)
                 Text("\(Int(job.transferProgress * 100))%").font(.caption.monospacedDigit())
@@ -209,9 +301,8 @@ struct AreaTargetProcessingView: View {
                     }.accessibilityIdentifier("area-target-download")
                 case .downloaded:
                     if let asset = job.savedAsset {
-                        AreaTargetActionButton(title: "导出资产包", symbol: "square.and.arrow.up") {
-                            sharePayload = SharePayload(activityItems: [asset.bundleURL])
-                        }.accessibilityIdentifier("area-target-share-result")
+                        AreaTargetActionButton(title: "离线定位测试", symbol: "viewfinder") { testingJob = job }
+                            .accessibilityIdentifier("area-target-localize")
                     }
                 case .paused, .submissionUnknown, .preparing, .uploading:
                     AreaTargetActionButton(title: "检查并继续上传", symbol: "icloud.and.arrow.up") {
@@ -229,19 +320,25 @@ struct AreaTargetProcessingView: View {
                     }
                     if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
                         AreaTargetActionButton(title: "重新处理此扫描", symbol: "icloud.and.arrow.up") {
-                            Task { await cloudActions.perform(.upload(scanDirectory: job.scanDirectory, displayName: job.displayName)) }
+                            let intent = AreaTargetCloudIntent.upload(scanDirectory: job.scanDirectory,
+                                displayName: job.displayName, profile: settings.processingProfile, uvUnwrap: settings.uvUnwrap, mapCLAHE: mapCLAHE)
+                            Task { await cloudActions.perform(intent) }
                         }.accessibilityIdentifier("area-target-process-again")
                     }
                 case .failed:
                     if FileManager.default.fileExists(atPath: job.scanDirectoryPath) {
                         AreaTargetActionButton(title: "重新上传处理", symbol: "icloud.and.arrow.up") {
-                            Task { await cloudActions.perform(.upload(scanDirectory: job.scanDirectory, displayName: job.displayName)) }
+                            let intent = AreaTargetCloudIntent.upload(scanDirectory: job.scanDirectory,
+                                displayName: job.displayName, profile: settings.processingProfile, uvUnwrap: settings.uvUnwrap, mapCLAHE: mapCLAHE)
+                            Task { await cloudActions.perform(intent) }
                         }.accessibilityIdentifier("area-target-restart")
                     }
                 }
             } else if let scanDirectory, entryPoint == .preparation, !showingTasks {
                 AreaTargetActionButton(title: "上传并处理", symbol: "icloud.and.arrow.up") {
-                    Task { await cloudActions.perform(.upload(scanDirectory: scanDirectory, displayName: displayName)) }
+                    let intent = AreaTargetCloudIntent.upload(scanDirectory: scanDirectory,
+                        displayName: displayName, profile: settings.processingProfile, uvUnwrap: settings.uvUnwrap, mapCLAHE: mapCLAHE)
+                    Task { await cloudActions.perform(intent) }
                 }.accessibilityIdentifier("area-target-submit")
             }
             if !model.operationInProgress, let job = currentJob, job.canStopLocalTracking {
@@ -257,7 +354,7 @@ struct AreaTargetProcessingView: View {
 }
 
 enum AreaTargetCloudIntent: Equatable {
-    case upload(scanDirectory: URL, displayName: String)
+    case upload(scanDirectory: URL, displayName: String, profile: AreaTargetProcessingProfile = .quality, uvUnwrap: Bool = true, mapCLAHE: Bool = false)
     case resume(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
     case refresh(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
     case download(jobID: String, origin: AreaTargetServerOrigin, displayName: String)
@@ -271,7 +368,7 @@ enum AreaTargetCloudIntent: Equatable {
 
     var displayName: String {
         switch self {
-        case .upload(let directory, let name): return name.isEmpty ? ScanHistoryItem.displayName(for: directory.lastPathComponent) : name
+        case .upload(let directory, let name, _, _, _): return name.isEmpty ? ScanHistoryItem.displayName(for: directory.lastPathComponent) : name
         case .resume(_, _, let name), .refresh(_, _, let name), .download(_, _, let name): return name
         }
     }
@@ -287,7 +384,7 @@ enum AreaTargetCloudIntent: Equatable {
     @MainActor
     func isValid(in model: AreaTargetProcessingModel) -> Bool {
         switch self {
-        case .upload(let directory, _):
+        case .upload(let directory, _, _, _, _):
             var isDirectory: ObjCBool = false
             return FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
                 && !model.jobs.contains { $0.scanDirectoryPath == directory.path && $0.isPending }
@@ -369,7 +466,8 @@ final class AreaTargetCloudActionCoordinator: ObservableObject {
         isExecuting = true
         defer { isExecuting = false }
         switch request.intent {
-        case .upload(let directory, let name): await model.start(scanDirectory: directory, displayName: name)
+        case .upload(let directory, let name, let profile, let uvUnwrap, let mapCLAHE):
+            await model.start(scanDirectory: directory, displayName: name, profile: profile, uvUnwrap: uvUnwrap, mapCLAHE: mapCLAHE)
         case .resume(let id, _, _): await model.resume(jobID: id)
         case .refresh(let id, _, _): await model.refresh(jobID: id)
         case .download(let id, _, _): await model.download(jobID: id)
@@ -380,7 +478,7 @@ final class AreaTargetCloudActionCoordinator: ObservableObject {
         var retry = request.intent
         // A rejected upload may already own a durable job ID and capability. Resume
         // that identity after login rather than starting another submission.
-        if case .upload(let directory, _) = retry,
+        if case .upload(let directory, _, _, _, _) = retry,
            let job = model.jobs.first(where: { $0.scanDirectoryPath == directory.path && $0.isPending }) {
             retry = .resume(jobID: job.id, origin: job.serverOrigin, displayName: job.displayName)
         }

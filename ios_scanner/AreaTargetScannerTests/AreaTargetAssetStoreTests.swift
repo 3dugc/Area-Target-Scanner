@@ -25,6 +25,38 @@ final class AreaTargetAssetStoreTests: XCTestCase {
         XCTAssertEqual(try AreaTargetAssetStore(rootDirectory: root.appendingPathComponent("assets")).asset(jobID: jobID), saved)
     }
 
+    func testSavedAssetURLsAreCanonicalAcrossParentPathAliases() throws {
+        let zip = try fixture()
+        let parent = root.appendingPathComponent("canonical-parent", isDirectory: true)
+        let alias = root.appendingPathComponent("parent-alias", isDirectory: true)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        // Construct before the alias exists so initialization cannot normalize it.
+        // The asset cache itself is a real directory beneath this parent alias.
+        let store = AreaTargetAssetStore(rootDirectory: alias.appendingPathComponent("assets", isDirectory: true))
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: parent)
+
+        let saved = try store.save(downloadURL: zip, jobID: jobID, result: result(zip))
+        let canonicalStore = AreaTargetAssetStore(rootDirectory: parent.appendingPathComponent("assets", isDirectory: true))
+        XCTAssertEqual(try store.asset(jobID: jobID), saved)
+        XCTAssertEqual(try canonicalStore.asset(jobID: jobID), saved)
+        for url in [saved.bundleURL, saved.directoryURL, saved.modelURL, saved.featuresURL, saved.manifestURL] {
+            XCTAssertEqual(url, url.resolvingSymlinksInPath())
+        }
+    }
+
+    func testSymlinkedAssetRootIsRejectedBeforeReturningCanonicalURLs() throws {
+        let zip = try fixture()
+        let target = root.appendingPathComponent("real-assets", isDirectory: true)
+        let alias = root.appendingPathComponent("assets-link", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: target)
+        let store = AreaTargetAssetStore(rootDirectory: alias)
+
+        XCTAssertThrowsError(try store.save(downloadURL: zip, jobID: jobID, result: result(zip)))
+        XCTAssertThrowsError(try store.asset(jobID: jobID))
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: target.path).isEmpty)
+    }
+
     func testDigestAndByteLengthMismatchCannotPublish() throws {
         let zip = try fixture()
         let good = try result(zip)

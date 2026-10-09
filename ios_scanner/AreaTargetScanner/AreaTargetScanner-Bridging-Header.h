@@ -6,6 +6,7 @@
 //
 
 #import "XAtlasBridge.h"
+#import "ThirdParty/Immersal/ImmersalNative.h"
 
-// Shared grayscale risk kernel; no localization framework dependency.
-#import "area_target_runtime.h"
+#import <AreaTargetNative/AreaTargetNative.h>
+#import <AreaTargetNative/area_target_runtime.h>

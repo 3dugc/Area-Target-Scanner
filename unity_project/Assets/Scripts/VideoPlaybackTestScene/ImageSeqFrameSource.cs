@@ -26,6 +26,9 @@ namespace VideoPlaybackTestScene
         /// <summary>加载错误信息，null 表示无错误</summary>
         public string LastError { get; private set; }
 
+        public string MapId { get; set; } = "offline-replay-map";
+        /// <summary>One explicit fixed provider-to-host mapping per replay epoch.</summary>
+        public ICaptureClockMapper CaptureClockMapper { get; set; }
         private List<FrameEntry> _frames;
         private IntrinsicsData _intrinsics;
         private Matrix4x4 _intrinsicsMatrix;
@@ -130,6 +133,52 @@ namespace VideoPlaybackTestScene
         /// <returns>CameraFrame 结构体</returns>
         public CameraFrame GetFrame(int frameIndex)
         {
+            CameraFrame frame = ReadImage(frameIndex);
+            var entry = _frames != null && frameIndex >= 0 && frameIndex < _frames.Count ? _frames[frameIndex] : null;
+            bool timeKnown = TryGetOriginalExposureTimestampNs(frameIndex, out long sourceExposure);
+            long exposure = sourceExposure;
+            bool mapped = timeKnown && CaptureClockMapper != null && CaptureClockMapper.TryMap(sourceExposure, out exposure);
+            if (!mapped) exposure = sourceExposure;
+            bool poseKnown = TryGetUnityCameraPose(frameIndex, out Matrix4x4 cameraPose);
+            frame.FrameId = entry?.index ?? Math.Max(0, frameIndex);
+            frame.CaptureTimestampNs = exposure;
+            frame.UnityWorldFromCamera = cameraPose;
+            frame.Orientation = ImageOrientation.LandscapeRight;
+            frame.MapId = MapId;
+            frame.TrackingMetadata = new LocalizationTrackingMetadata(1,
+                CaptureClockMapper?.CaptureClockEpoch ?? 0, CaptureClockMapper?.CaptureClockEpoch ?? 0,
+                exposure, poseKnown ? 2u : 0u, mapped && poseKnown, mapped && poseKnown);
+            return frame;
+        }
+
+        /// <summary>Original serialized exposure in seconds, converted once; no arrival or synthetic increment.</summary>
+        public bool TryGetOriginalExposureTimestampNs(int frameIndex, out long timestampNs)
+        {
+            timestampNs = 0;
+            if (_frames == null || frameIndex < 0 || frameIndex >= _frames.Count) return false;
+            double seconds = _frames[frameIndex].timestamp;
+            // Legacy missing timestamp fields deserialize as zero. Treat this
+            // ambiguous sentinel as unknown rather than asserting a clock binding.
+            double ns = seconds * 1000000000.0;
+            if (double.IsNaN(ns) || double.IsInfinity(ns) || ns <= 0 || ns >= long.MaxValue) return false;
+            timestampNs = (long)Math.Round(ns);
+            return true;
+        }
+        private bool TryGetUnityCameraPose(int frameIndex, out Matrix4x4 pose)
+        {
+            pose = Matrix4x4.identity;
+            if (_frames == null || frameIndex < 0 || frameIndex >= _frames.Count) return false;
+            var transform = _frames[frameIndex].transform;
+            if (transform == null || transform.Length != 16) return false;
+            var arCameraToScan = ScanDataUtils.ColumnMajorToMatrix4x4(transform);
+            if (!CoordinateTransform.IsFiniteRigidTransform(arCameraToScan)) return false;
+            var reflectZ = Matrix4x4.identity; reflectZ.m22 = -1;
+            // The recording is scanRH-from-ARCameraRH; Unity camera/world are LH.
+            pose = reflectZ * arCameraToScan * reflectZ;
+            return true;
+        }
+        private CameraFrame ReadImage(int frameIndex)
+        {
             if (_frames == null || frameIndex < 0 || frameIndex >= _frames.Count)
             {
                 return new CameraFrame
@@ -167,12 +216,21 @@ namespace VideoPlaybackTestScene
                 Color32[] pixels = tex.GetPixels32();
                 byte[] gray = new byte[w * h];
 
-                for (int i = 0; i < pixels.Length; i++)
+                // Unity texture pixels start at bottom-left; native optical
+                // images use row zero at top-left, matching the recorded intrinsics.
+                for (int y = 0; y < h; y++)
                 {
-                    gray[i] = (byte)(0.299f * pixels[i].r + 0.587f * pixels[i].g + 0.114f * pixels[i].b);
+                    int sourceRow = (h - 1 - y) * w;
+                    int opticalRow = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        Color32 pixel = pixels[sourceRow + x];
+                        gray[opticalRow + x] = (byte)(0.299f * pixel.r + 0.587f * pixel.g + 0.114f * pixel.b);
+                    }
                 }
 
-                UnityEngine.Object.Destroy(tex);
+                if (Application.isPlaying) UnityEngine.Object.Destroy(tex);
+                else UnityEngine.Object.DestroyImmediate(tex);
 
                 return new CameraFrame
                 {

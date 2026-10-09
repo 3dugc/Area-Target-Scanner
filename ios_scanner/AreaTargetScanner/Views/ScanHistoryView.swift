@@ -1,152 +1,75 @@
 import SwiftUI
 
-/// 扫描历史列表视图，支持查看、导出和删除
+/// One shared library. Platform-specific actions live in the processing page.
 struct ScanHistoryView: View {
     @ObservedObject var viewModel: ScanViewModel
-    @State private var itemToDelete: ScanHistoryItem? = nil
-    @State private var showDeleteConfirm = false
+    let select: (ScanHistoryItem) -> Void
+    let rename: (ScanHistoryItem) -> Void
+    let preview: (URL) -> Void
+    let didDelete: (String) -> Void
+    let startScan: () -> Void
+    @State private var itemToDelete: ScanHistoryItem?
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 顶部导航栏
-            HStack {
-                Button(action: { viewModel.resetToReady() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("返回")
-                    }
-                    .foregroundStyle(ScannerTheme.accent)
-                    .frame(minWidth: 64, minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
-                Text("扫描历史")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .frame(minHeight: 44)
-                Spacer()
-                // 与返回按钮等宽，保持标题居中。
-                Color.clear.frame(width: 64, height: 44).accessibilityHidden(true)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
-
+        WorkspacePage {
+            WorkspaceHeading(title: "扫描记录", subtitle: "保存的场景，可随时预览或继续处理。")
             if viewModel.scanHistory.isEmpty {
-                Spacer()
-                VStack(spacing: 16) {
-                    Image(systemName: "tray")
-                        .font(.system(size: 48))
-                        .foregroundStyle(ScannerTheme.accent)
-                    Text("暂无扫描记录")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+                WorkspaceEmptyState(title: "还没有扫描记录", message: "完成第一次扫描后，场景会保存在这里。", symbol: "tray")
+                WorkspacePrimaryButton(title: "去扫描", symbol: "viewfinder", action: startScan)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(viewModel.scanHistory) { item in
-                            ScanHistoryRow(item: item)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    viewModel.state = .preview(item.directoryPath)
-                                }
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        itemToDelete = item
-                                        showDeleteConfirm = true
-                                    } label: {
-                                        Label("删除", systemImage: "trash")
-                                    }
-                                }
-                                .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        viewModel.deleteScan(item)
-                                    } label: {
-                                        Label("删除", systemImage: "trash")
-                                    }
-                                }
-                        }
+                LazyVStack(spacing: 0) {
+                    ForEach(viewModel.scanHistory) { item in
+                        recordRow(item)
+                        if item.id != viewModel.scanHistory.last?.id { Divider().padding(.leading, 64) }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 40)
                 }
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
             }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
-        .alert("确认删除", isPresented: $showDeleteConfirm) {
+        .confirmationDialog("删除这个场景？", isPresented: Binding(
+            get: { itemToDelete != nil }, set: { if !$0 { itemToDelete = nil } }
+        ), titleVisibility: .visible, presenting: itemToDelete) { item in
+            Button("删除场景", role: .destructive) {
+                viewModel.deleteScan(item)
+                if !viewModel.scanHistory.contains(where: { $0.id == item.id }) { didDelete(item.directoryPath) }
+                itemToDelete = nil
+            }
             Button("取消", role: .cancel) { itemToDelete = nil }
-            Button("删除", role: .destructive) {
-                if let item = itemToDelete {
-                    viewModel.deleteScan(item)
-                    itemToDelete = nil
-                }
-            }
-        } message: {
-            Text("将删除扫描数据和对应的 ZIP 文件，此操作不可撤销。")
+        } message: { item in
+            Text("将删除“\(item.displayName)”的本地扫描及导出文件，两个平台都将无法再使用这份本地数据。已有云端地图会保留。")
         }
-        .alert("无法删除扫描", isPresented: Binding(get: { viewModel.deletionError != nil }, set: { if !$0 { viewModel.deletionError = nil } })) {
-            Button("好", role: .cancel) { viewModel.deletionError = nil }
-        } message: { Text(viewModel.deletionError ?? "") }
     }
-}
 
-/// 单条扫描记录行
-private struct ScanHistoryRow: View {
-    let item: ScanHistoryItem
-
-    var body: some View {
-        HStack(spacing: 14) {
-            // 图标
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(ScannerTheme.accent.opacity(0.10))
-                    .frame(width: 44, height: 44)
-                Image(systemName: item.hasTexture ? "cube.fill" : "cube")
-                    .font(.system(size: 20))
-                    .foregroundStyle(ScannerTheme.accent)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.formattedDate)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                HStack(spacing: 12) {
-                    Label {
-                        Text("\(item.keyframeCount) 帧")
-                    } icon: {
-                        Image(systemName: "camera").foregroundStyle(ScannerTheme.accent)
+    private func recordRow(_ item: ScanHistoryItem) -> some View {
+        HStack(spacing: 4) {
+            Button { select(item) } label: {
+                HStack(alignment: .center, spacing: 14) {
+                    Image(systemName: "cube").font(.system(size: 24)).foregroundStyle(.secondary).frame(width: 30)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.displayName).font(.headline).foregroundStyle(.primary).multilineTextAlignment(.leading)
+                        Text(item.date.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).year().month().day().hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("\(item.keyframeCount) 帧 · \(String(format: "%.1f MB", item.totalSizeMB))")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Label {
-                        Text(String(format: "%.1f MB", item.totalSizeMB))
-                    } icon: {
-                        Image(systemName: "doc").foregroundStyle(ScannerTheme.accent)
-                    }
-                    if item.hasImmersalZip {
-                        Text("Immersal")
-                    }
-                    if item.hasZip {
-                        Image(systemName: "doc.zipper")
-                            .foregroundStyle(ScannerTheme.accent)
-                    }
+                    Spacer(minLength: 4)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .padding(.vertical, 16).padding(.leading, 16)
+                .contentShape(Rectangle())
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(ScannerTheme.accent)
+            .buttonStyle(.plain).accessibilityHint("选择此场景并进入处理页")
+            .accessibilityIdentifier("scan-record-\(item.id)")
+            Menu {
+                Button { select(item) } label: { Label("处理场景", systemImage: "gearshape") }
+                if let url = viewModel.modelURL(for: item.directoryPath) {
+                    Button { preview(url) } label: { Label("预览模型", systemImage: "cube") }
+                }
+                Button { rename(item) } label: { Label("重命名", systemImage: "pencil") }
+                Button(role: .destructive) { itemToDelete = item } label: { Label("删除", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis").font(.body).frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .padding(.trailing, 4).accessibilityLabel("\(item.displayName)的更多操作")
         }
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("扫描记录 \(item.formattedDate), \(item.keyframeCount) 帧, \(String(format: "%.1f", item.totalSizeMB)) MB")
     }
 }

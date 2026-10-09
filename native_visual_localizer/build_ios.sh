@@ -86,50 +86,30 @@ mkdir -p "$BUILD_DIR"
 SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
 CXX=$(xcrun --sdk iphoneos --find clang++)
 
-echo "--- Compiling visual_localizer.cpp ---"
-$CXX -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
-    -miphoneos-version-min=14.0 \
-    -I"$SCRIPT_DIR/include" \
-    -I"$SCRIPT_DIR/src" \
-    -F"$OPENCV_DIR" \
-    -fvisibility=hidden -fvisibility-inlines-hidden \
-    -fPIC \
-    -c "$SCRIPT_DIR/src/visual_localizer.cpp" -o "$BUILD_DIR/visual_localizer.o"
+# Every bridge compiles the same canonical core source directory.
+OBJECTS=()
+for SOURCE in "$SCRIPT_DIR"/src/*.cpp; do
+    NAME="$(basename "$SOURCE" .cpp)"
+    OBJECT="$BUILD_DIR/$NAME.o"
+    "$CXX" -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
+        -miphoneos-version-min=16.0 -I"$SCRIPT_DIR/include" -I"$SCRIPT_DIR/src" \
+        -F"$OPENCV_DIR" -fvisibility=hidden -fvisibility-inlines-hidden -fPIC \
+        -c "$SOURCE" -o "$OBJECT"
+    OBJECTS+=("$OBJECT")
+done
 
-echo "--- Compiling pose_contract.cpp ---"
-$CXX -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
-    -miphoneos-version-min=14.0 \
-    -I"$SCRIPT_DIR/include" \
-    -I"$SCRIPT_DIR/src" \
-    -F"$OPENCV_DIR" \
-    -fvisibility=hidden -fvisibility-inlines-hidden \
-    -fPIC \
-    -c "$SCRIPT_DIR/src/pose_contract.cpp" -o "$BUILD_DIR/pose_contract.o"
-
-echo "--- Compiling visual_localizer_impl.cpp ---"
-$CXX -std=c++17 -O2 -DNDEBUG -arch arm64 -isysroot "$SYSROOT" \
-    -miphoneos-version-min=14.0 \
-    -I"$SCRIPT_DIR/include" \
-    -I"$SCRIPT_DIR/src" \
-    -F"$OPENCV_DIR" \
-    -fvisibility=hidden -fvisibility-inlines-hidden \
-    -fPIC \
-    -c "$SCRIPT_DIR/src/visual_localizer_impl.cpp" -o "$BUILD_DIR/visual_localizer_impl.o"
-
-# Step 3: Create static library
-echo "--- Creating static library ---"
-ar rcs "$BUILD_DIR/libvisual_localizer.a" \
-    "$BUILD_DIR/visual_localizer.o" \
-    "$BUILD_DIR/pose_contract.o" \
-    "$BUILD_DIR/visual_localizer_impl.o"
+# Replace the archive so removed source objects cannot survive an incremental build.
+rm -f "$BUILD_DIR/libvisual_localizer.a"
+ar rcs "$BUILD_DIR/libvisual_localizer.a" "${OBJECTS[@]}"
 
 # Step 4: Verify
 echo "=== Verifying ==="
 "$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$BUILD_DIR/libvisual_localizer.a"
+"$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$BUILD_DIR/libvisual_localizer.a" "$SCRIPT_DIR/../tools/phase0/required_combined_native_symbols.txt"
 # Resolve the entire wrapper and OpenCV archive for the device target. This
 # catches missing transitive libraries that an archive symbol check cannot.
 "$CXX" -std=c++17 -arch arm64 -isysroot "$SYSROOT" \
-    -miphoneos-version-min=14.0 -I"$SCRIPT_DIR/include" \
+    -miphoneos-version-min=16.0 -I"$SCRIPT_DIR/include" \
     "$SCRIPT_DIR/tests/ios_link_smoke.cpp" \
     -Wl,-force_load,"$BUILD_DIR/libvisual_localizer.a" \
     -Wl,-force_load,"$OPENCV_FW/opencv2" \

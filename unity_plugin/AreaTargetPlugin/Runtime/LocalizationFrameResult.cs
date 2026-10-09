@@ -46,6 +46,7 @@ namespace AreaTargetPlugin
         public int MatchedFeatures { get; }
         public LocalizationFailureCategory FailureCategory { get; }
         public VLDebugInfo NativeDebugInfo { get; }
+        public LocalizationTrackingMetadata TrackingMetadata { get; }
 
         public bool IsSuccess => State == TrackingState.TRACKING
             && FailureCategory == LocalizationFailureCategory.None
@@ -82,6 +83,7 @@ namespace AreaTargetPlugin
             MatchedFeatures = matchedFeatures;
             FailureCategory = failureCategory;
             NativeDebugInfo = nativeDebugInfo;
+            TrackingMetadata = frame.TrackingMetadata;
         }
 
         public static LocalizationFrameResult Succeeded(

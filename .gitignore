@@ -74,3 +74,6 @@ phase1-results/
 
 # Local Git worktrees
 .worktrees/
+
+# Restore the pinned proprietary SDK locally with tools/ios/bootstrap_immersal_sdk.py
+ios_scanner/AreaTargetScanner/ThirdParty/Immersal/libPosePlugin.a

@@ -135,15 +135,20 @@ A native Swift app that uses ARKit + LiDAR to capture:
 - RGB keyframe images
 - Camera intrinsics
 
-Exports everything as a tidy ZIP you can feed straight into the pipeline. You can also sign in to your Area Target service from the app to upload a scan, track processing, and download the verified asset bundle. See [iOS Area Target service login](docs/ios-area-target-service-login.md).
+The app separates **Scan**, **Records**, and **Process**. Choose **Area Target** or **Immersal** from the platform menu; both use the same saved scenes and editable scene names. A scan saves its native data first, and the selected platform exports its ZIP on demand. Area Target supports service login, scan upload, processing progress, and verified asset downloads; see [iOS Area Target service login](docs/ios-area-target-service-login.md). Immersal account, upload, mapping, and task controls appear in Immersal mode. Tasks show the active scene and operation stage, can be interrupted locally, and can be removed from local history while preserving scan files and cloud content. Completed Immersal tasks can [download the map for offline localization tests](docs/ios-immersal-offline-test.md), overlay the original scan wireframe after checking its coordinate alignment (with visibility/opacity controls), and save a quality report based on fresh camera observations.
+
+See the [native workspace preview](docs/design/platform-workspace/workspace-overview.png) and [design verification](docs/design/platform-workspace/design-qa.md).
 
 **Requirements:** iPhone 12 Pro or newer (needs LiDAR), iOS 16+, Xcode 15+
 
 ```bash
+python3 tools/ios/bootstrap_immersal_sdk.py
 open ios_scanner/AreaTargetScanner.xcodeproj
 # Build & run on a LiDAR-equipped device
-# Scan → Export → AirDrop the ZIP to your Mac
+# Scan → Records / Process → Export → AirDrop the ZIP to your Mac
 ```
+
+The SDK bootstrap verifies the pinned upstream artifact before installing it locally; its binary is excluded from Git. Xcode builds the shared native core with pinned OpenCV 5 + contrib dependencies. See [native dependency restoration](ios_scanner/AreaTargetScanner/ThirdParty/Immersal/README.md) when moving to another computer.
 
 ## Processing Pipeline
 
@@ -310,5 +315,7 @@ The test suite includes unit tests, integration tests, property-based tests (Hyp
 PRs welcome. If you find a bug, open an issue. If you fix a bug, you're a hero.
 
 ## License
+
+The optional Immersal native runtime is proprietary and has separate [upstream terms and notices](ios_scanner/AreaTargetScanner/ThirdParty/Immersal/README.md); it is not covered by this repository's Apache license.
 
 [Apache License 2.0](LICENSE) — use it commercially, modify it, distribute it. Just don't blame us if your AR furniture app places a couch on the ceiling.

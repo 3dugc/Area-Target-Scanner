@@ -35,6 +35,7 @@ namespace AreaTargetPlugin
         public Matrix4x4 UnityWorldFromCamera { get; }
 
         public string MapId { get; }
+        public LocalizationTrackingMetadata TrackingMetadata { get; }
 
         /// <summary>
         /// Single-channel, row-major grayscale image. A defensive copy is returned
@@ -53,7 +54,8 @@ namespace AreaTargetPlugin
             Vector4 intrinsics,
             ImageOrientation orientation,
             Matrix4x4 unityWorldFromCamera,
-            string mapId)
+            string mapId,
+            LocalizationTrackingMetadata? trackingMetadata = null)
         {
             if (frameId < 0)
                 throw new ArgumentException("Frame ID must be non-negative.", nameof(frameId));
@@ -91,6 +93,7 @@ namespace AreaTargetPlugin
             Orientation = orientation;
             UnityWorldFromCamera = unityWorldFromCamera;
             MapId = mapId;
+            TrackingMetadata = trackingMetadata ?? LocalizationTrackingMetadata.KnownClock(captureTimestampNs);
         }
 
         private static bool ArePositiveFinite(Vector4 intrinsics)

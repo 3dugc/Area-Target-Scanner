@@ -8,15 +8,29 @@ namespace AreaTargetPlugin.PointCloudLocalization
     /// Default ILocalizer implementation that wraps VisualLocalizationEngine and FeatureDatabaseReader.
     /// Converts ICameraData to CameraFrame, runs ProcessFrame, and converts TrackingResult to ILocalizationResult.
     /// </summary>
-    public class PointCloudLocalizer : ILocalizer
+    public class PointCloudLocalizer : ILocalizer, ILocalizationSessionLifecycle
     {
         private const int ResultPollLimit = 100;
-        private const long MaxLocalizationResultAgeNs = 1_000_000_000L;
 
         private AsyncLocalizationRunner _runner;
         private FeatureDatabaseReader _featureDb;
+        private NativeSessionBridge _session;
+        private LocalizationTrackingMetadata? _lastTrackingMetadata;
         private readonly int _mapId;
         private bool _disposed;
+        private uint _platformTrackingQuality = 2;
+        public int MapId => _mapId;
+        public void SetPlatformTrackingQuality(uint trackingQuality)
+        {
+            if (trackingQuality > 2) throw new ArgumentOutOfRangeException(nameof(trackingQuality));
+            _platformTrackingQuality = trackingQuality;
+        }
+        public async Task ResetTrackingAsync()
+        {
+            _session?.Dispose(); _session = null; _lastTrackingMetadata = null;
+            if (_runner != null) await _runner.ResetAsync();
+        }
+
 
         public event Action<int[]> OnSuccessfulLocalizations;
 
@@ -47,60 +61,78 @@ namespace AreaTargetPlugin.PointCloudLocalization
             try
             {
                 if (_disposed)
-                    return LocalizationResult.Failed();
+                    return FailedForMap();
 
                 if (cameraData == null)
-                    return LocalizationResult.Failed();
+                    return FailedForMap();
 
                 if (cameraData.Width <= 0 || cameraData.Height <= 0)
-                    return LocalizationResult.Failed();
+                    return FailedForMap();
 
                 var frame = CameraDataAdapter.ToCameraFrame(cameraData);
+                var sourceMetadata = frame.TrackingMetadata.Value;
+                frame.TrackingMetadata = new LocalizationTrackingMetadata(sourceMetadata.CameraId,
+                    sourceMetadata.CaptureClockEpoch, sourceMetadata.TrackingEpoch, sourceMetadata.PoseTimestampNs,
+                    Math.Min(sourceMetadata.TrackingQuality, _platformTrackingQuality),
+                    sourceMetadata.ClockMappingValid, sourceMetadata.ExtrinsicsValid);
                 if (!frame.TryCreateLocalizationFrame(
                     out LocalizationFrame localizationFrame,
                     out _))
                 {
-                    return LocalizationResult.Failed();
+                    return FailedForMap();
                 }
 
-                if (_runner == null || !_runner.Submit(localizationFrame))
-                    return LocalizationResult.Failed();
-
+                if (_runner == null) return FailedForMap();
+                if (_session == null) _session = new NativeSessionBridge();
+                var metadata = localizationFrame.TrackingMetadata;
+                if (_lastTrackingMetadata.HasValue)
+                {
+                    var previous = _lastTrackingMetadata.Value;
+                    if (previous.CameraId != metadata.CameraId
+                        || previous.CaptureClockEpoch != metadata.CaptureClockEpoch
+                        || previous.TrackingEpoch != metadata.TrackingEpoch
+                        || (previous.TrackingQuality == 2 && metadata.TrackingQuality != 2))
+                    {
+                        await _runner.ResetAsync();
+                        _session.Reset((ulong)_runner.CurrentGeneration, metadata.TrackingEpoch);
+                        _lastTrackingMetadata = metadata;
+                        return FailedForMap();
+                    }
+                }
+                _lastTrackingMetadata = metadata;
+                if (!_runner.Submit(localizationFrame)) return FailedForMap();
                 for (int attempt = 0; attempt < ResultPollLimit; attempt++)
                 {
-                    if (_runner.TryDequeueLatest(
-                        localizationFrame.MapId,
-                        _runner.CurrentGeneration,
-                        localizationFrame.CaptureTimestampNs,
-                        MaxLocalizationResultAgeNs,
-                        out LocalizationFrameResult frameResult))
+                    if (_disposed) return FailedForMap();
+                    TrackingResult display;
+                    if (_runner.TryTakeLatestForSession(out LocalizationFrameResult frameResult))
                     {
+                        // Report genuine engine successes independently of whether
+                        // C++ has confirmed an alignment or is displaying propagation.
                         if (frameResult.IsSuccess)
-                        {
-                            var result = new LocalizationResult
-                            {
-                                Success = true,
-                                MapId = _mapId,
-                                Pose = frameResult.UnityWorldFromScan.Value
-                            };
                             OnSuccessfulLocalizations?.Invoke(new[] { _mapId });
-                            return result;
-                        }
-
-                        return LocalizationResult.Failed();
+                        display = _session.Update(frameResult, LocalizationClock.NowTimestampNs);
                     }
-
+                    else
+                    {
+                        display = _session.Poll(LocalizationClock.NowTimestampNs);
+                    }
+                    if (display.Quality != LocalizationQuality.NONE)
+                        return new LocalizationResult { Success = true, MapId = _mapId, Pose = display.Pose };
                     await Task.Delay(1);
                 }
 
-                return LocalizationResult.Failed();
+                return FailedForMap();
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[PointCloudLocalizer] Localize exception: {ex.Message}");
-                return LocalizationResult.Failed();
+                return FailedForMap();
             }
         }
+
+        private ILocalizationResult FailedForMap()
+            => new LocalizationResult { Success = false, MapId = _mapId, Pose = UnityEngine.Matrix4x4.identity };
 
         /// <summary>
         /// Releases VisualLocalizationEngine and FeatureDatabaseReader resources and marks this localizer as disposed.
@@ -112,6 +144,8 @@ namespace AreaTargetPlugin.PointCloudLocalization
         {
             if (_disposed) return;
             _disposed = true;
+            _session?.Dispose();
+            _session = null;
 
             try
             {

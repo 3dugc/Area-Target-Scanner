@@ -67,7 +67,8 @@ namespace AreaTargetPlugin.Tests
             rawPose.m23 = tz;
             rawPose.m30 = 0f; rawPose.m31 = 0f; rawPose.m32 = 0f; rawPose.m33 = 1f;
 
-            // Feed the pose through the filter
+            // The core profile requires two consistent observations.
+            filter.Update(rawPose);
             Matrix4x4 smoothed = filter.Update(rawPose);
 
             // P6.1: Requirement 13.2 — Translation difference < 0.5m
@@ -98,6 +99,10 @@ namespace AreaTargetPlugin.Tests
         {
             var filter = new KalmanPoseFilter();
             var rng = new System.Random(caseIndex + 100);
+
+            Matrix4x4 initial = KalmanPoseFilter.EulerToMatrix(baseRx, baseRy, baseRz);
+            initial.m03 = baseTx; initial.m13 = baseTy; initial.m23 = baseTz;
+            filter.Update(initial); filter.Update(initial);
 
             // Generate a sequence of 10 poses with small perturbations
             for (int step = 0; step < 10; step++)

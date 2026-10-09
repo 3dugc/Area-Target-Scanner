@@ -6,5 +6,7 @@ namespace AreaTargetPlugin.PointCloudLocalization
     {
         public Matrix4x4 Pose;
         public bool Ignore;
+        public bool SetVisibility;
+        public bool Visible;
     }
 }

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="${1:?usage: check_native_symbols.sh <library>}"
-SYMBOLS="$ROOT/tools/phase0/required_native_symbols.txt"
+SYMBOLS="${2:-$ROOT/tools/phase0/required_native_symbols.txt}"
 
 if [[ ! -f "$LIB" ]]; then
   echo "FAIL missing library: $LIB" >&2
@@ -25,7 +25,7 @@ if command -v lipo >/dev/null 2>&1; then
   lipo -info "$LIB"
 fi
 
-NM_OUTPUT="$(nm "$LIB")"
+NM_OUTPUT="$(nm -gU "$LIB")"
 while IFS= read -r symbol; do
   [[ -z "$symbol" ]] && continue
   if ! grep -Eq "[[:space:]_]${symbol}$" <<<"$NM_OUTPUT"; then

@@ -31,6 +31,7 @@ struct ImmersalMappingJob: Codable, Equatable, Identifiable {
     let mapName: String
     let createdAt: Date
     var fingerprint = ""
+    var sourceFingerprint: String?
     var frameCount = 0
     var uploadedCount = 0
     var phase: Phase = .paused

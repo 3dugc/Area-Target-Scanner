@@ -19,8 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VERSION = "5.0.0"
 SOURCE_SHA256 = "b0528f5a1d379d59d4701cb28c36e22214cc51cf64594e5b56f2d3e6c0233095"
 CONTRIB_SHA256 = "c58f6344170c39abf187c56f3843b59cab1fd3e89cf19ba2ce25dc061659b27f"
-SOURCES = tuple(ROOT / "native_visual_localizer/src" / name for name in
-                ("pose_contract.cpp", "visual_localizer.cpp", "visual_localizer_impl.cpp"))
+SOURCES = tuple(sorted((ROOT / "native_visual_localizer/src").glob("*.cpp")))
 HEADER = ROOT / "ios_scanner/AreaTargetScanner/ThirdParty/AreaTargetNative/AreaTargetNative.h"
 NOTICES = HEADER.with_name("ThirdPartyNotices.md")
 LICENSE_SHA256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
@@ -166,8 +165,10 @@ def build_framework(cache, platform, jobs, opencv_framework=None):
     compiler = run(["xcrun", "--sdk", platform, "--find", "clang++"]).strip()
     standard_info = framework_sdk_info(platform, sdk)
     target = "arm64-apple-ios16.0" + ("-simulator" if platform == "iphonesimulator" else "")
-    inputs = [*SOURCES, original, HEADER, NOTICES, Path(__file__), ROOT / "tools/ios/verify_area_target_native.py",
-              ROOT / "native_visual_localizer/src/visual_localizer_impl.h", ROOT / "native_visual_localizer/src/pose_contract.h"]
+    public_headers = list(sorted((ROOT / "native_visual_localizer/include").glob("*.h")))
+    private_headers = list(sorted((ROOT / "native_visual_localizer/src").glob("*.h")))
+    inputs = [*SOURCES, *public_headers, *private_headers, HEADER, NOTICES, Path(__file__),
+              ROOT / "tools/ios/verify_area_target_native.py", ROOT / "tools/phase0/required_combined_native_symbols.txt"]
     key = hashlib.sha256((platform + target + sdk + json.dumps(standard_info, sort_keys=True) + json.dumps(metadata, sort_keys=True) +
                          "".join(digest(path) for path in inputs)).encode()).hexdigest()[:20]
     build = cache / "frameworks" / key / platform
@@ -193,12 +194,13 @@ def build_framework(cache, platform, jobs, opencv_framework=None):
          "-Wl,-exported_symbols_list," + str(exports), "-Wl,-twolevel_namespace", "-Wl,-dead_strip",
          "-framework", "Foundation", "-framework", "Accelerate", "-framework", "AVFoundation",
          "-framework", "CoreMedia", "-framework", "CoreVideo", "-framework", "CoreGraphics",
-         "-framework", "UIKit", "-lz", "-lc++"], log=build / "link.log")
+         "-framework", "UIKit", "-lz", "-lsqlite3", "-lc++"], log=build / "link.log")
     (framework / "Headers").mkdir(exist_ok=True)
     (framework / "Modules").mkdir(exist_ok=True)
     shutil.copy2(HEADER, framework / "Headers/AreaTargetNative.h")
+    shutil.copy2(original.with_name("area_target_runtime.h"), framework / "Headers/area_target_runtime.h")
     (framework / "Modules/module.modulemap").write_text(
-        'framework module AreaTargetNative {\n  umbrella header "AreaTargetNative.h"\n  export *\n}\n')
+        'framework module AreaTargetNative {\n  umbrella header "AreaTargetNative.h"\n  header "area_target_runtime.h"\n  export *\n}\n')
     with (framework / "Info.plist").open("wb") as stream:
         plistlib.dump({**standard_info, "CFBundleExecutable": "AreaTargetNative", "CFBundleIdentifier": "com.areatarget.native",
                       "CFBundleName": "AreaTargetNative", "CFBundlePackageType": "FMWK",
@@ -211,6 +213,9 @@ def build_framework(cache, platform, jobs, opencv_framework=None):
     shutil.copytree(dependency_framework / "Licenses", framework / "Licenses", dirs_exist_ok=True)
     metadata["opencvBinarySHA256"] = metadata.pop("binarySHA256")
     metadata["binarySHA256"] = digest(framework / "AreaTargetNative")
+    metadata["runtimeApiVersion"] = 2
+    metadata["runtimeSourceSHA256s"] = {str(path.relative_to(ROOT)): digest(path) for path in
+                                       [*SOURCES, *public_headers, *private_headers]}
     (framework / "dependency.json").write_text(json.dumps(metadata, indent=2, sort_keys=True))
     verification = verify_framework(framework, platform)
     (build / "verified.json").write_text(json.dumps(verification, indent=2))

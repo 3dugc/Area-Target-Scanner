@@ -3,9 +3,16 @@ import XCTest
 
 @MainActor
 final class DualExportViewModelTests: XCTestCase {
+    private let isolationRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("DualExportViewModelTests-\(UUID().uuidString)", isDirectory: true)
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: isolationRoot)
+        try super.tearDownWithError()
+    }
+
     func testCompletionPublishesOnlyChosenArchiveAndStaysInPreview() async throws {
         let exporter = ControlledExporter()
-        let vm = ScanViewModel(exporter: exporter)
+        let vm = ScanViewModel(exporter: exporter, documentsDirectory: isolationRoot)
         vm.state = .preview("/tmp/scan_test")
         vm.beginExport(format: .immersal, from: "/tmp/scan_test")
         await fulfillment(of: [exporter.started], timeout: 3)
@@ -20,7 +27,7 @@ final class DualExportViewModelTests: XCTestCase {
 
     func testCancelledExportDoesNotOpenShareAndCanRetry() async throws {
         let exporter = ControlledExporter()
-        let vm = ScanViewModel(exporter: exporter)
+        let vm = ScanViewModel(exporter: exporter, documentsDirectory: isolationRoot)
         vm.state = .preview("/tmp/scan_test")
         vm.beginExport(format: .immersal, from: "/tmp/scan_test")
         await fulfillment(of: [exporter.started], timeout: 3)
@@ -38,7 +45,7 @@ final class DualExportViewModelTests: XCTestCase {
 
     func testFailureLeavesPreviewAndDoesNotShare() async throws {
         let exporter = ControlledExporter(fails: true)
-        let vm = ScanViewModel(exporter: exporter)
+        let vm = ScanViewModel(exporter: exporter, documentsDirectory: isolationRoot)
         vm.state = .preview("/tmp/scan_test")
         exporter.finish.signal()
         vm.beginExport(format: .immersal, from: "/tmp/scan_test")
@@ -50,7 +57,7 @@ final class DualExportViewModelTests: XCTestCase {
 
     func testCompletionForDepartedPreviewDoesNotOpenShare() async {
         let exporter = ControlledExporter()
-        let vm = ScanViewModel(exporter: exporter)
+        let vm = ScanViewModel(exporter: exporter, documentsDirectory: isolationRoot)
         vm.state = .preview("/tmp/scan_test")
         vm.beginExport(format: .immersal, from: "/tmp/scan_test")
         await fulfillment(of: [exporter.started], timeout: 3)

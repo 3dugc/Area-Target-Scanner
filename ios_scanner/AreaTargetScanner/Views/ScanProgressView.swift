@@ -8,22 +8,34 @@ struct ScanProgressView: View {
     let progress: ScanProgress
 
     var body: some View {
-        HStack(spacing: 24) {
+        VStack(spacing: 8) {
+          HStack(spacing: 12) {
             StatItem(
                 icon: "circle.grid.3x3.fill",
                 value: formattedPointCount,
-                label: "Points"
+                label: "点数"
             )
             StatItem(
                 icon: "square.dashed",
                 value: formattedCoverageArea,
-                label: "Area"
+                label: "路径范围"
             )
             StatItem(
                 icon: "camera.fill",
                 value: "\(progress.keyframeCount)",
-                label: "Keyframes"
+                label: "采集帧数"
             )
+          }
+          if let feedback = progress.qualityFeedback {
+            Text(feedback)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+          }
+          if progress.rejectedKeyframeCount > 0 {
+            Text("已跳过 \(progress.rejectedKeyframeCount) 次低质量画面")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+          }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

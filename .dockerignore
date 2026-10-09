@@ -7,11 +7,14 @@
 !web_service/**
 !native/
 !native/**
+!native_visual_localizer/
+!native_visual_localizer/include/
 !native_visual_localizer/include/area_target_runtime.h
+!native_visual_localizer/src/
 !native_visual_localizer/src/frame_contract.h
+!native_visual_localizer/src/rigid_math.h
 !native_visual_localizer/src/frame_contract.cpp
 !native_visual_localizer/src/gray_quality.cpp
-!native_visual_localizer/src/rigid_math.h
 !native_visual_localizer/src/keyframe_selection.cpp
 !ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.h
 !ios_scanner/AreaTargetScanner/ThirdParty/xatlas/xatlas.cpp

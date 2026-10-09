@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-08T09:49:01.489978+00:00",
+  "feature": "独立客户端设置：Quality/Fast 与 UV/纹理重建",
+  "provenance": {
+    "plan": "data/github-Data/plans/2026-10-08-ios-processing-profile-selector/implementation.md",
+    "productBaseCommit": "802e1bbe24fdb77792fc2a0866da1fda8140d121",
+    "dataBaseCommit": "f97ea032b9d860765ee0c92f21f65785a05f0536",
+    "sourceHashManifest": "data/github-Data/results/ios-client-settings/2026-10-08/source-hashes.json",
+    "sourceHashManifestSHA256": "e2f5ebc9a46adb7b3f854f1f28a6dc069eb5163cf48575aeaa32bf797e4451d3",
+    "baselineFiles": 148,
+    "changedBaselineFiles": 7,
+    "unchangedBaselineFiles": 141,
+    "newFiles": 4,
+    "planSHA256": "65f9aee6fc5edeb6c7b628b2a4cbb523b224f79652368c6b0513c95a554a0cea"
+  },
+  "behavior": {
+    "settingsEntry": "首页右上角齿轮；Area Target 处理页齿轮/更改设置",
+    "defaultProfile": "quality",
+    "defaultUVUnwrap": true,
+    "persistsAcrossLaunch": true,
+    "newTaskOptionsFrozenBeforeJournalSave": true,
+    "resumeUsesFrozenJobOptions": true,
+    "rebuildCreatesNewJobAndRetainsOldAsset": true,
+    "uvDisabledRequiresExistingMaterialAndTexture": true,
+    "silentProfileFallback": false
+  },
+  "validation": {
+    "focused": {
+      "total": 149,
+      "passed": 148,
+      "skipped": 1,
+      "failed": 0,
+      "xcresult": "/private/tmp/area-target-settings-focused-20261008.xcresult"
+    },
+    "fullNativeRegression": {
+      "total": 689,
+      "passed": 685,
+      "skipped": 4,
+      "failed": 0,
+      "skippedTests": [
+        "AreaTargetLiveAPITests testDownloadedRealHallBundleSavesReopensAndLoadsNative",
+        "AreaTargetLiveAPITests testRealHallScanUploadsProcessesDownloadsAndLoadsNative",
+        "AreaTargetLiveAPITests testSyntheticScanUploadsProcessesAndDownloadsOnIOS",
+        "AreaTargetScanArchiveTests testRealCriticalProtectionArchiveWhenFixtureIsExplicitlyProvided"
+      ],
+      "xcresult": "/private/tmp/area-target-settings-full-20261008.xcresult"
+    },
+    "themeFixtureCorrection": {
+      "productCodeChanged": false,
+      "reason": "初次dark附件仍浅色，补正hosting controller有效trait与SwiftUI colorScheme；显式断言主题后通过并复核真暗色截图",
+      "total": 2,
+      "passed": 2,
+      "failed": 0,
+      "xcresult": "/private/tmp/area-target-settings-theme-20261008.xcresult"
+    },
+    "redEvidence": {
+      "defaultQualityBeforeImplementation": "2 tests/6 assertion failures",
+      "remoteConfigurationGuard": "2 tests/6 assertion failures",
+      "profileEdgeCases": "5 tests/13 assertion failures",
+      "standaloneSettingsAndPersistence": "8 tests/17 assertion failures",
+      "uvOptionFreezing": "5 tests/24 assertion failures"
+    },
+    "review": "独立静态与视觉审查，无功能阻断；320点accessibilityLarge、浅色/暗色截图复核。滚动下载页高度>450断言通过。",
+    "gitDiffCheck": "passed"
+  },
+  "package": {
+    "bundleIdentifier": "com.areatarget.scanner",
+    "version": "1.0",
+    "build": "5",
+    "path": "/private/tmp/area-target-phone-device-20261008/Build/Products/Debug-iphoneos/AreaTargetScanner.app",
+    "signatureVerification": {
+      "command": "codesign --verify --deep --strict",
+      "exitCode": 0
+    },
+    "binarySHA256": {
+      "AreaTargetScanner": "bba0d892cb596f59f86f7c33b6b60c4cd6601f038dfd9b7f4b56fa6fa5e19a22",
+      "AreaTargetScanner.debug.dylib": "d6f98d7f1dc0eac9199ae90c35ecb5cd588a428d6ad5d4cad41e0a4093e94261",
+      "Frameworks/AreaTargetNative.framework/AreaTargetNative": "cbc179fb0dd4e8bf13e0be91aaa23eb40c5d751e037fe02b7a7c0ca03bc59a47"
+    }
+  },
+  "device": {
+    "name": "邸锐的iPhone",
+    "model": "iPhone 15 Pro",
+    "os": "26.7.1",
+    "previousVersion": "1.0",
+    "previousBuild": "4",
+    "installedVersion": "1.0",
+    "installedBuild": "5",
+    "installation": "success",
+    "launch": {
+      "status": "success",
+      "initialAttempt": "blocked by iOS lock screen, CoreDevice 10002",
+      "userUnlocked": true,
+      "processIdentifier": 10461,
+      "executable": "file:///private/var/containers/Bundle/Application/734141FF-63CA-43BF-8247-C932616EA0B5/AreaTargetScanner.app/AreaTargetScanner",
+      "subsequentProcessSnapshotContainsSameProcess": true
+    },
+    "documents": {
+      "beforeFiles": 680,
+      "afterFiles": 680,
+      "beforeBytes": 2727843001,
+      "afterBytes": 2727843001,
+      "pathSizeMtimeIdentical": true,
+      "normalizedMetadataSHA256": "e79a8bcdb83da26f3d5a6efb481ada4a22fab4ce7066bd948115dabf018808cd",
+      "verificationLevel": "path,size,mtime; no file-content hashing or complete container backup"
+    },
+    "icon": {
+      "sourceSHA256": "cef7fb223f98c98d51da7f2ae6b840556e74fad33488d19b6dfab950acb3ab2f",
+      "installedPixelWidth": 180,
+      "installedPixelHeight": 180,
+      "placeholder": false,
+      "installedSHA256": "69e81c746f815daa88ed54354a0d0cb603538a806fc5ff6a0969e3f4b16fb84f",
+      "matchesPreviouslyConfirmedInstalledIcon": true
+    }
+  },
+  "limits": [
+    "未自动重新提交实际扫描；当前Fast地图仍为Fast，需按设置重新建图才会使用Quality。",
+    "本变更复用已有服务profile/uv_unwrap，不改变识别算法；没有新增独立采集或Quality识别提升结论。",
+    "不部署或更换现有100帧云端；原始扫描、旧任务、图标及其他已授权功能保留。"
+  ],
+  "artifactSHA256": {
+    "logs/settings-red-tests.log": "7b71a69d4d21787869d202495d65606d869e4196e0f1ef4f70b090c8db81dca8",
+    "logs/focused-tests.log": "81ca136208bb5d6a97c2418cbe08da639e36e31a2616178ce4b2b90eafeef43f",
+    "logs/settings-full-tests.log": "1ce10f66dc7af96e371d96195d9008b5782b1cce715195840d3b22520e700bde",
+    "logs/settings-theme-tests.log": "54c4b4911c9b862bb5fbad9af23a51a58499a4dc559816b69961a8dc28af6cd3",
+    "logs/contract-red-tests.log": "ea15b14bab317dfab006202d7b0d5c0cfca1c671e424a25c9bb15f914085f661",
+    "logs/settings-focused-tests.log": "d1724b56fc268ca37ce534875c43f2699d49e7d4d27eee7f3692401dfc3b541f",
+    "logs/review-red-tests.log": "ba26174b0e002aa0049722f55feec5e16bf599605f1aff2521f24c1817931326",
+    "logs/settings-uv-red-tests.log": "06b180d44a737af81697b85cdf643ab117552b2b080f1a7f5bb6ba41b7e530ca",
+    "logs/settings-device-build.log": "0f8661e6eb021a5b8819a9084158f5273ff51ec70c69b5293c4b2ea91f7fa869",
+    "logs/red-tests.log": "5313ab9d340f083d6eed1fd0350ca6d1a52411a3129994bc5dd65ac58d7acd2e",
+    "screenshots/settings-large-text-320.png": "7b68cabaabb9ba28fa8b3bf2991d628812f98a65e9a3d56ae4af784eec30662b",
+    "screenshots/settings-light.png": "1e77009fa424e2325e38aaa28b921ba3d13968a50e1885866badd9ea608a10f3",
+    "screenshots/installed-app-icon.png": "69e81c746f815daa88ed54354a0d0cb603538a806fc5ff6a0969e3f4b16fb84f",
+    "screenshots/processing-downloaded-scrolled-large-text-320.png": "9e2afbb3fa54d615e7f6946ca6faa01d32661ea000f066af18eeb2b1a9d3093e",
+    "screenshots/settings-dark.png": "b19b95b94e2464c9ce1fb2926ecdf50da4ec6e7eccc2e19733b92d6722b092d9"
+  },
+  "localEvidence": {
+    "installOutcome": "success",
+    "launchOutcome": "success",
+    "installResponseSHA256": "3de4683f861fe0e491cf28ed066b1dc8d5cce4a8d756dd5eab77dd9766012a0a",
+    "launchResponseSHA256": "6b0b14fcc5c47c5bca75d7a3f9b126019607f349ae0f1379cff6851648488769",
+    "processSnapshotSHA256": "9143064870d1c1dabbefba84d8ef7d82ac9b02f3f5ab9fb21a3de11c1f44d9af"
+  }
+}

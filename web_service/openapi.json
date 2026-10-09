@@ -67,6 +67,15 @@
                       "1"
                     ],
                     "default": "1"
+                  },
+                  "map_clahe": {
+                    "type": "string",
+                    "enum": [
+                      "0",
+                      "1"
+                    ],
+                    "default": "0",
+                    "description": "Experimental mapping-only CLAHE (clipLimit 2.0, 8x8 tiles). Frozen at submission; changing it requires a new job and map. May increase map size and processing time."
                   }
                 }
               }
@@ -599,7 +608,8 @@
           "finished_at",
           "expires_at",
           "error",
-          "result"
+          "result",
+          "map_clahe"
         ],
         "additionalProperties": false,
         "properties": {
@@ -677,6 +687,11 @@
               }
             ],
             "nullable": true
+          },
+          "map_clahe": {
+            "type": "boolean",
+            "default": false,
+            "description": "Frozen mapping illumination enhancement choice. Historical jobs default to false."
           }
         }
       },
@@ -687,7 +702,8 @@
           "policy",
           "policyVersion",
           "profiles",
-          "safety"
+          "safety",
+          "map_clahe_supported"
         ],
         "properties": {
           "schemaVersion": {
@@ -860,6 +876,10 @@
           "criticalFrameProtection": {
             "$ref": "#/components/schemas/CriticalFrameProtectionCapability",
             "description": "Optional v2 capability. Absent for v1; ordinary maximumLongEdge remains 1600."
+          },
+          "map_clahe_supported": {
+            "type": "boolean",
+            "description": "Whether optional mapping-only CLAHE is supported."
           }
         }
       },

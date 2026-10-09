@@ -16,15 +16,26 @@ final class ScanViewModel: ObservableObject {
         case history            // 扫描历史列表
     }
 
-    @Published var state: State = .requestingPermission
+    @Published var state: State = .ready
     @Published var progress = ScanProgress(
         pointCount: 0, coverageArea: 0, keyframeCount: 0, isScanning: false
     )
     @Published var scanHistory: [ScanHistoryItem] = []
     @Published var deletionError: String?
+    @Published var draftSceneName = ""
+    @Published var namingError: String?
+    @Published private(set) var isStartingScan = false
     var deletionBlocked: (String) -> Bool = { _ in false }
     /// A nonempty reason protects the scan; nil or blank keeps the legacy guard in effect.
     var deletionBlockReason: ((String) -> String?)?
+
+    var isCaptureBusy: Bool {
+        if isStartingScan { return true }
+        switch state {
+        case .scanning, .processing: return true
+        default: return false
+        }
+    }
 
     @Published var gpsStatus = "GPS 未开启"
     @Published private(set) var exportStatus: String?
@@ -34,22 +45,38 @@ final class ScanViewModel: ObservableObject {
     private var eligibilityID: UUID?
     var isExporting: Bool { exportStatus != nil }
 
-    private let scanner = ARKitScannerService()
+    private let arScanner: ARKitScannerService
+    private let scanner: ScannerService
     private let exporter: ScanExporting
     private let documentsDirectory: URL
-    private let cameraAuthorizationStatus: () -> AVAuthorizationStatus
     private let locationService: ScanLocationService
+    private let metadataStore: ScanMetadataStore
+    private let cameraAuthorizationStatus: () -> AVAuthorizationStatus
+    private let requestCameraAccess: (@escaping (Bool) -> Void) -> Void
+    private var savedSceneNames: [String: String] = [:]
+    private var lastMetadataReadError: String?
+    private var captureSceneName: String?
     private var exportID: UUID?
     private var exportCancellation: ScanExportCancellation?
 
     init(exporter: ScanExporting = ScanExportService(),
          documentsDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!,
-         cameraAuthorizationStatus: @escaping () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .video) }) {
+         metadataStore: ScanMetadataStore? = nil,
+         scanner: ScannerService? = nil,
+         locationService: ScanLocationService? = nil,
+         cameraAuthorizationStatus: @escaping () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .video) },
+         requestCameraAccess: @escaping (@escaping (Bool) -> Void) -> Void = { AVCaptureDevice.requestAccess(for: .video, completionHandler: $0) }) {
+        let arScanner = ARKitScannerService()
+        self.arScanner = arScanner
+        self.scanner = scanner ?? arScanner
         self.exporter = exporter
         self.documentsDirectory = documentsDirectory
+        self.metadataStore = metadataStore ?? ScanMetadataStore(documentsDirectory: documentsDirectory)
         self.cameraAuthorizationStatus = cameraAuthorizationStatus
-        self.locationService = ScanLocationService(store: scanner.locationStore)
-        locationService.$status.assign(to: &$gpsStatus)
+        self.requestCameraAccess = requestCameraAccess
+        self.locationService = locationService ?? ScanLocationService(store: arScanner.locationStore)
+        self.locationService.$status.assign(to: &$gpsStatus)
+        refreshSceneNames()
     }
 
     func setAppActive(_ active: Bool) {
@@ -74,7 +101,7 @@ final class ScanViewModel: ObservableObject {
     }
 
     func beginExport(format: ScanExportFormat, from path: String) {
-        guard !isExporting else { return }
+        guard !isExporting, !isCaptureBusy else { return }
         let directory = URL(fileURLWithPath: path)
         let id = UUID()
         let cancellation = ScanExportCancellation()
@@ -115,11 +142,12 @@ final class ScanViewModel: ObservableObject {
     private let scannerQueue = DispatchQueue(label: "com.areatarget.scanner.vm")
     private var progressTimer: Timer?
 
-    var arSession: ARSession { scanner.arSession }
+    var arSession: ARSession { arScanner.arSession }
 
     // MARK: - Camera Permission
 
     func checkCameraPermission() {
+        guard !isCaptureBusy, !isExporting else { return }
         switch cameraAuthorizationStatus() {
         case .authorized:
             state = .ready
@@ -133,84 +161,111 @@ final class ScanViewModel: ObservableObject {
     }
 
     func requestCameraPermission() {
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-            Task { @MainActor in
-                self?.state = granted ? .ready : .permissionDenied
-            }
-        }
+        startScanning()
     }
 
     // MARK: - Scan Control
 
     func startScanning() {
-        guard !isExporting else { return }
-        guard cameraAuthorizationStatus() == .authorized else {
-            checkCameraPermission()
+        guard !isExporting, !isCaptureBusy else { return }
+        let trimmed = draftSceneName.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            captureSceneName = trimmed.isEmpty ? nil : try ScanMetadataStore.normalizedName(trimmed)
+        } catch {
+            namingError = error.localizedDescription
             return
         }
+        namingError = nil
+        isStartingScan = true
+        switch cameraAuthorizationStatus() {
+        case .authorized:
+            startAuthorizedScan()
+        case .notDetermined:
+            state = .requestingPermission
+            requestCameraAccess { [weak self] granted in
+                Task { @MainActor in
+                    guard let self, self.isStartingScan else { return }
+                    if granted {
+                        self.startAuthorizedScan()
+                    } else {
+                        self.isStartingScan = false
+                        self.captureSceneName = nil
+                        self.state = .permissionDenied
+                    }
+                }
+            }
+        case .denied, .restricted:
+            isStartingScan = false
+            captureSceneName = nil
+            state = .permissionDenied
+        @unknown default:
+            isStartingScan = false
+            captureSceneName = nil
+            state = .permissionDenied
+        }
+    }
+
+    private func startAuthorizedScan() {
         let scanner = self.scanner
         scannerQueue.async { [weak self] in
             do {
                 try scanner.startScan()
                 Task { @MainActor in
-                    self?.locationService.start()
-                    self?.state = .scanning
-                    self?.startProgressUpdates()
+                    guard let self else { return }
+                    self.state = .scanning
+                    self.isStartingScan = false
+                    self.locationService.start()
+                    self.startProgressUpdates()
                 }
             } catch {
                 let msg = error.localizedDescription
-                Task { @MainActor in self?.state = .error(msg) }
+                Task { @MainActor in
+                    self?.isStartingScan = false
+                    self?.captureSceneName = nil
+                    self?.state = .error(msg)
+                }
             }
         }
     }
 
-    /// Stop scanning → immediately start processing → auto-preview
+    /// Save the native scan once; each platform exports its archive explicitly later.
     func stopAndProcess() {
+        guard state == .scanning, !isStartingScan else { return }
         stopProgressUpdates()
         locationService.stop()
         let outputPath = makeExportPath()
-        let exporter = self.exporter
+        let sceneName = captureSceneName ?? defaultSceneName(for: outputPath)
         state = .processing("正在停止扫描...")
 
         let scanner = self.scanner
-        Task.detached { [weak self] in
+        scannerQueue.async { [weak self] in
             do {
-                // Step 1: Stop scan
                 let _ = try scanner.stopScan()
                 let prog = scanner.getScanProgress()
-                await MainActor.run { self?.progress = prog }
+                Task { @MainActor in self?.progress = prog }
 
-                // Step 2: Export data with progress callback
-                await MainActor.run { self?.state = .processing("正在准备导出...") }
-                let _ = try scanner.exportScanData(outputPath: outputPath) { status in
+                let saved = try scanner.exportScanData(outputPath: outputPath) { status in
                     Task { @MainActor in
-                        self?.state = .processing(status)
+                        guard let self, case .processing = self.state else { return }
+                        self.state = .processing(status)
                     }
                 }
-
-                // Step 3: Create zip
-                await MainActor.run { self?.state = .processing("正在打包ZIP...") }
-                do {
-                    _ = try exporter.export(scanDirectory: URL(fileURLWithPath: outputPath), format: .areaTarget,
-                                            progress: { _ in }, isCancelled: { false })
-                    await MainActor.run { self?.state = .preview(outputPath) }
-                } catch {
-                    // The saved scan is usable even when automatic ZIP creation fails.
-                    let message = error.localizedDescription
-                    await MainActor.run {
-                        self?.state = .preview(outputPath)
-                        self?.exportError = "扫描已保存，打包失败，可在导出中重试：\(message)"
-                    }
+                guard saved else { throw ScannerError.exportFailed(reason: "扫描数据未能保存") }
+                Task { @MainActor in
+                    self?.finishSavedScan(at: outputPath, sceneName: sceneName)
                 }
             } catch {
                 let msg = error.localizedDescription
-                await MainActor.run { self?.state = .error(msg) }
+                Task { @MainActor in
+                    self?.captureSceneName = nil
+                    self?.state = .error(msg)
+                }
             }
         }
     }
 
     func resetToReady() {
-        guard !isExporting else { return }
+        guard !isExporting, !isCaptureBusy else { return }
         locationService.stop()
         stopProgressUpdates()
         progress = ScanProgress(
@@ -298,13 +353,94 @@ final class ScanViewModel: ObservableObject {
     private func makeExportPath() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
-        return documentsDirectory.appendingPathComponent("scan_\(formatter.string(from: Date()))").path
+        var date = Date()
+        while true {
+            let directory = documentsDirectory.appendingPathComponent("scan_\(formatter.string(from: date))")
+            let candidates = [directory] + ScanExportFormat.allCases.map { $0.archiveURL(for: directory) }
+            if candidates.allSatisfy({ !FileManager.default.fileExists(atPath: $0.path) }) {
+                return directory.path
+            }
+            date = date.addingTimeInterval(1)
+        }
+    }
+
+    // MARK: - Shared Scene Names
+
+    func sceneName(for path: String) -> String {
+        let scanID = URL(fileURLWithPath: path).lastPathComponent
+        return savedSceneNames[scanID] ?? defaultSceneName(for: path)
+    }
+
+    @discardableResult
+    func renameScan(at path: String, to name: String) -> Bool {
+        guard !isCaptureBusy else {
+            namingError = "请等待当前扫描保存完成后再修改场景名称。"
+            return false
+        }
+        let directory = URL(fileURLWithPath: path).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard directory.deletingLastPathComponent().path == documentsDirectory.standardizedFileURL.path,
+              ScanHistoryItem.parseDate(from: directory.lastPathComponent) != nil,
+              FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            namingError = "找不到这条扫描记录，无法修改名称。"
+            return false
+        }
+        do {
+            let normalized = try ScanMetadataStore.normalizedName(name)
+            try metadataStore.setSceneName(normalized, for: directory.lastPathComponent)
+            savedSceneNames[directory.lastPathComponent] = normalized
+            if let index = scanHistory.firstIndex(where: { $0.id == directory.lastPathComponent }) {
+                scanHistory[index].sceneName = normalized
+            }
+            namingError = nil
+            lastMetadataReadError = nil
+            return true
+        } catch {
+            namingError = error.localizedDescription
+            return false
+        }
+    }
+
+    private func defaultSceneName(for path: String) -> String {
+        let scanID = URL(fileURLWithPath: path).lastPathComponent
+        guard let date = ScanHistoryItem.parseDate(from: scanID) else { return scanID }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return "扫描 \(formatter.string(from: date))"
+    }
+
+    private func refreshSceneNames() {
+        do {
+            savedSceneNames = try metadataStore.sceneNames()
+            lastMetadataReadError = nil
+        } catch {
+            let message = error.localizedDescription
+            if lastMetadataReadError != message {
+                namingError = message
+                lastMetadataReadError = message
+            }
+        }
+    }
+
+    private func finishSavedScan(at path: String, sceneName: String) {
+        var nameSaveError: String?
+        do {
+            try metadataStore.setSceneName(sceneName, for: URL(fileURLWithPath: path).lastPathComponent)
+        } catch {
+            nameSaveError = "扫描已保存，但场景名称保存失败：\(error.localizedDescription)"
+        }
+        loadScanHistory()
+        if let nameSaveError { namingError = nameSaveError }
+        draftSceneName = ""
+        captureSceneName = nil
+        state = .preview(path)
     }
 
     // MARK: - Scan History
 
     /// 加载 Documents 目录下所有 scan_ 开头的扫描记录
     func loadScanHistory() {
+        refreshSceneNames()
         let fm = FileManager.default
         let docsPath = documentsDirectory.path
 
@@ -326,7 +462,8 @@ final class ScanViewModel: ObservableObject {
                 id: name,
                 directoryPath: dirPath,
                 date: date,
-                formattedDate: displayFormatter.string(from: date)
+                formattedDate: displayFormatter.string(from: date),
+                sceneName: savedSceneNames[name]
             )
 
             // 读取元数据
@@ -360,7 +497,10 @@ final class ScanViewModel: ObservableObject {
 
     /// 删除一条扫描记录（目录 + ZIP）
     func deleteScan(_ item: ScanHistoryItem) {
-        guard !isExporting else { return }
+        guard !isExporting, !isCaptureBusy else {
+            deletionError = "请等待当前扫描或导出完成后再删除扫描。"
+            return
+        }
         if let reason = deletionBlockReason?(item.directoryPath)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !reason.isEmpty {
             deletionError = reason
@@ -372,16 +512,29 @@ final class ScanViewModel: ObservableObject {
         }
         deletionError = nil
         let fm = FileManager.default
-        try? fm.removeItem(atPath: item.directoryPath)
-        for format in ScanExportFormat.allCases {
-            try? fm.removeItem(at: format.archiveURL(for: URL(fileURLWithPath: item.directoryPath)))
+        do {
+            // Remove archives first, retaining the native scan if archive cleanup fails.
+            for format in ScanExportFormat.allCases {
+                let archive = format.archiveURL(for: URL(fileURLWithPath: item.directoryPath))
+                if fm.fileExists(atPath: archive.path) { try fm.removeItem(at: archive) }
+            }
+            try fm.removeItem(atPath: item.directoryPath)
+        } catch {
+            deletionError = "删除扫描失败：\(error.localizedDescription)"
+            return
         }
         scanHistory.removeAll { $0.id == item.id }
+        savedSceneNames.removeValue(forKey: item.id)
+        do {
+            try metadataStore.removeSceneName(for: item.id)
+        } catch {
+            deletionError = "扫描已删除，但名称记录清理失败：\(error.localizedDescription)"
+        }
     }
 
     /// 显示历史列表
     func showHistory() {
-        guard !isExporting else { return }
+        guard !isExporting, !isCaptureBusy else { return }
         loadScanHistory()
         state = .history
     }

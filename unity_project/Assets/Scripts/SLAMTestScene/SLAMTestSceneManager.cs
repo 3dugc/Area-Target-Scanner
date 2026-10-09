@@ -51,6 +51,12 @@ public class SLAMTestSceneManager : MonoBehaviour
     private int _lastImageW, _lastImageH;
     private int _lastGrayscaleNonZero;
     private long _lastCaptureTimestampNs = -1;
+    public ICaptureClockMapper CaptureClockMapper { get; set; }
+    public bool PoseSampleIsFrameBound { get; set; }
+    private ulong _trackingEpoch;
+    private uint _lastPlatformTrackingQuality;
+    private Camera _captureCamera;
+    private ulong _cameraIdentity;
 
     private const long MaxLocalizationResultAgeNs = 1_000_000_000L;
 
@@ -210,9 +216,28 @@ public class SLAMTestSceneManager : MonoBehaviour
         debugPanel?.SetStatus(string.Join("\n", log), Color.green);
     }
 
+    private uint ObservePlatformTracking()
+    {
+        uint quality = ARSession.state == ARSessionState.SessionTracking ? 2u : 1u;
+        if (_lastPlatformTrackingQuality == 2 && quality != 2)
+        {
+            _trackingEpoch++;
+            // Platform lifecycle loss is explicit even when no CPU image arrives.
+            _tracker?.Reset();
+        }
+        _lastPlatformTrackingQuality = quality;
+        return quality;
+    }
+
     private void OnCameraFrameReceived(ARCameraFrameEventArgs args)
     {
         if (!_initialized || _tracker == null) return;
+        Camera captureCamera = Camera.main;
+        if (captureCamera == null) return;
+        if (_captureCamera != captureCamera) { _captureCamera = captureCamera; _cameraIdentity++; }
+        uint captureQuality = ObservePlatformTracking();
+        var capturePose = new CapturePoseSnapshot(args.timestampNs, LocalizationClock.NowTimestampNs,
+            captureCamera.transform.localToWorldMatrix, _trackingEpoch, captureQuality, PoseSampleIsFrameBound);
         _totalFramesProcessed++;
 
         if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage))
@@ -221,6 +246,14 @@ public class SLAMTestSceneManager : MonoBehaviour
             return;
         }
         _framesWithImage++;
+
+        if (!CaptureFrameBinding.TryBind(cpuImage.timestamp, capturePose, CaptureClockMapper,
+            _cameraIdentity, out var captureBinding))
+        {
+            cpuImage.Dispose();
+            return;
+        }
+        Matrix4x4 captureIntrinsics = BuildIntrinsicsMatrix(cpuImage.width, cpuImage.height);
 
         var convParams = new XRCpuImage.ConversionParams
         {
@@ -247,7 +280,7 @@ public class SLAMTestSceneManager : MonoBehaviour
             if (gray[i] > 0) nonZero++;
         _lastGrayscaleNonZero = nonZero;
 
-        Matrix4x4 intrinsics = BuildIntrinsicsMatrix(_lastImageW, _lastImageH);
+        Matrix4x4 intrinsics = captureIntrinsics;
         _lastIntrinsicsFx = intrinsics.m00;
 
         Camera arCamera = Camera.main;
@@ -258,6 +291,7 @@ public class SLAMTestSceneManager : MonoBehaviour
             return;
         }
 
+        _lastCaptureTimestampNs = captureBinding.CaptureTimestampNs;
         var frame = new CameraFrame
         {
             ImageData = gray,
@@ -265,9 +299,10 @@ public class SLAMTestSceneManager : MonoBehaviour
             Height = _lastImageH,
             Intrinsics = intrinsics,
             FrameId = _totalFramesProcessed,
-            CaptureTimestampNs = GetMonotonicCaptureTimestampNs(args),
+            CaptureTimestampNs = captureBinding.CaptureTimestampNs,
+            TrackingMetadata = captureBinding.TrackingMetadata,
             Orientation = ImageOrientation.LandscapeRight,
-            UnityWorldFromCamera = arCamera.transform.localToWorldMatrix,
+            UnityWorldFromCamera = captureBinding.UnityWorldFromCamera,
             MapId = _tracker.MapId
         };
 
@@ -275,15 +310,7 @@ public class SLAMTestSceneManager : MonoBehaviour
             _framesSkipped++;
     }
 
-    private long GetMonotonicCaptureTimestampNs(ARCameraFrameEventArgs args)
-    {
-        long candidate = args.timestampNs ?? ((long)_totalFramesProcessed * 1_000_000L);
-        if (candidate <= _lastCaptureTimestampNs)
-            candidate = _lastCaptureTimestampNs + 1;
 
-        _lastCaptureTimestampNs = candidate;
-        return candidate;
-    }
 
     /// <summary>
     /// Main-thread result consumption. Native work has already completed inside
@@ -295,7 +322,7 @@ public class SLAMTestSceneManager : MonoBehaviour
             return;
 
         if (!_tracker.TryGetLatestTrackingResult(
-            _lastCaptureTimestampNs,
+            LocalizationClock.NowTimestampNs,
             MaxLocalizationResultAgeNs,
             out TrackingResult result))
         {
@@ -325,6 +352,11 @@ public class SLAMTestSceneManager : MonoBehaviour
 
     private void HandleTrackingResult(TrackingResult result)
     {
+        if (result.State != AreaTargetPlugin.TrackingState.TRACKING)
+        {
+            if (_originCube != null) _originCube.SetActive(false);
+            if (_glbModelObj != null) _glbModelObj.SetActive(false);
+        }
         switch (result.State)
         {
             case AreaTargetPlugin.TrackingState.TRACKING:
@@ -590,6 +622,7 @@ public class SLAMTestSceneManager : MonoBehaviour
 
     void Update()
     {
+        if (_initialized) ObservePlatformTracking();
         ConsumeLatestTrackingResult();
 
         _fpsFrameCount++;

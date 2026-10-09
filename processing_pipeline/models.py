@@ -196,4 +196,3 @@ class ScanInput:
     mtl_path: str
     images: List[dict]  # [{"path": str, "pose": NDArray (4,4)}]
     intrinsics: Optional[dict]
-

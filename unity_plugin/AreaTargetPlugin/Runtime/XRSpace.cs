@@ -13,6 +13,7 @@ namespace AreaTargetPlugin.PointCloudLocalization
 
         public async Task SceneUpdate(SceneUpdateData data)
         {
+            if (data.SetVisibility) gameObject.SetActive(data.Visible);
             if (data.Ignore) return;
 
             if (ProcessPoses)
@@ -33,7 +34,12 @@ namespace AreaTargetPlugin.PointCloudLocalization
         }
 
         public void AddProcessor(IDataProcessor<SceneUpdateData> processor)
-            => _processors.Add(processor);
+        {
+            // Localization poses are already filtered by the shared native Session.
+            // Keep this legacy registration source-compatible without filtering twice.
+            if (processor is KalmanDataProcessor) return;
+            _processors.Add(processor);
+        }
 
         private async void OnDestroy()
         {
