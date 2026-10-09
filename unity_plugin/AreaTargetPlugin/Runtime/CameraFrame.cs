@@ -38,6 +38,8 @@ namespace AreaTargetPlugin
         /// </summary>
         public Matrix4x4? UnityWorldFromCamera;
 
+        public LocalizationTrackingMetadata? TrackingMetadata;
+
         /// <summary>
         /// Creates the immutable runtime payload and rejects incomplete legacy frames.
         /// </summary>
@@ -65,7 +67,8 @@ namespace AreaTargetPlugin
                     new Vector4(Intrinsics.m00, Intrinsics.m11, Intrinsics.m02, Intrinsics.m12),
                     Orientation,
                     UnityWorldFromCamera.Value,
-                    MapId);
+                    MapId,
+                    TrackingMetadata);
                 return true;
             }
             catch (ArgumentException exception)

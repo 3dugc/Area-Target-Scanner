@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Combine
 @testable import AreaTargetScanner
 
 @MainActor
@@ -30,6 +31,312 @@ final class ImmersalMappingTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTFail("Operation failed to finish")
+    }
+
+    func testConcreteStagesCoverTheWholeUploadAndClearWhenFinished() async throws {
+        let vm = model()
+        var stages: [ImmersalOperationStage] = []
+        let observation = vm.$operationStage.compactMap { $0 }.sink { stages.append($0) }
+        defer { observation.cancel() }
+        start(vm)
+        let id = try XCTUnwrap(vm.jobs.first?.id)
+        XCTAssertEqual(vm.operationStage, .preparingFrames)
+        XCTAssertEqual(vm.busyJobID, id)
+        await wait(vm)
+        XCTAssertEqual(stages, [.preparingFrames, .checkingWorkspace, .uploading, .checkingWorkspace, .submittingMap])
+        XCTAssertNil(vm.operationStage)
+        XCTAssertNil(vm.busyJobID)
+        XCTAssertTrue(ImmersalOperationStage.allCases.allSatisfy { !$0.title.isEmpty })
+    }
+
+    func testLoginStageCanBeInterruptedWithoutSavingLateCredentials() async throws {
+        credentials.value = nil
+        api.loginSuspended = true
+        let vm = model()
+        vm.login(email: "person@example.com", password: "secret")
+        XCTAssertEqual(vm.operationStage, .login)
+        XCTAssertNil(vm.busyJobID)
+        await waitUntil { self.api.releaseLogin != nil }
+        vm.pause()
+        XCTAssertNil(vm.operationStage)
+        XCTAssertFalse(vm.isBusy)
+        api.releaseLogin?()
+        await drainLateResponse()
+        XCTAssertFalse(vm.isLoggedIn)
+        XCTAssertNil(credentials.value)
+    }
+
+    func testImmediatePauseDoesNotRestorePreparationProgressFromCancelledWorker() async {
+        let vm = model()
+        start(vm)
+        vm.pause()
+        await drainLateResponse()
+        XCTAssertFalse(vm.isBusy)
+        XCTAssertNil(vm.operationStage)
+        XCTAssertNil(vm.busyJobID)
+        XCTAssertEqual(vm.progressText, "")
+        XCTAssertTrue(api.events.isEmpty)
+    }
+
+    func testImmediateInterruptBeforeReadOnlyWorkerStartsSendsNoRequest() async throws {
+        var job = fixtureJob(); job.phase = .workspaceConflict; job.frameCount = 2
+        try store.save([job])
+        let vm = model()
+        vm.requestWorkspaceRestart(jobID: job.id)
+        vm.pause()
+        await drainLateResponse()
+        XCTAssertTrue(api.events.isEmpty)
+        XCTAssertEqual(vm.jobs, [job])
+        XCTAssertNil(vm.workspaceConfirmation)
+    }
+
+    func testReadOnlyWorkspaceStageIdentifiesJobAndPausePreservesUncertainIntent() async throws {
+        var job = fixtureJob()
+        job.phase = .captureUncertain; job.pendingOperation = .capture; job.frameCount = 2
+        try store.save([job])
+        api.statusSuspended = true
+        let vm = model()
+        vm.requestWorkspaceRestart(jobID: job.id)
+        XCTAssertEqual(vm.operationStage, .checkingWorkspace)
+        XCTAssertEqual(vm.busyJobID, job.id)
+        XCTAssertNil(vm.activeJobID)
+        await waitUntil { self.api.releaseStatus != nil }
+        vm.pause()
+        XCTAssertEqual(vm.jobs.first?.phase, .captureUncertain)
+        XCTAssertEqual(vm.jobs.first?.pendingOperation, .capture)
+        XCTAssertNil(vm.busyJobID)
+        XCTAssertNil(vm.operationStage)
+        api.releaseStatus?()
+        await drainLateResponse()
+        XCTAssertNil(vm.workspaceConfirmation)
+        XCTAssertEqual(api.events, ["status"])
+    }
+
+    func testPausePreservesUnknownMutationForCaptureClearAndConstruction() async throws {
+        for operation in ImmersalMappingJob.PendingOperation.allTestCases {
+            api = MappingFakeAPI()
+            try store.save([])
+            let vm = model()
+            if operation == .clear {
+                api.imageCount = 4
+                start(vm)
+                await wait(vm)
+                api.clearSuspended = true
+                vm.restartAfterClearingWorkspace(jobID: try XCTUnwrap(vm.jobs.first?.id))
+                await waitUntil { self.api.releaseClear != nil }
+                XCTAssertEqual(vm.operationStage, .clearingWorkspace)
+            } else {
+                api.captureSuspended = operation == .capture
+                api.constructSuspended = operation == .construct
+                start(vm)
+                await waitUntil { operation == .capture ? self.api.releaseCapture != nil : self.api.releaseConstruct != nil }
+                XCTAssertEqual(vm.operationStage, operation == .capture ? .uploading : .submittingMap)
+                if operation == .capture { XCTAssertEqual(vm.progressText, "正在上传第 1/2 帧") }
+            }
+            vm.pause()
+            XCTAssertNil(vm.operationStage)
+            XCTAssertNil(vm.busyJobID)
+            XCTAssertEqual(vm.jobs.first?.pendingOperation, operation)
+            XCTAssertEqual(vm.jobs.first?.phase, operation == .construct ? .constructionUncertain : .captureUncertain)
+            switch operation {
+            case .capture: api.releaseCapture?()
+            case .clear: api.releaseClear?()
+            case .construct: api.releaseConstruct?()
+            }
+            await drainLateResponse()
+            XCTAssertEqual(vm.jobs.first?.pendingOperation, operation)
+        }
+    }
+
+    func testDeleteDuringPreparationCancelsWithoutNetworkAndRetainsScanAndArchives() async throws {
+        let frames = MappingGateFrames()
+        let directory = root.appendingPathComponent("scan_fixture")
+        let payload = directory.appendingPathComponent("poses.json")
+        let bytes = Data("scan unchanged".utf8)
+        try bytes.write(to: payload)
+        for format in ScanExportFormat.allCases { try bytes.write(to: format.archiveURL(for: directory)) }
+        let vm = ImmersalMappingModel(api: api, credentials: credentials, store: store, frames: frames, documentsDirectory: root)
+        start(vm)
+        await fulfillment(of: [frames.started], timeout: 3)
+        let id = try XCTUnwrap(vm.jobs.first?.id)
+        XCTAssertEqual(vm.operationStage, .preparingFrames)
+        XCTAssertTrue(vm.deleteJob(jobID: id))
+        XCTAssertFalse(vm.isBusy)
+        XCTAssertNil(vm.busyJobID)
+        XCTAssertNil(vm.operationStage)
+        frames.release.signal()
+        await fulfillment(of: [frames.finished], timeout: 3)
+        await drainLateResponse()
+        XCTAssertTrue(vm.jobs.isEmpty)
+        XCTAssertTrue(try store.load().isEmpty)
+        XCTAssertTrue(api.events.isEmpty)
+        XCTAssertFalse(vm.blocksDeletion(of: directory.path))
+        XCTAssertEqual(try Data(contentsOf: payload), bytes)
+        for format in ScanExportFormat.allCases { XCTAssertEqual(try Data(contentsOf: format.archiveURL(for: directory)), bytes) }
+    }
+
+    func testDeleteDuringReadOnlyCheckSuppressesLateConfirmationWithoutMutatingCloud() async throws {
+        var job = fixtureJob(); job.phase = .workspaceConflict; job.frameCount = 2
+        try store.save([job])
+        api.imageCount = 7; api.statusSuspended = true
+        let vm = model()
+        vm.requestWorkspaceRestart(jobID: job.id)
+        await waitUntil { self.api.releaseStatus != nil }
+        XCTAssertEqual(vm.busyJobID, job.id)
+        XCTAssertNil(vm.activeJobID)
+        XCTAssertTrue(vm.deleteJob(jobID: job.id))
+        XCTAssertFalse(vm.isBusy)
+        api.releaseStatus?()
+        await drainLateResponse()
+        XCTAssertTrue(vm.jobs.isEmpty)
+        XCTAssertTrue(try store.load().isEmpty)
+        XCTAssertNil(vm.workspaceConfirmation)
+        XCTAssertEqual(api.events, ["status"])
+        XCTAssertEqual(api.imageCount, 7)
+    }
+
+    func testDeletingCaptureCannotLetItsLateResponseFinishANewerWorker() async throws {
+        api.captureSuspended = true
+        let vm = model()
+        start(vm)
+        await waitUntil { self.api.releaseCapture != nil }
+        let deletedID = try XCTUnwrap(vm.jobs.first?.id)
+        XCTAssertTrue(vm.deleteJob(jobID: deletedID))
+        api.captureSuspended = false; api.statusSuspended = true
+        start(vm)
+        await waitUntil { self.api.releaseStatus != nil }
+        let newID = try XCTUnwrap(vm.jobs.first?.id)
+        XCTAssertNotEqual(deletedID, newID)
+        api.releaseCapture?()
+        await drainLateResponse()
+        XCTAssertTrue(vm.isBusy)
+        XCTAssertEqual(vm.busyJobID, newID)
+        XCTAssertEqual(vm.operationStage, .checkingWorkspace)
+        XCTAssertEqual(vm.jobs.map(\.id), [newID])
+        vm.pause()
+        api.releaseStatus?()
+        await drainLateResponse()
+        XCTAssertFalse(api.events.contains("construct"))
+    }
+
+    func testDeleteDuringClearOrConstructionSuppressesLateStateChanges() async throws {
+        for clear in [true, false] {
+            api = MappingFakeAPI()
+            try store.save([])
+            let vm = model()
+            if clear {
+                api.imageCount = 4
+                start(vm)
+                await wait(vm)
+                api.clearSuspended = true
+                vm.restartAfterClearingWorkspace(jobID: try XCTUnwrap(vm.jobs.first?.id))
+                await waitUntil { self.api.releaseClear != nil }
+            } else {
+                api.constructSuspended = true
+                start(vm)
+                await waitUntil { self.api.releaseConstruct != nil }
+            }
+            let id = try XCTUnwrap(vm.jobs.first?.id)
+            XCTAssertTrue(vm.deleteJob(jobID: id))
+            let sentRequests = api.events
+            if clear { api.releaseClear?() } else { api.releaseConstruct?() }
+            await drainLateResponse()
+            XCTAssertFalse(vm.isBusy)
+            XCTAssertNil(vm.operationStage)
+            XCTAssertTrue(vm.jobs.isEmpty)
+            XCTAssertTrue(try store.load().isEmpty)
+            XCTAssertEqual(api.events, sentRequests, "Deletion must not issue any cloud cleanup or follow-on upload")
+        }
+    }
+
+    func testDeletingAnotherRecordDoesNotInterruptCurrentWorker() async throws {
+        var completed = fixtureJob(); completed.phase = .done; completed.mapID = 77
+        try store.save([completed])
+        api.statusSuspended = true
+        let vm = model()
+        start(vm)
+        await waitUntil { self.api.releaseStatus != nil }
+        let activeID = try XCTUnwrap(vm.activeJobID)
+        XCTAssertTrue(vm.deleteJob(jobID: completed.id))
+        XCTAssertTrue(vm.isBusy)
+        XCTAssertEqual(vm.activeJobID, activeID)
+        XCTAssertEqual(vm.busyJobID, activeID)
+        XCTAssertEqual(vm.operationStage, .checkingWorkspace)
+        XCTAssertEqual(vm.jobs.map(\.id), [activeID])
+        api.statusSuspended = false
+        api.releaseStatus?()
+        await wait(vm)
+        XCTAssertEqual(vm.jobs.first?.mapID, 123)
+    }
+
+    func testDeletingCurrentAccountRecordsPreservesOtherAccountsAndAllowsCloudQueuedRecords() throws {
+        var other = fixtureJob(userID: 8); other.phase = .done; other.mapID = 88
+        var queued = fixtureJob(); queued.phase = .pending; queued.mapID = 77
+        var finished = fixtureJob(); finished.phase = .done; finished.mapID = 99
+        try store.save([other, queued, finished])
+        let vm = model()
+        XCTAssertFalse(vm.deleteJob(jobID: other.id))
+        XCTAssertTrue(vm.deleteJob(jobID: queued.id))
+        XCTAssertTrue(vm.deleteJob(jobID: finished.id))
+        XCTAssertTrue(vm.jobs.isEmpty)
+        XCTAssertEqual(try store.load(), [other])
+        XCTAssertTrue(api.events.isEmpty)
+    }
+
+    func testDeleteSaveFailureRetainsRecordAndReportsFailure() throws {
+        var job = fixtureJob(); job.phase = .done; job.mapID = 123
+        try store.save([job])
+        let vm = model()
+        try FileManager.default.removeItem(at: store.url)
+        try FileManager.default.createDirectory(at: store.url, withIntermediateDirectories: true)
+        XCTAssertFalse(vm.deleteJob(jobID: job.id))
+        XCTAssertEqual(vm.jobs, [job])
+        XCTAssertNotNil(vm.errorMessage)
+        XCTAssertTrue(api.events.isEmpty)
+    }
+
+    func testLateRefreshDoesNotResurrectDeletedQueuedMap() async throws {
+        var job = fixtureJob(); job.phase = .pending; job.mapID = 123; job.frameCount = 2
+        try store.save([job])
+        api.remoteName = job.mapName; api.jobsSuspended = true
+        let vm = model()
+        let refresh = Task { await vm.refreshJobs() }
+        await waitUntil { self.api.releaseJobs != nil }
+        XCTAssertTrue(vm.deleteJob(jobID: job.id))
+        api.releaseJobs?()
+        await refresh.value
+        XCTAssertTrue(vm.jobs.isEmpty)
+        XCTAssertTrue(try store.load().isEmpty)
+        XCTAssertEqual(api.events, ["list"])
+    }
+
+    func testDeleteDismissesOnlyItsPendingWorkspaceConfirmation() async throws {
+        api.imageCount = 4
+        let vm = model()
+        start(vm)
+        await wait(vm)
+        let confirmation = try XCTUnwrap(vm.workspaceConfirmation)
+        XCTAssertTrue(vm.deleteJob(jobID: confirmation.jobID))
+        XCTAssertNil(vm.workspaceConfirmation)
+        vm.restartAfterClearingWorkspace(jobID: confirmation.jobID, confirmation: confirmation)
+        XCTAssertEqual(api.events, ["status"])
+        XCTAssertTrue(vm.jobs.isEmpty)
+    }
+
+    private func fixtureJob(userID: Int = 7) -> ImmersalMappingJob {
+        ImmersalMappingJob(id: UUID(), userID: userID, scanName: "scan_fixture", mapName: "UniqueMap", createdAt: Date())
+    }
+
+    private func waitUntil(_ predicate: () -> Bool) async {
+        for _ in 0..<300 {
+            if predicate() { return }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Expected suspended operation did not start")
+    }
+
+    private func drainLateResponse() async {
+        try? await Task.sleep(nanoseconds: 30_000_000)
     }
 
     func testDisplayNameHidesOnlyThisJobsGeneratedSuffix() {
@@ -675,6 +982,12 @@ private struct MappingFakeFrames: ImmersalFramePreparing {
 
 private final class MappingFakeAPI: ImmersalAPI {
     var events: [String] = []
+    var loginSuspended = false
+    var releaseLogin: (() -> Void)?
+    var clearSuspended = false
+    var releaseClear: (() -> Void)?
+    var constructSuspended = false
+    var releaseConstruct: (() -> Void)?
     var imageCount = 0
     var imageMax = 100
     var userID = 7
@@ -692,7 +1005,8 @@ private final class MappingFakeAPI: ImmersalAPI {
     var captureSuspended = false
     var releaseCapture: (() -> Void)?
     func login(email: String, password: String) async throws -> ImmersalCredential {
-        ImmersalCredential(email: email, userID: 7, token: "test-token")
+        if loginSuspended { await withCheckedContinuation { continuation in releaseLogin = { continuation.resume() } } }
+        return ImmersalCredential(email: email, userID: 7, token: "test-token")
     }
     func status(token: String) async throws -> ImmersalAccountStatus {
         events.append("status")
@@ -711,12 +1025,14 @@ private final class MappingFakeAPI: ImmersalAPI {
         events.append("clear")
         if let clearFailure, (clearFailure as? ImmersalAPIError)?.definitelyRejected == true { throw clearFailure }
         imageCount = 0
+        if clearSuspended { await withCheckedContinuation { continuation in releaseClear = { continuation.resume() } } }
         if let clearFailure { throw clearFailure }
     }
     func construct(name: String, token: String) async throws -> ImmersalConstruction {
         events.append("construct")
         if let constructFailure, (constructFailure as? ImmersalAPIError)?.definitelyRejected == true { throw constructFailure }
         remoteName = name
+        if constructSuspended { await withCheckedContinuation { continuation in releaseConstruct = { continuation.resume() } } }
         if let constructFailure { throw constructFailure }
         return ImmersalConstruction(id: 123, size: imageCount)
     }
@@ -732,6 +1048,8 @@ private final class MappingFakeAPI: ImmersalAPI {
 @MainActor
 final class ImmersalMappingViewTests: XCTestCase {
     func testSignedOutPreparationOffersUploadWithoutLoginUIOrCloudRequests() async throws {
+        let accessibilityScope = try HostedAccessibilityTestScope()
+        defer { accessibilityScope.restore() }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ImmersalView-\(UUID().uuidString)")
         let directory = root.appendingPathComponent("scan_20261005_180000")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -750,7 +1068,9 @@ final class ImmersalMappingViewTests: XCTestCase {
         host.view.frame = window.bounds
         try await Task.sleep(nanoseconds: 100_000_000)
         host.view.layoutIfNeeded()
-        let nodes = accessibilityNodes(in: host.view)
+        let nodes = try await HostedAccessibilityTestScope.waitForNodes(in: host.view) {
+            HostedAccessibilityTestScope.hasEnabledButton("上传并建图", in: $0)
+        }
         XCTAssertTrue(nodes.contains {
             $0.accessibilityLabel == "上传并建图" && $0.accessibilityTraits.contains(.button)
                 && !$0.accessibilityTraits.contains(.notEnabled)
@@ -1266,5 +1586,22 @@ final class ImmersalMappingViewTests: XCTestCase {
         }
         visit(root)
         return nodes
+    }
+}
+
+private extension ImmersalMappingJob.PendingOperation {
+    static var allTestCases: [Self] { [.capture, .clear, .construct] }
+}
+
+private final class MappingGateFrames: ImmersalFramePreparing {
+    let started = XCTestExpectation(description: "preparation started")
+    let finished = XCTestExpectation(description: "preparation finished")
+    let release = DispatchSemaphore(value: 0)
+    func prepareUpload(scanDirectory: URL, isCancelled: () -> Bool) throws -> ImmersalUploadScan {
+        started.fulfill()
+        defer { finished.fulfill() }
+        _ = release.wait(timeout: .now() + 3)
+        if isCancelled() { throw CancellationError() }
+        return try MappingFakeFrames().prepareUpload(scanDirectory: scanDirectory, isCancelled: isCancelled)
     }
 }

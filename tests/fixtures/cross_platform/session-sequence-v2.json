@@ -1,0 +1,54 @@
+{
+  "api_version": 2,
+  "coordinate_fixture": "coordinate-contract-v2.json",
+  "configuration_scope": "test inputs only; production thresholds must be supplied from device evaluation",
+  "window_size": 5,
+  "initialization_samples": 3,
+  "recovery_samples": 2,
+  "max_translation_residual_m": 0.25,
+  "max_rotation_residual_rad": 0.08726646259971647,
+  "max_pose_skew_ns": 5000000,
+  "max_alignment_age_ns": 1000000000,
+  "max_result_age_ns": 100000000,
+  "smoothing_tau_seconds": 0.0,
+  "sequence": [
+    {
+      "event": "raw_without_tracking",
+      "mode": "RAW",
+      "raw_pose_valid": true,
+      "alignment_valid": false
+    },
+    {
+      "event": "three_consistent_visual_tracking_pairs",
+      "state": "TRACKING",
+      "mode": "ALIGNED"
+    },
+    {
+      "event": "fresh_tracking_no_match",
+      "mode": "PROPAGATED",
+      "raw_pose_valid": false,
+      "propagated_pose_valid": true
+    },
+    {
+      "event": "alignment_age_exceeded",
+      "state": "LOST",
+      "alignment_valid": false
+    },
+    {
+      "event": "two_consistent_recovery_pairs",
+      "state": "TRACKING",
+      "mode": "ALIGNED"
+    },
+    {
+      "event": "reset_new_generation_and_tracking_epoch",
+      "state": "INITIALIZING",
+      "old_raw": "STALE_FRAME"
+    }
+  ],
+  "propagation": "world_from_scan retains the visual alignment; camera_from_scan is inverse(world_from_camera)*world_from_scan and is valid only under propagated_pose_valid; raw_pose_valid remains false",
+  "result_age_scope": "host checks submit/delivery time against capture time; Session update has no host-now argument and does not guess a clock epoch",
+  "residuals": "relative translation norm and SO(3) rotation angle are checked separately, invariant under a rigid change of world origin",
+  "smoothing": "alpha=1-exp(-accepted_capture_delta_seconds/tau), linear translation and shortest-arc SO(3) interpolation; tau=0 disables smoothing",
+  "bootstrap_and_recovery": "Before alignment is ready, an inconsistent candidate restarts the window with that candidate as its seed; only the configured number of subsequent mutually consistent candidate samples publishes alignment. An inconsistent sample never replaces an established alignment.",
+  "reset_epoch": "An explicit reset pins generation and tracking epoch; any mismatched epoch is rejected before touching current alignment, including late old tracking samples with a newer valid Raw frame."
+}

@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 import pytest
 
+from processing_pipeline import feature_extraction
+from processing_pipeline.models import FeatureDatabase
 from processing_pipeline.optimized_pipeline import OptimizedPipeline
 
 
@@ -120,4 +122,32 @@ def test_v2_policy_cannot_reuse_previous_preparation_cache(monkeypatch):
     from web_service import app as app_module
     monkeypatch.setattr(app_module, "PIPELINE_CACHE_VERSION", "v2")
     previous = hashlib.sha256("scan:quality:0:v2".encode()).hexdigest()
+    assert app_module._make_input_hash("scan", "quality", False) != previous
+
+
+def test_optimized_profiles_enable_versioned_selection_without_changing_limits(monkeypatch):
+    calls = []
+    monkeypatch.setattr(OptimizedPipeline, "_trimesh_to_o3d", lambda self, mesh: mesh)
+    monkeypatch.setattr(feature_extraction, "build_feature_database",
+                        lambda *args, **kwargs: calls.append(kwargs) or FeatureDatabase(keyframes=[]))
+    OptimizedPipeline(mobile_feature_limits=True).build_feature_database(None, [])
+    assert calls[-1]["keyframe_selection"] == "quality-coverage-v1"
+    assert calls[-1]["max_keyframes"] == 80
+    assert calls[-1]["orb_nfeatures"] == 2000
+    assert calls[-1]["max_akaze_features"] == 500
+
+
+def test_new_selection_cannot_reuse_previous_v2_feature_cache(monkeypatch):
+    from web_service import app as app_module
+    from processing_pipeline.scan_preparation import POLICY_V2
+    monkeypatch.setattr(app_module, "PIPELINE_CACHE_VERSION", "v3")
+    previous = hashlib.sha256(
+        f"scan:quality:0:0:v3:{cv2.__version__}:{POLICY_V2}".encode()).hexdigest()
+    assert app_module._make_input_hash("scan", "quality", False) != previous
+
+
+def test_new_selection_cannot_reuse_old_opencv5_feature_cache(monkeypatch):
+    from web_service import app as app_module
+    monkeypatch.setattr(app_module, "PIPELINE_CACHE_VERSION", "v3")
+    previous = hashlib.sha256(f"scan:quality:0:v3:{cv2.__version__}".encode()).hexdigest()
     assert app_module._make_input_hash("scan", "quality", False) != previous

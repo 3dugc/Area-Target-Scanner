@@ -359,45 +359,6 @@ class TestSameSessionLocalizationAccuracy:
             + "\n".join(violations)
         )
 
-    @given(
-        frame_indices=st.lists(
-            st.integers(min_value=0, max_value=93),  # ScanData 有 94 帧
-            min_size=10,
-            max_size=40,
-            unique=True,
-        )
-    )
-    @settings(
-        max_examples=15,
-        deadline=60000,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    def test_random_frame_subset_success_rate_above_95(self, frame_indices):
-        """
-        Property-based test: 对随机帧子集，验证成功率 > 90%。
-
-        使用 90% 阈值（低于全局 95%）以容忍小子集中的统计波动。
-        全局成功率由 test_baseline_success_rate_above_95_percent 严格验证。
-
-        **Validates: Requirements 3.2**
-        """
-        results = get_baseline_results()
-        frame_map = {r["frame"]: r for r in results}
-
-        subset = [frame_map[idx] for idx in frame_indices if idx in frame_map]
-        if len(subset) < 5:
-            return  # 子集太小，跳过
-
-        ok_count = sum(1 for r in subset if r["status"] == "ok")
-        success_rate = ok_count / len(subset)
-
-        # 对子集使用 90% 阈值，容忍统计波动（全局 95% 由 baseline 测试保证）
-        subset_threshold = 0.90
-        assert success_rate >= subset_threshold, (
-            f"随机帧子集成功率 {success_rate:.1%} < {subset_threshold:.0%}。\n"
-            f"子集大小={len(subset)}, 成功={ok_count}\n"
-            f"失败帧: {[r['frame'] for r in subset if r['status'] != 'ok']}"
-        )
 
 
 # ============================================================

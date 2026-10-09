@@ -25,9 +25,9 @@ namespace AreaTargetPlugin
     internal static class NativeLocalizerBridge
     {
 #if UNITY_IOS && !UNITY_EDITOR
-        private const string LibName = "__Internal";
+        internal const string LibName = "__Internal";
 #else
-        private const string LibName = "visual_localizer";
+        internal const string LibName = "visual_localizer";
 #endif
 
         [DllImport(LibName)] internal static extern IntPtr vl_create();
@@ -203,13 +203,15 @@ namespace AreaTargetPlugin
                     _checkedOutVersion = true;
                 }
 
-                if (_hasOutVersion)
+                else if (_hasOutVersion)
                 {
                     vl_process_frame_out_native(handle, imageData, width, height,
                         fx, fy, cx, cy,
                         hasUnityWorldFromCamera, unityWorldFromCamera, buf);
                 }
-                else
+                // A successful first probe already populated this frame's buffer.
+                // A missing entry point still needs the legacy path on this frame.
+                if (!_hasOutVersion)
                 {
                     // Original vl_process_frame returns VLResult by value.
                     // On iOS ARM64, large struct returns go via x8 register (pointer to caller-allocated space).

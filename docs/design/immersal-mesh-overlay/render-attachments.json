@@ -1,0 +1,38 @@
+[
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "3714FD58-944D-4020-A43E-AEE9D5DB0A57",
+        "deviceName": "iPhone 17 Pro",
+        "exportedFileName": "mesh-overlay-large-text.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "mesh-overlay-large-text_0_A11C0D2A-074E-4967-A14B-5079C34BE97D.png",
+        "timestamp": 1790755778.26,
+        "originalExportedFileName": "7E635DDE-9A5F-47B8-BC4F-93665D210359.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "3714FD58-944D-4020-A43E-AEE9D5DB0A57",
+        "deviceName": "iPhone 17 Pro",
+        "exportedFileName": "mesh-overlay-dark.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "mesh-overlay-dark_0_1FE708DC-903C-4ADC-96EC-AF4D3D911F85.png",
+        "timestamp": 1790755776.933,
+        "originalExportedFileName": "C792CE6F-C9E4-4663-9A62-F653697DDF1C.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "3714FD58-944D-4020-A43E-AEE9D5DB0A57",
+        "deviceName": "iPhone 17 Pro",
+        "exportedFileName": "mesh-overlay-light.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "mesh-overlay-light_0_BC544644-981B-4C69-B790-BC9C099576EB.png",
+        "timestamp": 1790755775.884,
+        "originalExportedFileName": "E4DDEB0B-90E3-489B-996A-2BE1283F39DB.png"
+      }
+    ],
+    "testIdentifier": "ImmersalMeshOverlayRenderTests/testWireframeAndControlsRenderInLightDarkAndLargeText()",
+    "testIdentifierURL": "test://com.apple.xcode/AreaTargetScanner/AreaTargetScannerTests/ImmersalMeshOverlayRenderTests/testWireframeAndControlsRenderInLightDarkAndLargeText"
+  }
+]

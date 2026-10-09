@@ -133,6 +133,7 @@ def build_feature_database(
     max_akaze_features: int | None = None,
     keyframe_selection: str = "even",
     mobile_feature_budget: str | MobileFeatureBudget | None = None,
+    map_clahe: bool = False,
 ) -> FeatureDatabase:
     """Extract ORB features from keyframes and build a visual feature database.
 
@@ -161,6 +162,8 @@ def build_feature_database(
             for each keyframe and store in akaze_* fields.
         max_akaze_features: Optional per-keyframe response-ranked AKAZE limit.
             None preserves legacy extraction; the explicit mobile producer uses 500.
+        map_clahe: Optional fixed CLAHE (clip 2, 8x8 tiles) on mapping grayscale
+            images only. False preserves the original grayscale extraction.
         mobile_feature_budget: Optional 'quality' / 'fast' mobile budget or its
             fixed MobileFeatureBudget configuration. Quotas apply after geometry
             eligibility and before vocabulary training, without dropping frames.
@@ -174,6 +177,9 @@ def build_feature_database(
 
     import cv2
     import numpy as np
+
+    if type(map_clahe) is not bool:
+        raise ValueError("map_clahe must be a bool")
 
     logger = logging.getLogger(__name__)
     feature_budget = resolve_mobile_feature_budget(mobile_feature_budget)
@@ -240,6 +246,9 @@ def build_feature_database(
             logger.warning("Could not read image: %s, skipping.", img_path)
             unreadable_indices.append(img_info.get("source_image_id", idx))
             continue
+
+        if map_clahe:
+            img_gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(img_gray)
 
         h, w = img_gray.shape[:2]
 

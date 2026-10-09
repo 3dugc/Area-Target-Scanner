@@ -177,10 +177,10 @@ namespace AreaTargetPlugin.Tests
         }
 
         /// <summary>
-        /// Validates Requirement 13.7: Low tracking quality (below default threshold 50) skips localization.
+        /// Raw localization continues at low platform quality; the shared core owns aligned-display acceptance.
         /// </summary>
         [Test]
-        public async Task RunFrame_LowTrackingQuality_SkipsLocalization()
+        public async Task RunFrame_LowTrackingQuality_StillRunsRawLocalization()
         {
             // Arrange
             _platform.Result = new PlatformUpdateResult
@@ -189,14 +189,34 @@ namespace AreaTargetPlugin.Tests
                 TrackingQuality = 20,
                 CameraData = new StubCameraData()
             };
+            _localizer.ResultToReturn = LocalizationResult.Failed();
 
             // Act
             var result = await _pipeline.RunFrame();
 
             // Assert
             Assert.IsFalse(result.Success);
-            Assert.IsFalse(_localizer.LocalizeCalled);
+            Assert.IsTrue(_localizer.LocalizeCalled);
             Assert.IsFalse(_sceneUpdater.UpdateSceneCalled);
+        }
+
+        [Test]
+        public async Task RunFrame_NullLocalizationResult_ReturnsFailedWithoutSceneUpdate()
+        {
+            _platform.Result = new PlatformUpdateResult
+            {
+                Success = true,
+                TrackingQuality = 100,
+                CameraData = new StubCameraData()
+            };
+            _localizer.ResultToReturn = null;
+
+            var result = await _pipeline.RunFrame();
+
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result.Success, Is.False);
+            Assert.That(_localizer.LocalizeCalled, Is.True);
+            Assert.That(_sceneUpdater.UpdateSceneCalled, Is.False);
         }
 
         /// <summary>
@@ -257,10 +277,10 @@ namespace AreaTargetPlugin.Tests
 
         /// <summary>
         /// Validates Requirement 2.6: Null ICameraData from platform.
-        /// The localizer receives null and returns Failed().
+        /// No captured image exists, so the host rejects it before raw localization.
         /// </summary>
         [Test]
-        public async Task RunFrame_NullCameraData_LocalizerReturnsFailed()
+        public async Task RunFrame_NullCameraData_RejectsCaptureBeforeLocalization()
         {
             // Arrange
             _platform.Result = new PlatformUpdateResult
@@ -275,7 +295,7 @@ namespace AreaTargetPlugin.Tests
 
             // Assert
             Assert.IsFalse(result.Success);
-            Assert.IsTrue(_localizer.LocalizeCalled);
+            Assert.IsFalse(_localizer.LocalizeCalled);
             Assert.IsNull(_localizer.LastCameraData);
             Assert.IsFalse(_sceneUpdater.UpdateSceneCalled);
         }

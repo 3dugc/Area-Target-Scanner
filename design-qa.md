@@ -1,3 +1,27 @@
+# Immersal 原扫描网格叠加（2026-09-30）
+
+已实现原扫描 OBJ 的青色线框叠加、模型与地图的本机坐标核对、开关与透明度，以及定位丢失/中断时隐藏。最终 iOS 回归319项通过，独立macOS加载器13项通过；大模型缓冲区保留问题已修复。最终版本已签名构建、覆盖安装并在 iPhone 15 Pro 上成功启动。原空间视觉对齐与用户地图质量仍待现场实测。详见 [网格叠加验证](docs/design/immersal-mesh-overlay/design-qa.md)。
+
+以下保留较早阶段的验证记录，测试数量及启动状态仅适用于相应版本。
+
+# Immersal 离线定位测试（2026-09-30）
+
+已完成下载缓存、原生离线定位、现场统计报告及原生界面检查。完整回归270项通过；最终质量suite16项和渲染suite3项通过。真机签名构建并覆盖安装完成，自动启动暂被锁屏拒绝。真实空间定位质量待现场采样。详见 [离线测试验证](docs/design/immersal-offline-test/design-qa.md)。
+
+# 当前 Immersal 任务控制验证
+
+已增加明确的任务阶段、中断和删除本机任务入口。最新验证见 [任务控制验证](docs/design/task-controls/design-qa.md)，[原生操作预览](docs/design/task-controls/task-controls-overview.png)。
+
+---
+
+# 当前平台工作区设计验证
+
+本次已实现三页导航、平台模式隔离、共享场景及命名/改名。当前验证记录见 [平台工作区设计验证](docs/design/platform-workspace/design-qa.md)，实际原生页面见 [页面预览](docs/design/platform-workspace/workspace-overview.png)。
+
+以下保留此前 Immersal 上传页的独立验证记录；其中测试数量与真机安装状态仅适用于当时版本。
+
+---
+
 # Immersal 上传页设计验证
 
 - Source visual truth：`docs/design/immersal-upload/selected-guided.png`，用户选定第 3 张「准备 → 上传 → 建图」。源图 852×1846 px。

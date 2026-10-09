@@ -6,7 +6,7 @@ namespace AreaTargetPlugin.PointCloudLocalization
 {
     /// <summary>
     /// Orchestrates the end-to-end localization pipeline:
-    /// IPlatformSupport.UpdatePlatform() → TrackingQuality threshold check →
+    /// IPlatformSupport.UpdatePlatform() → shared-core tracking metadata →
     /// ILocalizer.Localize() → MapManager.TryGetMapEntry() →
     /// ISceneUpdater.UpdateScene() → XRSpace.SceneUpdate() → IDataProcessor chain → Transform update.
     /// </summary>
@@ -17,8 +17,9 @@ namespace AreaTargetPlugin.PointCloudLocalization
         private readonly ISceneUpdater _sceneUpdater;
 
         /// <summary>
-        /// TrackingQuality threshold (0-100). Frames with quality below this value are skipped.
+        /// Deprecated source-compatible setting. The platform status is forwarded to core metadata.
         /// </summary>
+        [Obsolete("Tracking quality is passed to the shared C++ Session; this legacy threshold is unused.")]
         public int TrackingQualityThreshold { get; set; } = 50;
 
         /// <summary>
@@ -49,20 +50,23 @@ namespace AreaTargetPlugin.PointCloudLocalization
             catch (Exception ex)
             {
                 Debug.LogError($"[LocalizationPipeline] Platform update failed: {ex.Message}");
-                return LocalizationResult.Failed();
+                return await TrackingUnavailable();
             }
 
             // Step 2: Check platform success
-            if (!platformResult.Success)
+            if (platformResult == null || !platformResult.Success || platformResult.CameraData == null)
             {
-                return LocalizationResult.Failed();
+                return await TrackingUnavailable();
             }
 
-            // Step 3: Check tracking quality threshold
-            if (platformResult.TrackingQuality < TrackingQualityThreshold)
+            // Map the platform's documented 0..100 status to the core tracking enum.
+            // No host threshold, frame skip, confirmation, or hold policy remains.
+            if (_localizer is ILocalizationSessionLifecycle sessionHost)
             {
-                Debug.Log($"[LocalizationPipeline] TrackingQuality {platformResult.TrackingQuality} below threshold {TrackingQualityThreshold}, skipping frame.");
-                return LocalizationResult.Failed();
+                uint quality = platformResult.TrackingQuality == 100 ? 2u
+                    : platformResult.TrackingQuality > 0 ? 1u : 0u;
+                sessionHost.SetPlatformTrackingQuality(quality);
+                if (quality != 2) await sessionHost.ResetTrackingAsync();
             }
 
             // Step 4: Run localization
@@ -75,14 +79,17 @@ namespace AreaTargetPlugin.PointCloudLocalization
             catch (Exception ex)
             {
                 Debug.LogError($"[LocalizationPipeline] Localization failed: {ex.Message}");
-                return LocalizationResult.Failed();
+                return await TrackingUnavailable();
             }
 
+            // A custom localizer may produce no result; fail through the same
+            // capture-unavailable lifecycle instead of dereferencing an empty outcome.
+            if (localizationResult == null)
+                return await TrackingUnavailable();
+
             // Step 5: If localization failed, return early
-            if (!localizationResult.Success)
-            {
+            if (!localizationResult.Success && !(_localizer is ILocalizationSessionLifecycle))
                 return localizationResult;
-            }
 
             // Step 6: Look up map entry
             if (!MapManager.TryGetMapEntry(localizationResult.MapId, out var mapEntry))
@@ -102,6 +109,20 @@ namespace AreaTargetPlugin.PointCloudLocalization
             }
 
             return localizationResult;
+        }
+
+        private async Task<ILocalizationResult> TrackingUnavailable()
+        {
+            if (_localizer is ILocalizationSessionLifecycle sessionHost)
+            {
+                sessionHost.SetPlatformTrackingQuality(0);
+                await sessionHost.ResetTrackingAsync();
+                var failed = new LocalizationResult { Success = false, MapId = sessionHost.MapId };
+                if (MapManager.TryGetMapEntry(sessionHost.MapId, out var entry))
+                    await _sceneUpdater.UpdateScene(entry, null, failed);
+                return failed;
+            }
+            return LocalizationResult.Failed();
         }
 
         /// <summary>

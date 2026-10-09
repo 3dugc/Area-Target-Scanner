@@ -1,0 +1,125 @@
+{
+  "recordedAtUTC": "2026-10-08T07:08:34.872354+00:00",
+  "verifiedReleaseCommit": "f096061f5e0dd3cac1553b2fe3a2c32b12c8e404",
+  "releaseTree": "86039be7e6e0c5632b5b775d28e3dbe8e0ec3d9c",
+  "CI": {
+    "run": 37538073781,
+    "conclusion": "success"
+  },
+  "Deploy": {
+    "run": 37538073719,
+    "conclusion": "success"
+  },
+  "scannerImage": "hkccr.ccs.tencentyun.com/plugins/area-target-scanner:latest",
+  "optimizerImage": "hkccr.ccs.tencentyun.com/plugins/area-target-optimizer:latest",
+  "requestedPolicy": "mobile-scan-preparation-v2",
+  "requestedCapacityTier": 100,
+  "productionURL": "https://at.3dugc.com",
+  "publishedSmokeSHA256": "c0d9f17b77c8f96059915451ed2c2dc25b11206baddc6333a143fdbedb099555",
+  "deploymentStatus": "deployed-runtime-verified",
+  "workspaceChangesReleased": false,
+  "verifiedPublishedDigests": {
+    "scanner": "sha256:4ed9ea91e99eb96eeb2e4c224a7376610a92e15ee47e51dccf9d9586c92a1346",
+    "optimizer": "sha256:b0212db9acc838359d2624697cd87d1abaef155288bd9cba3da02bf8f0d1d188"
+  },
+  "managementEndpoint": "https://port.at.3dugc.com",
+  "stack": "area-target",
+  "stackId": 9,
+  "endpointId": 3,
+  "before": {
+    "revision": "3adf0337915bdbb07b5087a3b1dd88a577fa618b",
+    "scannerImageId": "sha256:00d0f53ca9eb672e9eb56f46ea15e816e37a132e5ddaff2361576e748ab91c13",
+    "optimizerImageId": "sha256:17dccb026099f995659d04cc7a234e45cc39f643b794c663e785958a0313a9c3",
+    "activeJobs": 0,
+    "statusCounts": {
+      "completed": 1
+    },
+    "persistentVolumes": [
+      "area-target_pipeline_uploads",
+      "area-target_pipeline_outputs",
+      "area-target_model_optimizer_temp"
+    ]
+  },
+  "verifiedAtUtc": "2026-10-08T07:22:09Z",
+  "after": {
+    "revision": "f096061f5e0dd3cac1553b2fe3a2c32b12c8e404",
+    "scannerContainerId": "c62ce5f6fce3f25cf417098c6460c3b9935789982dfd10c1e19f619369c5c6b4",
+    "optimizerContainerId": "e8342637b6df8c2b2c48d0db159036d2bb978cfd0b6a9f557169b53ecf4f0625",
+    "scannerImageId": "sha256:a601591a6b2690ae44cbb1831493c2123ed14869c45c5a01f66393bf361671bc",
+    "optimizerImageId": "sha256:49e8f0428150abfe80999d624f67bca395f02ad6e173b554a848e332edd0f8ce",
+    "scannerStartedAtLocal": "2026-10-08 15:18:34 +08:00",
+    "optimizerStartedAtLocal": "2026-10-08 15:18:28 +08:00",
+    "scannerHealth": "healthy",
+    "optimizerHealth": "healthy",
+    "publicHealth": {
+      "url": "https://at.3dugc.com/healthz",
+      "status": "ok"
+    },
+    "activeJobs": 0,
+    "statusCounts": {
+      "completed": 1
+    },
+    "stackConfigurationEdited": false,
+    "pruneServices": false,
+    "preservedVolumes": [
+      "area-target_pipeline_uploads",
+      "area-target_pipeline_outputs",
+      "area-target_model_optimizer_temp"
+    ],
+    "runtimeCapabilities": {
+      "verificationMethod": "read-only container import of processing_pipeline.scan_preparation.processing_requirements; web_service.app not imported",
+      "policy": "mobile-scan-preparation-v2",
+      "policyVersion": 2,
+      "capacityTier": 100,
+      "profiles": {
+        "fast": {
+          "maxFrames": 100,
+          "maximumLongEdge": 1600,
+          "minimumLongEdge": 1024,
+          "maximumTotalPixels": 200000000
+        },
+        "quality": {
+          "maxFrames": 100,
+          "maximumLongEdge": 1600,
+          "minimumLongEdge": 1024,
+          "maximumTotalPixels": 200000000
+        }
+      },
+      "criticalFrameProtection": {
+        "version": "critical-frame-protection-v1",
+        "riskVersion": "gray-quality-risk-v1",
+        "maximumProtectedFrames": 8,
+        "maximumProtectedLongEdge": 1920,
+        "sharpnessThreshold": 16,
+        "contrastThreshold": 20
+      }
+    },
+    "nativeDependencies": {
+      "opencv": "5.0.0",
+      "qualityLibrary": "/app/bin/libarea_target_quality.so",
+      "exportsVerified": [
+        "atc_assess_gray_quality",
+        "atc_select_keyframes_v2"
+      ]
+    },
+    "deployedSourceSha256": {
+      "/app/web_service/app.py": "64c9f722783b26c1cd8302911eee887dcb4cdbf7298dfb8b4d591dfb1dd95140",
+      "/app/processing_pipeline/scan_preparation.py": "717b1b502dab001af993f6cfab9e17d9a8ef9482a41e88df7a4fbdcc86eddbb5"
+    }
+  },
+  "verificationLimits": {
+    "authenticatedPublicV2ResponseVerified": false,
+    "reason": "Browser refused direct API navigation; no normal production CLI login credentials supplied. Browser session was not extracted.",
+    "full100ViewProductionJobVerified": false,
+    "phoneNewTaskNegotiationVerified": false,
+    "existingPreparedTasks": "Retain original preparation policy. Create a new task to negotiate v2."
+  },
+  "screenshots": {
+    "jobs-and-optimizer.jpg": {
+      "sha256": "e86f8b1b10f9d8be9e6c8883e943482d5f5edb1ac7f7a73691e8a0cd1d803daa"
+    },
+    "runtime-100.jpg": {
+      "sha256": "5054e0384a754909983cd0c447be8785cd94414f7d821d62feb1a58065b5980c"
+    }
+  }
+}

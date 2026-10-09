@@ -31,6 +31,9 @@ namespace AreaTargetPlugin.PointCloudLocalization
                 CaptureTimestampNs = cameraData.CaptureTimestampNs,
                 Orientation = cameraData.Orientation,
                 MapId = cameraData.MapId,
+                TrackingMetadata = cameraData is ILocalizationTrackingMetadataSource metadataSource
+                    ? metadataSource.TrackingMetadata
+                    : LocalizationTrackingMetadata.KnownClock(cameraData.CaptureTimestampNs),
                 UnityWorldFromCamera = Matrix4x4.TRS(
                     cameraData.CameraPositionOnCapture,
                     cameraData.CameraRotationOnCapture,

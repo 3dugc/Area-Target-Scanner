@@ -73,9 +73,10 @@ def test_create_protected_job_returns_sanitized_durable_identity(api):
     assert response.status_code == 202
     job = response.get_json()
     assert set(job) == {'job_id', 'status', 'progress', 'stage', 'message', 'profile', 'uv_unwrap',
-                        'created_at', 'finished_at', 'expires_at', 'error', 'result'}
+                        'created_at', 'finished_at', 'expires_at', 'error', 'result', 'map_clahe'}
     assert job['job_id'] == JOB_ID and job['stage'] == 'queued' and job['progress'] == 0
     assert job['error'] is None and job['result'] is None and job['uv_unwrap'] is True
+    assert job['map_clahe'] is False
     assert len(submissions) == 1
     stored = server.job_store.get(JOB_ID)
     assert stored['token_hash'] == hashlib.sha256(TOKEN.encode()).hexdigest()

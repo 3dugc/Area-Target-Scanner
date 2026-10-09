@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct ImmersalCredential: Codable, Equatable {
     let email: String
@@ -68,13 +69,19 @@ protocol ImmersalAPI {
     func jobs(token: String) async throws -> [ImmersalRemoteJob]
 }
 
+protocol ImmersalMapDownloading {
+    func downloadMap(mapID: Int, token: String) async throws -> Data
+}
+
 /// Credentials are sent only to the fixed official HTTPS host, never in URLs or logs.
-final class ImmersalAPIClient: ImmersalAPI {
+final class ImmersalAPIClient: ImmersalAPI, ImmersalMapDownloading {
     private let session: URLSession
     private let redirectGuard: ImmersalRedirectGuard
     private let baseURL = URL(string: "https://api.immersal.com")!
+    private let maximumMapBytes: Int
 
-    init(session: URLSession? = nil) {
+    init(session: URLSession? = nil, maximumMapBytes: Int = ImmersalMapStore.maximumMapBytes) {
+        self.maximumMapBytes = max(1, min(maximumMapBytes, ImmersalMapStore.maximumMapBytes))
         let guardDelegate = ImmersalRedirectGuard()
         redirectGuard = guardDelegate
         if let session { self.session = session }
@@ -132,16 +139,39 @@ final class ImmersalAPIClient: ImmersalAPI {
         return result.jobs
     }
 
+    func downloadMap(mapID: Int, token: String) async throws -> Data {
+        try Task.checkCancellation()
+        guard mapID > 0, !token.isEmpty else { throw ImmersalAPIError.invalidResponse }
+        struct Response: Decodable { let b64: String; let sha256_al: String }
+        let maximumEncodedBytes = ((maximumMapBytes + 2) / 3) * 4
+        let data = try await request("mapb64", json: ["token": token, "id": mapID],
+                                     maximumResponseBytes: maximumEncodedBytes + 16_384)
+        try Task.checkCancellation()
+        let response: Response = try decode(data)
+        let expectedDigest = response.sha256_al.lowercased()
+        guard !response.b64.isEmpty, response.b64.utf8.count <= maximumEncodedBytes,
+              expectedDigest.utf8.count == 64,
+              expectedDigest.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+              let bytes = Data(base64Encoded: response.b64),
+              !bytes.isEmpty, bytes.count <= maximumMapBytes,
+              bytes.base64EncodedString() == response.b64 else { throw ImmersalAPIError.invalidResponse }
+        let actualDigest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        guard actualDigest == expectedDigest else { throw ImmersalAPIError.invalidResponse }
+        try Task.checkCancellation()
+        return bytes
+    }
+
     private func decode<T: Decodable>(_ data: Data) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: data) }
         catch { throw ImmersalAPIError.invalidResponse }
     }
 
-    private func request(_ endpoint: String, json: [String: Any]) async throws -> Data {
-        try await send(endpoint, body: JSONSerialization.data(withJSONObject: json), contentType: "application/json")
+    private func request(_ endpoint: String, json: [String: Any], maximumResponseBytes: Int? = nil) async throws -> Data {
+        try await send(endpoint, body: JSONSerialization.data(withJSONObject: json), contentType: "application/json",
+                       maximumResponseBytes: maximumResponseBytes)
     }
 
-    private func send(_ endpoint: String, body: Data, contentType: String) async throws -> Data {
+    private func send(_ endpoint: String, body: Data, contentType: String, maximumResponseBytes: Int? = nil) async throws -> Data {
         try Task.checkCancellation()
         var request = URLRequest(url: baseURL.appendingPathComponent(endpoint))
         request.httpMethod = "POST"
@@ -149,10 +179,12 @@ final class ImmersalAPIClient: ImmersalAPI {
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse, http.url?.host == baseURL.host,
               http.url?.scheme == "https" else { throw ImmersalAPIError.invalidResponse }
         if http.statusCode == 401 || http.statusCode == 403 { throw ImmersalAPIError.authentication }
         guard (200..<300).contains(http.statusCode) else { throw ImmersalAPIError.http(http.statusCode) }
+        if let maximumResponseBytes, data.count > maximumResponseBytes { throw ImmersalAPIError.invalidResponse }
         struct Envelope: Decodable { let error: String }
         let envelope: Envelope = try decode(data)
         if envelope.error == "auth" { throw ImmersalAPIError.authentication }

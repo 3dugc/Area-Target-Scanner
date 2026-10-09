@@ -1,8 +1,45 @@
 import SwiftUI
 
+enum ImmersalMappingPresentation {
+    static func statusTitle(for job: ImmersalMappingJob, busyJobID: UUID?, operationTitle: String?) -> String {
+        if busyJobID == job.id, let operationTitle { return operationTitle }
+        return job.phase.title
+    }
+
+    static func deletionMessage(for job: ImmersalMappingJob) -> String {
+        let scope = "删除本机任务记录，并中断该任务正在执行的本机操作。扫描数据和导出文件会保留，云端图片及地图不会删除。"
+        if job.pendingOperation == .construct || job.phase == .constructionUncertain {
+            return scope + " 建图提交结果尚未确认，云端可能已创建地图；此操作不会取消云端建图，再次上传前请先到 Portal 核实。"
+        }
+        return scope + " 已发出的请求仍可能在云端完成，此操作不会取消已提交的云端建图。"
+    }
+
+    static func currentJob(jobs: [ImmersalMappingJob], scanName: String?, selectedJobID: UUID?) -> ImmersalMappingJob? {
+        if let selectedJobID { return jobs.first { $0.id == selectedJobID } }
+        guard let scanName else { return nil }
+        return jobs.first { $0.scanName == scanName && $0.needsSource } ??
+            jobs.first { $0.scanName == scanName && $0.phase != .abandoned }
+    }
+
+    static func sceneTitle(scanName: String?, job: ImmersalMappingJob?, resolve: (String) -> String?) -> String {
+        if let scanName, let title = resolve(scanName), !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return title
+        }
+        if let job { return job.displayName }
+        if let scanName, let date = ScanHistoryItem.parseDate(from: scanName) {
+            return date.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).year().month().day().hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        }
+        return "扫描记录"
+    }
+}
+
 struct ImmersalMappingView: View {
+    public enum EntryPoint { case preparation, tasks, account }
+
     @ObservedObject var model: ImmersalMappingModel
     let scanDirectory: URL?
+    let entryPoint: EntryPoint
+    let sceneName: (String) -> String?
     var selectScan: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -13,12 +50,17 @@ struct ImmersalMappingView: View {
     @State private var password = ""
     @State private var mapName = ""
     @State private var mapNameSourceID: String?
-    @State private var selectedJobID: UUID?
-    @State private var showHistory = false
+    @State private var navigationPath: [Destination] = []
     @State private var sheet: Sheet?
-    @State private var abandonJob: ImmersalMappingJob?
+    @State private var deletingJob: ImmersalMappingJob?
     @State private var summaryFrameCount: Int?
     @State private var summaryLoading = true
+    @State private var testingJob: ImmersalMappingJob?
+
+    private enum Destination: Hashable {
+        case tasks
+        case task(UUID)
+    }
 
     private enum Sheet: Identifiable {
         case account(UUID), details
@@ -30,37 +72,65 @@ struct ImmersalMappingView: View {
         }
     }
 
+    init(model: ImmersalMappingModel, scanDirectory: URL?, entryPoint: EntryPoint = .preparation, selectScan: (() -> Void)? = nil,
+         sceneName: @escaping (String) -> String? = { _ in nil }) {
+        self.model = model
+        self.scanDirectory = scanDirectory
+        self.entryPoint = entryPoint
+        self.sceneName = sceneName
+        self.selectScan = selectScan
+    }
+
     private enum Confirmation {
         case workspace(ImmersalWorkspaceConfirmation)
-        case abandon(ImmersalMappingJob)
+        case delete(ImmersalMappingJob)
 
         var title: String {
             switch self {
             case .workspace: return "清空并上传本次扫描？"
-            case .abandon: return "停止这项本机任务的跟踪？"
+            case .delete: return "删除这项本机任务？"
             }
         }
 
         var message: String {
             switch self {
             case .workspace(let prompt): return prompt.message + " 请停止其他设备的上传。"
-            case .abandon(let job):
-                return job.pendingOperation == .construct ?
-                    "云端可能已经创建地图。请先在 Portal 核实，再停止本机跟踪；此操作不会取消云端建图。重新上传可能产生重复地图。扫描数据会保留。" :
-                    "本地扫描会保留，已上传的图片也会保留在云端工作区。之后重新上传可能需要确认清空工作区。"
+            case .delete(let job): return ImmersalMappingPresentation.deletionMessage(for: job)
             }
         }
     }
 
     private var currentJob: ImmersalMappingJob? {
-        if let selectedJobID, let selected = model.localJobs.first(where: { $0.id == selectedJobID }) { return selected }
-        guard let scanName = scanDirectory?.lastPathComponent else { return nil }
-        let available = model.isLoggedIn ? model.jobs : model.localJobs
-        return available.first(where: { $0.scanName == scanName && $0.needsSource }) ??
-            available.first(where: { $0.scanName == scanName && $0.phase != .abandoned })
+        if let selectedJobID { return model.localJobs.first { $0.id == selectedJobID } }
+        return ImmersalMappingPresentation.currentJob(jobs: model.isLoggedIn ? model.jobs : model.localJobs,
+                                              scanName: scanDirectory?.lastPathComponent,
+                                              selectedJobID: selectedJobID)
+    }
+
+    private var selectedJobID: UUID? {
+        for destination in navigationPath.reversed() {
+            if case .task(let id) = destination { return id }
+        }
+        return nil
+    }
+
+    private var currentSceneName: String {
+        ImmersalMappingPresentation.sceneTitle(scanName: currentJob?.scanName ?? scanDirectory?.lastPathComponent,
+                                              job: currentJob, resolve: sceneName)
+    }
+
+    private func sceneTitle(for job: ImmersalMappingJob) -> String {
+        ImmersalMappingPresentation.sceneTitle(scanName: job.scanName, job: job, resolve: sceneName)
+    }
+
+    private func scanDirectoryForTesting(_ job: ImmersalMappingJob) -> URL? {
+        let parent = scanDirectory?.deletingLastPathComponent() ??
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        return ImmersalMeshSource.directory(scanName: job.scanName, documentsDirectory: parent)
     }
 
     private var sourceDirectory: URL? {
+        if selectedJobID != nil && currentJob == nil { return nil }
         guard let job = currentJob else { return scanDirectory }
         let parent = scanDirectory?.deletingLastPathComponent() ??
             FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -76,133 +146,195 @@ struct ImmersalMappingView: View {
         model.jobs.first { $0.needsSource && $0.id != currentJob?.id }
     }
 
+    private var busyJob: ImmersalMappingJob? {
+        guard model.isBusy, let id = model.busyJobID else { return nil }
+        return model.jobs.first { $0.id == id }
+    }
+
+    private func statusTitle(for job: ImmersalMappingJob) -> String {
+        ImmersalMappingPresentation.statusTitle(for: job,
+            busyJobID: model.isBusy ? model.busyJobID : nil, operationTitle: model.operationStage?.title)
+    }
+
+    private var deletionTarget: ImmersalMappingJob? {
+        busyJob ?? currentJob ?? blockingJob
+    }
+
+    private var deletionTitle: String {
+        if busyJob != nil && busyJob?.id != currentJob?.id { return "删除该任务" }
+        if currentJob == nil && blockingJob != nil { return "删除旧任务" }
+        return "删除本机任务"
+    }
+
     private var confirmation: Confirmation? {
-        if let prompt = model.workspaceConfirmation { return .workspace(prompt) }
-        return abandonJob.map { .abandon($0) }
+        if let deletingJob { return .delete(deletingJob) }
+        if let prompt = model.workspaceConfirmation, prompt.jobID == currentJob?.id { return .workspace(prompt) }
+        return nil
     }
 
     var body: some View {
         // Capture the displayed prompt so an old dismissal cannot cancel a later confirmation.
         let presentedConfirmation = confirmation
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    stepIndicator
-                    introduction
-                    if sourceDirectory != nil { scanSummary }
-                    if let job = currentJob { jobStatus(job) }
-                    if let blockingJob { unfinishedTaskNotice(blockingJob) }
-                    if let error = model.errorMessage { errorNotice(error) }
-                    if sourceDirectory == nil && currentJob == nil { emptyScanNotice }
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 16)
-                .padding(.bottom, 20)
-                .frame(maxWidth: 640, alignment: .leading)
-                .frame(maxWidth: .infinity)
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .safeAreaInset(edge: .bottom, spacing: 0) { actionFooter }
-            .navigationTitle("Immersal 建图")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) { Button("任务") { showHistory = true }.disabled(model.isBusy) }
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    moreMenu.disabled(model.isBusy)
-                    Button("完成") { dismiss() }
+        NavigationStack(path: $navigationPath) {
+            Group {
+                switch entryPoint {
+                case .preparation: preparationView
+                case .tasks: historyView
+                case .account: accountView
                 }
             }
-            .navigationDestination(isPresented: $showHistory) { historyView }
-            .sheet(item: $sheet) { value in
-                NavigationStack {
-                    Group {
-                        switch value {
-                        case .account: accountView
-                        case .details: detailsView
-                        }
+            .toolbar { closeToolbar }
+            .navigationDestination(for: Destination.self) { destination in
+                Group {
+                    switch destination {
+                    case .tasks: historyView
+                    case .task: preparationView
                     }
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") {
-                                if case .account(let id) = value { cancelAuthentication(id: id) }
-                                sheet = nil
+                }
+                .toolbar { closeToolbar }
+            }
+        }
+        .fullScreenCover(item: $testingJob) { job in
+            if let mapID = job.mapID {
+                ImmersalMapTestView(mapID: mapID, userID: job.userID, sceneName: sceneTitle(for: job),
+                                    scanDirectory: scanDirectoryForTesting(job), sourceFingerprint: job.sourceFingerprint,
+                                    buildConfiguration: "cloud-default;frames=\(job.frameCount);continuous-live;no-ar-prior")
+            }
+        }
+        .sheet(item: $sheet) { value in
+            NavigationStack {
+                Group {
+                    switch value {
+                    case .account: accountView
+                    case .details: detailsView
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") {
+                            if case .account(let id) = value {
+                                cancelAuthentication(id: id == cloudActions.pendingID ? id : nil)
                             }
+                            sheet = nil
                         }
                     }
-                }
-                .onDisappear {
-                    if case .account(let id) = value { authenticationDismissed(id: id) }
-                }
-            }
-            .confirmationDialog(presentedConfirmation?.title ?? "", isPresented: Binding(
-                get: { confirmation != nil },
-                set: { visible in
-                    guard !visible else { return }
-                    switch presentedConfirmation {
-                    case .workspace(let prompt): model.cancelWorkspaceConfirmation(prompt)
-                    case .abandon(let job): if abandonJob?.id == job.id { abandonJob = nil }
-                    case nil: break
-                    }
-                }), titleVisibility: .visible, presenting: presentedConfirmation) { value in
-                switch value {
-                case .workspace(let prompt):
-                    Button("清空并上传 \(prompt.frameCount) 帧", role: .destructive) {
-                        requestCloudAction(.confirmedWorkspace(prompt))
-                    }
-                    Button("暂不上传", role: .cancel) { model.cancelWorkspaceConfirmation(prompt) }
-                case .abandon(let job):
-                    Button("确认停止本机任务", role: .destructive) { model.abandon(jobID: job.id); abandonJob = nil }
-                    Button("取消", role: .cancel) { abandonJob = nil }
-                }
-            } message: { Text($0.message) }
-            .task(id: sourceDirectory) { await readScanSummary() }
-            .onAppear {
-                email = model.email ?? ""
-                if let prompt = model.workspaceConfirmation { selectedJobID = prompt.jobID }
-                else if let id = model.activeJobID { selectedJobID = id }
-            }
-            .onChange(of: model.activeJobID) { id in if let id { selectedJobID = id } }
-            .onChange(of: model.workspaceConfirmation) { prompt in
-                if let prompt { selectedJobID = prompt.jobID }
-            }
-            .onChange(of: model.isLoggedIn) { loggedIn in
-                if loggedIn {
-                    password = ""
-                    if case .account(let id) = sheet, id == cloudActions.pendingID { sheet = nil }
-                } else {
-                    cloudActions.operationFinished(using: model)
-                }
-            }
-            .onChange(of: model.isBusy) { busy in
-                if !busy {
-                    continueDismissedAuthentication()
-                    cloudActions.operationFinished(using: model)
-                }
-            }
-            .onChange(of: model.isRefreshing) { refreshing in
-                if !refreshing {
-                    continueDismissedAuthentication()
-                    cloudActions.operationFinished(using: model)
-                }
-            }
-            .onChange(of: cloudActions.needsAuthentication) { needed in
-                if needed, scenePhase != .background, let id = cloudActions.pendingID {
-                    dismissedAuthenticationID = nil
-                    sheet = .account(id)
-                }
-            }
-            .onChange(of: scenePhase) { phase in
-                if phase == .background {
-                    cancelAuthentication()
-                    cloudActions.cancelPendingAuthentication(cancelActiveAction: true)
-                    sheet = nil
                 }
             }
             .onDisappear {
+                if case .account(let id) = value { authenticationDismissed(id: id) }
+            }
+        }
+        .confirmationDialog(presentedConfirmation?.title ?? "", isPresented: Binding(
+            get: { confirmation != nil },
+            set: { visible in
+                guard !visible else { return }
+                switch presentedConfirmation {
+                case .workspace(let prompt): model.cancelWorkspaceConfirmation(prompt)
+                case .delete(let job): if deletingJob?.id == job.id { deletingJob = nil }
+                case nil: break
+                }
+            }), titleVisibility: .visible, presenting: presentedConfirmation) { value in
+            switch value {
+            case .workspace(let prompt):
+                Button("清空并上传 \(prompt.frameCount) 帧", role: .destructive) {
+                    requestCloudAction(.confirmedWorkspace(prompt))
+                }
+                Button("暂不上传", role: .cancel) { model.cancelWorkspaceConfirmation(prompt) }
+            case .delete(let job):
+                Button("删除本机任务", role: .destructive) { deleteTask(job) }
+                Button("取消", role: .cancel) { deletingJob = nil }
+            }
+        } message: { value in
+            switch value {
+            case .delete(let job): Text("“\(sceneTitle(for: job))”\n\(value.message)")
+            case .workspace: Text(value.message)
+            }
+        }
+        .task(id: sourceDirectory) { await readScanSummary() }
+        .onAppear {
+            email = model.email ?? ""
+        }
+        .onChange(of: model.isLoggedIn) { loggedIn in
+            if loggedIn {
+                password = ""
+                if case .account(let id) = sheet, id == cloudActions.pendingID { sheet = nil }
+            } else {
+                cloudActions.operationFinished(using: model)
+            }
+        }
+        .onChange(of: model.isBusy) { busy in
+            if !busy {
+                continueDismissedAuthentication()
+                cloudActions.operationFinished(using: model)
+            }
+        }
+        .onChange(of: model.isRefreshing) { refreshing in
+            if !refreshing {
+                continueDismissedAuthentication()
+                cloudActions.operationFinished(using: model)
+            }
+        }
+        .onChange(of: cloudActions.needsAuthentication) { needed in
+            if needed, scenePhase != .background, let id = cloudActions.pendingID {
+                dismissedAuthenticationID = nil
+                sheet = .account(id)
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background {
                 cancelAuthentication()
                 cloudActions.cancelPendingAuthentication(cancelActiveAction: true)
-                model.cancelWorkspaceConfirmation()
+                sheet = nil
             }
+        }
+        .onDisappear {
+            cancelAuthentication()
+            cloudActions.cancelPendingAuthentication(cancelActiveAction: true)
+            model.cancelWorkspaceConfirmation()
+        }
+        .onChange(of: model.localJobs.map(\.id)) { ids in
+            if let index = navigationPath.firstIndex(where: {
+                if case .task(let id) = $0 { return !ids.contains(id) }
+                return false
+            }) { navigationPath.removeSubrange(index...) }
+        }
+        .interactiveDismissDisabled(model.isBusy)
+    }
+
+    private var closeToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button("完成") { dismiss() }.disabled(model.isBusy)
+        }
+    }
+
+    private var preparationView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                stepIndicator
+                introduction
+                if let blockingJob { unfinishedTaskNotice(blockingJob) }
+                if sourceDirectory != nil { scanSummary }
+                if let job = currentJob { jobStatus(job) }
+                if let error = model.errorMessage { errorNotice(error) }
+                if sourceDirectory == nil && currentJob == nil { emptyScanNotice }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 16)
+            .padding(.bottom, 20)
+            .frame(maxWidth: 640, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .safeAreaInset(edge: .bottom, spacing: 0) { actionFooter }
+        .navigationTitle("Immersal 建图")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if entryPoint == .preparation && navigationPath.isEmpty {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("任务") { navigationPath.append(.tasks) }
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) { moreMenu }
         }
     }
 
@@ -247,6 +379,7 @@ struct ImmersalMappingView: View {
 
     private var mainTitle: String {
         guard let job = currentJob else { return "准备上传" }
+        if busyJob?.id == job.id, let stage = model.operationStage { return stage.title }
         switch job.phase {
         case .paused: return job.uploadedCount > 0 ? "上传已暂停" : "准备上传"
         case .workspaceConflict: return "准备上传"
@@ -270,9 +403,9 @@ struct ImmersalMappingView: View {
         case .captureUncertain: return "先检查云端工作区，避免重复上传图片。"
         case .uploading: return "全部图片上传成功后会自动建图。请保持 App 在前台。"
         case .constructing: return "正在向 Immersal 提交本次建图。"
-        case .constructionUncertain: return "正在核对云端结果，不会重复提交建图。"
+        case .constructionUncertain: return "建图提交结果尚未确认，可查询状态或到 Portal 核实。"
         case .pending, .processing, .sparse: return "云端正在处理，离开此页面后建图会继续。"
-        case .done: return "在 Immersal Portal 中查看和管理地图。"
+        case .done: return "下载地图后，在原扫描空间离线测试定位并查看质量报告。"
         case .failed: return "在 Immersal Portal 查看失败原因和处理建议。"
         case .abandoned: return "本地扫描已保留，可以重新创建上传任务。"
         }
@@ -282,7 +415,7 @@ struct ImmersalMappingView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeading("本次扫描")
             VStack(spacing: 0) {
-                summaryRow("场景名称", symbol: "cube", value: ScanHistoryItem.displayName(for: currentJob?.scanName ?? scanDirectory?.lastPathComponent ?? ""))
+                summaryRow("场景名称", symbol: "building.2", value: currentSceneName)
                 Divider().padding(.horizontal, 16)
                 summaryRow("扫描时间", symbol: "clock", value: scanDate)
                 Divider().padding(.horizontal, 16)
@@ -290,19 +423,23 @@ struct ImmersalMappingView: View {
                 Divider().padding(.horizontal, 16)
                 HStack(spacing: 14) {
                     Image(systemName: "doc.text").foregroundStyle(.secondary).frame(width: 24)
-                    Text("地图名称")
+                    Text("云端地图名称")
                     Spacer(minLength: 12)
                     if let job = currentJob, job.phase != .abandoned {
                         Text(job.displayName).multilineTextAlignment(.trailing)
                     } else {
-                        TextField("地图名称", text: $mapName)
+                        TextField("MyScan", text: $mapName)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .multilineTextAlignment(.trailing).frame(minWidth: 80)
                             .disabled(model.isBusy)
-                            .accessibilityLabel("地图名称，1 至 24 个英文字母或数字")
+                            .accessibilityLabel("云端地图名称，1 至 24 个英文字母或数字")
                     }
                 }.padding(16).frame(minHeight: 54)
             }.background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+            if currentJob == nil {
+                Text("云端地图名称使用 1–24 个英文字母或数字；场景名称可在记录中修改。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -338,7 +475,7 @@ struct ImmersalMappingView: View {
                 }
                 ProgressView(value: Double(job.uploadedCount), total: Double(max(job.frameCount, 1)))
                     .accessibilityLabel("已确认上传 \(job.uploadedCount) 帧，共 \(job.frameCount) 帧")
-                if model.activeJobID == job.id && !model.progressText.isEmpty {
+                if model.busyJobID == job.id && !model.progressText.isEmpty {
                     Text(model.progressText).font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -347,7 +484,7 @@ struct ImmersalMappingView: View {
                    color: job.phase == .done ? .green : (job.phase == .failed ? .orange : .accentColor),
                    title: job.phase.title, message: job.mapID.map { "地图 ID：\($0)" } ?? "可以刷新状态，或前往 Portal 核实。")
         }
-        if model.isBusy && job.phase != .uploading && job.phase != .constructing {
+        if model.isBusy && model.busyJobID == job.id && job.phase != .uploading {
             HStack(spacing: 10) { ProgressView(); Text(model.progressText).font(.callout).foregroundStyle(.secondary) }
         }
     }
@@ -370,9 +507,12 @@ struct ImmersalMappingView: View {
 
     private func unfinishedTaskNotice(_ job: ImmersalMappingJob) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            notice(symbol: "clock.badge.exclamationmark", color: .orange, title: "还有未完成的任务",
-                   message: "请先处理“\(job.displayName)”，再上传新的扫描。")
-            Button("去历史处理") { showHistory = true }.frame(minHeight: 44)
+            notice(symbol: "clock.badge.exclamationmark", color: .orange,
+                   title: busyJob?.id == job.id ? "正在处理其他扫描" : "本机有未完成的任务",
+                   message: "“\(sceneTitle(for: job))” · \(statusTitle(for: job))。" +
+                    (currentJob == nil ? "\n当前扫描尚未开始上传。" : ""))
+            Button("查看此任务") { navigationPath.append(.task(job.id)) }
+                .frame(minHeight: 44).accessibilityIdentifier("view-blocking-task")
         }
     }
 
@@ -385,18 +525,40 @@ struct ImmersalMappingView: View {
 
     private var emptyScanNotice: some View {
         notice(symbol: "viewfinder", color: .accentColor, title: "尚未选择扫描",
-               message: "请从扫描历史选择已保存的扫描。已有云端任务可在本页任务列表中查看。")
+               message: "可在任务中继续已有任务，或从扫描记录创建新地图。")
     }
 
     private var actionFooter: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            if model.isBusy {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let busyJob {
+                        Text("当前任务：\(sceneTitle(for: busyJob))").font(.subheadline.weight(.semibold))
+                    }
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text(model.progressText.isEmpty ? (model.operationStage?.title ?? "正在执行本机操作") : model.progressText)
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("active-task-stage")
+            }
             primaryAction
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .frame(maxWidth: .infinity).tint(ScannerTheme.actionBlue)
-            Button(currentJob?.phase == .done ? "关闭" : "稍后处理") {
-                if model.isBusy { model.pause() }
-                dismiss()
-            }.frame(minHeight: 44)
+                .frame(maxWidth: .infinity).tint(.accentColor)
+            HStack(spacing: 16) {
+                if let job = deletionTarget {
+                    Button(deletionTitle, role: .destructive) { deletingJob = job }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .accessibilityLabel("删除本机任务：\(sceneTitle(for: job))")
+                        .accessibilityIdentifier("delete-mapping-task")
+                }
+                if !model.isBusy {
+                    Button(currentJob?.phase == .done ? "关闭" : "稍后处理") { dismiss() }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+            }
         }
         .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 8)
         .frame(maxWidth: 640).frame(maxWidth: .infinity)
@@ -404,18 +566,12 @@ struct ImmersalMappingView: View {
     }
 
     @ViewBuilder private var primaryAction: some View {
-        if sourceDirectory == nil && currentJob == nil {
-            fullWidthButton("选择扫描", symbol: "clock.arrow.circlepath") {
-                dismiss()
-                selectScan?()
-            }.disabled(model.isBusy)
+        if sourceDirectory == nil && currentJob == nil, let selectScan {
+            fullWidthButton("选择扫描", symbol: "clock.arrow.circlepath") { dismiss(); selectScan() }
+                .disabled(model.isBusy)
         } else if model.isBusy {
-            if currentJob?.phase == .uploading {
-                fullWidthButton("暂停上传", symbol: "pause") { model.pause() }
-            } else {
-                Button {} label: { HStack { ProgressView().tint(.white); Text("正在处理…") }.frame(maxWidth: .infinity, minHeight: 24) }
-                    .disabled(true)
-            }
+            fullWidthButton("中断本机操作", symbol: "pause.circle") { model.pause() }
+                .accessibilityIdentifier("interrupt-mapping-task")
         } else if let job = currentJob, job.canRestart {
             fullWidthButton("检查并继续", symbol: "arrow.right") { requestCloudAction(.checkWorkspace(jobID: job.id, userID: job.userID)) }
         } else if let job = currentJob, job.canResume {
@@ -424,14 +580,16 @@ struct ImmersalMappingView: View {
             fullWidthButton(model.isRefreshing ? "正在查询…" : "查询建图结果", symbol: "arrow.clockwise") {
                 requestCloudAction(.refresh(jobID: job.id, userID: job.userID))
             }.disabled(model.isRefreshing)
+        } else if let job = currentJob, job.phase == .done, job.mapID != nil {
+            fullWidthButton("下载地图与离线测试", symbol: "viewfinder") { testingJob = job }
         } else if let job = currentJob, job.stage == .construction {
             Link(destination: portalURL) { Label("查看 Immersal Portal", systemImage: "arrow.up.right.square").frame(maxWidth: .infinity, minHeight: 24) }
-        } else if blockingJob != nil {
-            fullWidthButton("处理未完成任务", symbol: "clock.arrow.circlepath") { showHistory = true }
+        } else if let blockingJob {
+            fullWidthButton("处理未完成任务", symbol: "clock.arrow.circlepath") { navigationPath.append(.task(blockingJob.id)) }
         } else if let directory = sourceDirectory {
             fullWidthButton("上传并建图", symbol: "icloud.and.arrow.up") { requestCloudAction(.upload(scanDirectory: directory, mapName: mapName)) }
         } else {
-            fullWidthButton("查看历史任务", symbol: "clock.arrow.circlepath") { showHistory = true }
+            fullWidthButton("查看建图任务", symbol: "clock.arrow.circlepath") { navigationPath.append(.tasks) }
         }
     }
 
@@ -443,11 +601,8 @@ struct ImmersalMappingView: View {
 
     private var moreMenu: some View {
         Menu {
-            if model.isLoggedIn {
-                Button(role: .destructive) {
-                    logout()
-                } label: { Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right") }
-            }
+            Button { sheet = .account(UUID()) } label: { Label(model.isLoggedIn ? "账号" : "登录账号", systemImage: "person.crop.circle") }
+                .disabled(model.isBusy)
             Button { sheet = .details } label: { Label("扫描与任务详情", systemImage: "info.circle") }
             Link(destination: portalURL) { Label("打开 Immersal Portal", systemImage: "arrow.up.right.square") }
             if let job = currentJob, job.stage == .construction {
@@ -459,21 +614,27 @@ struct ImmersalMappingView: View {
                     Label("再次上传此扫描", systemImage: "icloud.and.arrow.up")
                 }.disabled(model.isBusy)
             }
-            if let job = currentJob, job.canAbandon,
-               model.jobs.contains(where: { $0.id == job.id && $0.userID == job.userID }) {
+            if let job = currentJob {
                 Divider()
-                Button(role: .destructive) { abandonJob = job } label: {
-                    Label(job.pendingOperation == .construct ? "停止本机跟踪…" : "停止本机任务…", systemImage: "stop.circle")
-                }.disabled(model.isBusy)
+                Button(role: .destructive) { deletingJob = job } label: {
+                    Label("删除本机任务…", systemImage: "trash")
+                }
             }
         } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44) }
         .accessibilityLabel("更多选项")
     }
 
+    private func deleteTask(_ job: ImmersalMappingJob) {
+        deletingJob = nil
+        guard model.deleteJob(jobID: job.id) else { return }
+        if let index = navigationPath.firstIndex(of: .task(job.id)) {
+            navigationPath.removeSubrange(index...)
+        }
+    }
+
     private func startAnotherUpload(_ job: ImmersalMappingJob) {
         let parent = scanDirectory?.deletingLastPathComponent() ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        requestCloudAction(.uploadAgain(jobID: job.id, userID: job.userID,
-            scanDirectory: parent.appendingPathComponent(job.scanName), mapName: job.displayName))
+        requestCloudAction(.uploadAgain(jobID: job.id, userID: job.userID, scanDirectory: parent.appendingPathComponent(job.scanName), mapName: job.displayName))
     }
 
     private var accountView: some View {
@@ -484,18 +645,14 @@ struct ImmersalMappingView: View {
                     Button("退出登录", role: .destructive) { logout() }
                 } else {
                     TextField("邮箱", text: $email).keyboardType(.emailAddress).textContentType(.username)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().disabled(model.isBusy)
-                        .accessibilityLabel("Immersal 邮箱")
-                    SecureField("密码", text: $password).textContentType(.password).disabled(model.isBusy)
-                        .accessibilityLabel("Immersal 密码")
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().disabled(model.isBusy).accessibilityLabel("Immersal 邮箱")
+                    SecureField("密码", text: $password).textContentType(.password).disabled(model.isBusy).accessibilityLabel("Immersal 密码")
                     Button(model.isBusy ? "正在登录…" : "登录") {
                         let submitted = password; password = ""
                         loginSubmitted = true
                         model.login(email: email, password: submitted)
                     }.disabled(model.isBusy || email.isEmpty || password.isEmpty)
-                    if model.isBusy {
-                        Button("取消登录", role: .cancel) { cancelAuthentication(); sheet = nil }
-                    }
+                    if model.isBusy { Button("取消登录", role: .cancel) { cancelAuthentication(); sheet = nil } }
                 }
             } footer: { Text("使用 Immersal 邮箱和密码登录。登录凭据保存在本机钥匙串，下次自动使用；App 不保存密码。") }
             if let error = model.errorMessage { Text(error).foregroundStyle(.red) }
@@ -505,15 +662,16 @@ struct ImmersalMappingView: View {
     private var detailsView: some View {
         Form {
             Section("扫描文件") {
+                LabeledContent("场景名称", value: currentSceneName)
                 Text(currentJob?.scanName ?? scanDirectory?.lastPathComponent ?? "未选择扫描").textSelection(.enabled)
                 if let frameCount { LabeledContent("图片数量", value: "\(frameCount) 帧") }
-                Text("上传扫描图片、相机位姿及扫描时采集的 GPS；无需先导出 ZIP。地图名称会自动添加唯一编号。")
+                Text("上传扫描图片、相机位姿及扫描时采集的 GPS；无需先导出 ZIP。云端地图名称会自动添加唯一编号，修改场景名称不会改变云端地图名称。")
                     .foregroundStyle(.secondary)
             }
             if let job = currentJob {
                 Section("完整任务信息") {
-                    LabeledContent("状态", value: job.phase.title)
-                    Text(job.mapName).textSelection(.enabled)
+                    LabeledContent("状态", value: statusTitle(for: job))
+                    LabeledContent("云端地图名称", value: job.mapName).textSelection(.enabled)
                     Text(job.id.uuidString).font(.caption).textSelection(.enabled)
                     LabeledContent("已确认上传", value: "\(job.uploadedCount) / \(job.frameCount) 帧")
                     if let count = job.workspaceImageCount { LabeledContent("最近检查的工作区图片", value: "\(count) 张") }
@@ -530,29 +688,43 @@ struct ImmersalMappingView: View {
 
     private var historyView: some View {
         List {
+            if let error = model.errorMessage {
+                Section { errorNotice(error) }
+            }
             if model.localJobs.isEmpty {
                 Text("暂无本机任务").foregroundStyle(.secondary)
             } else {
                 ForEach(model.localJobs) { job in
                     Button {
-                        selectedJobID = job.id; mapName = job.displayName; showHistory = false
+                        mapName = job.displayName
+                        navigationPath.append(.task(job.id))
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: historySymbol(job)).foregroundStyle(job.phase == .done ? Color.green : Color.accentColor)
                                 .frame(width: 24).padding(.top, 3)
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(job.displayName).font(.headline).foregroundStyle(.primary)
-                                Text(job.phase.title).font(.subheadline).foregroundStyle(.secondary)
+                                Text(sceneTitle(for: job)).font(.headline).foregroundStyle(.primary)
+                                Text(statusTitle(for: job)).font(.subheadline).foregroundStyle(.secondary)
                                 Text(historyDate(job)).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
                             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                         }.padding(.vertical, 5)
-                    }.buttonStyle(.plain)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { deletingJob = job } label: { Label("删除", systemImage: "trash") }
+                    }
+                    .contextMenu {
+                        if busyJob?.id == job.id {
+                            Button { model.pause() } label: { Label("中断本机操作", systemImage: "pause.circle") }
+                        }
+                        Button(role: .destructive) { deletingJob = job } label: { Label("删除本机任务…", systemImage: "trash") }
+                    }
                 }
             }
         }
-        .navigationTitle("上传历史").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Immersal 任务").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { requestCloudAction(.refreshJobs) } label: {
@@ -560,13 +732,12 @@ struct ImmersalMappingView: View {
                 }.accessibilityLabel("刷新建图状态").disabled(model.isBusy || model.isRefreshing || model.localJobs.isEmpty)
             }
         }
-        .refreshable {
-            if !model.localJobs.isEmpty { requestCloudAction(.refreshJobs) }
-        }
+        .refreshable { if !model.localJobs.isEmpty { requestCloudAction(.refreshJobs) } }
     }
 
     private func requestCloudAction(_ action: ImmersalCloudAction) {
         cloudActions.request(action, using: model)
+        followActiveUpload()
     }
 
     private func logout() {
@@ -586,7 +757,10 @@ struct ImmersalMappingView: View {
     }
 
     private func authenticationDismissed(id: UUID) {
-        guard id == cloudActions.pendingID else { return }
+        guard id == cloudActions.pendingID else {
+            if !model.isLoggedIn { cancelAuthentication() }
+            return
+        }
         if model.isLoggedIn {
             dismissedAuthenticationID = id
             continueDismissedAuthentication()
@@ -600,6 +774,15 @@ struct ImmersalMappingView: View {
         dismissedAuthenticationID = nil
         loginSubmitted = false
         cloudActions.continueAfterLogin(requestID: id, using: model)
+        followActiveUpload()
+    }
+
+    private func followActiveUpload() {
+        guard selectedJobID != nil, let id = model.activeJobID,
+              let active = model.localJobs.first(where: { $0.id == id }),
+              active.scanName == sourceDirectory?.lastPathComponent,
+              let index = navigationPath.lastIndex(where: { if case .task = $0 { return true }; return false }) else { return }
+        navigationPath[index] = .task(id)
     }
 
     private func historySymbol(_ job: ImmersalMappingJob) -> String {
@@ -610,7 +793,7 @@ struct ImmersalMappingView: View {
     }
 
     private func historyDate(_ job: ImmersalMappingJob) -> String {
-        (ScanHistoryItem.parseDate(from: job.scanName) ?? job.createdAt).formatted(date: .abbreviated, time: .shortened)
+        (ScanHistoryItem.parseDate(from: job.scanName) ?? job.createdAt).formatted(.dateTime.locale(Locale(identifier: "zh_CN")).year().month().day().hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
     }
 
     private func readScanSummary() async {
@@ -636,7 +819,6 @@ struct ImmersalMappingView: View {
         summaryLoading = false
     }
 }
-
 
 /// Each authenticated continuation holds the source or task selected by its explicit action.
 /// A changed selection or a later account cannot replace that action.

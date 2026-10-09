@@ -67,3 +67,9 @@ VLResult vl_process_frame(VLHandle handle,
 void vl_reset(VLHandle handle) {
     (void)handle;
 }
+
+/* Simulator stub cannot configure or perform native recovery. */
+int vl_set_recovery_mode(VLHandle handle, int mode) {
+    (void)handle; (void)mode;
+    return 0;
+}

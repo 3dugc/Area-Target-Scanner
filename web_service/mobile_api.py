@@ -68,6 +68,18 @@ def expiry(server, job):
     return (finished + timedelta(hours=hours)).isoformat()
 
 
+# Included only for enabled submissions, preserving historical off fingerprints.
+MAP_CLAHE_FINGERPRINT = ':map-clahe:clip2:tile8'
+
+
+def parse_map_clahe(values):
+    if not values:
+        return False
+    if len(values) != 1 or values[0] not in ('0', '1'):
+        raise ValueError('map_clahe must be a single 0 or 1')
+    return values[0] == '1'
+
+
 def dto(server, job):
     status = job['status']
     stage = job.get('stage')
@@ -101,6 +113,7 @@ def dto(server, job):
                   'url': f"/api/v1/jobs/{job['id']}/result", 'expires_at': expires_at}
     return {'job_id': job['id'], 'status': status, 'progress': max(0, min(100, int(job.get('progress') or 0))),
             'stage': stage, 'message': MESSAGES[stage], 'profile': job['profile'], 'uv_unwrap': bool(job['uv_unwrap']),
+            'map_clahe': bool(job.get('map_clahe', False)),
             'created_at': job['created_at'], 'finished_at': job.get('finished_at'), 'expires_at': expires_at,
             'error': error, 'result': result}
 
@@ -153,8 +166,10 @@ def register_mobile_api(app, server):
         if set(request.args) - {'policy'} or len(request.args.getlist('policy')) > 1:
             raise APIError(400, 'invalid_request', 'Use a single supported preparation policy.')
         try:
-            return jsonify(processing_requirements(maximum_request_bytes=app.config['MAX_CONTENT_LENGTH'],
-                                                  policy=request.args.get('policy', POLICY)))
+            value = processing_requirements(maximum_request_bytes=app.config['MAX_CONTENT_LENGTH'],
+                                            policy=request.args.get('policy', POLICY))
+            value['map_clahe_supported'] = True
+            return jsonify(value)
         except PreparationError as error:
             raise APIError(400, error.code, str(error)) from error
 
@@ -170,7 +185,7 @@ def register_mobile_api(app, server):
             raise APIError(404, 'job_not_found', 'The task was not found.')
         if (len(request.files.getlist('file')) != 1 or set(request.files) != {'file'}
                 or any(len(request.form.getlist(key)) != 1 for key in request.form)
-                or set(request.form) - {'profile', 'uv_unwrap'}):
+                or set(request.form) - {'profile', 'uv_unwrap', 'map_clahe'}):
             raise APIError(400, 'invalid_request', 'Submit one scan ZIP and supported processing options.')
         upload = request.files['file']
         profile = request.form.get('profile', 'fast')
@@ -178,13 +193,20 @@ def register_mobile_api(app, server):
         if not upload.filename or not upload.filename.lower().endswith('.zip') or profile not in server.VALID_PROFILES or unwrap not in ('0', '1'):
             raise APIError(400, 'invalid_request', 'A ZIP, fast or quality profile, and uv_unwrap=0 or 1 are required.')
         uv_unwrap = unwrap == '1'
+        try:
+            map_clahe = parse_map_clahe(request.form.getlist('map_clahe'))
+        except ValueError as error:
+            raise APIError(400, 'invalid_request', str(error)) from error
         incoming = tempfile.mkdtemp(prefix='.incoming-', dir=server.UPLOAD_DIR)
         try:
             zip_path = os.path.join(incoming, 'upload.zip')
             upload.save(zip_path)
             payload_hash = server._sha256_file(zip_path)
             # Submission equality is independent of future pipeline/cache versions.
-            fingerprint = hashlib.sha256(f'{payload_hash}:{profile}:{unwrap}'.encode()).hexdigest()
+            identity = f'{payload_hash}:{profile}:{unwrap}'
+            if map_clahe:
+                identity += MAP_CLAHE_FINGERPRINT
+            fingerprint = hashlib.sha256(identity.encode()).hexdigest()
             if existing:
                 return reconcile(server, existing, digest, fingerprint)
             extract_dir = os.path.join(incoming, 'preflight')
@@ -216,7 +238,7 @@ def register_mobile_api(app, server):
                 raise APIError(400, 'invalid_scan', 'The scan must contain a valid model, keyframe images, and camera data.') from error
             shutil.rmtree(extract_dir)
             job = {'id': job_id, 'status': 'queued', 'step': '等待处理', 'stage': 'queued', 'progress': 0,
-                   'error': None, 'error_code': None, 'result_zip': None, 'uv_unwrap': uv_unwrap, 'profile': profile,
+                   'error': None, 'error_code': None, 'result_zip': None, 'uv_unwrap': uv_unwrap, 'profile': profile, 'map_clahe': map_clahe,
                    'input_hash': fingerprint, 'source_job_id': None, 'token_hash': digest,
                    'created_at': server._now_iso(), 'finished_at': None}
             with server._admission_lock:
@@ -231,7 +253,10 @@ def register_mobile_api(app, server):
                 destination = os.path.join(server.UPLOAD_DIR, job_id)
                 try:
                     os.rename(incoming, destination)
-                    server._submit_pipeline_job(job_id, os.path.join(destination, 'upload.zip'), uv_unwrap, profile)
+                    arguments = (job_id, os.path.join(destination, 'upload.zip'), uv_unwrap, profile)
+                    if map_clahe:
+                        arguments += (True,)
+                    server._submit_pipeline_job(*arguments)
                 except Exception:
                     server._update_job(job_id, status='failed', error_code='processing_failed', finished_at=server._now_iso())
                     raise

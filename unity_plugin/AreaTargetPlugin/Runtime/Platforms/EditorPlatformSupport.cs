@@ -28,7 +28,7 @@ namespace AreaTargetPlugin.PointCloudLocalization
                 _simulatedWidth,
                 _simulatedHeight,
                 frameId,
-                frameId * 1000000L,
+                LocalizationClock.NowTimestampNs,
                 MapId);
             await Task.CompletedTask;
             return new PlatformUpdateResult

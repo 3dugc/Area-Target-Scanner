@@ -95,14 +95,13 @@ namespace AreaTargetPlugin
             long mapGeneration = 0)
         {
             long workerStartedTimestampNs = GetMonotonicTimestampNs();
-            float[] unityWorldFromCamera = PrepareUnityWorldFromCameraForNative(frame);
 
             // Use ProcessFrameSafe to avoid struct-return ABI issues on iOS ARM64
             VLResultData result = NativeLocalizerBridge.ProcessFrameSafe(
                 _nativeHandle, frame.GrayscaleImage, frame.Width, frame.Height,
                 frame.Intrinsics.x, frame.Intrinsics.y,
                 frame.Intrinsics.z, frame.Intrinsics.w,
-                1, unityWorldFromCamera);
+                0, null);
             long workerCompletedTimestampNs = GetMonotonicTimestampNs();
             VLDebugInfo nativeDebugInfo = GetDebugInfo();
 

@@ -68,12 +68,63 @@ final class ScanSourceFingerprintTests: XCTestCase {
     }
 
     func testOriginalAggregateRemainsBoundedToEightGiB() throws {
-        // Sparse files reserve almost no disk space, but the real stream hashes bytes.
+        // Keep the real 8 GiB budget. Cancellation is a fail-fast sentinel for a
+        // regression that starts hashing these sparse originals before rejecting them.
         let root = try sparseFixture(frameCount: 33, imageBytes: 260 * 1024 * 1024)
         defer { try? FileManager.default.removeItem(at: root) }
-        XCTAssertThrowsError(try ScanSourceFingerprint.compute(directory: root)) { error in
+        var checks = 0
+        XCTAssertThrowsError(try ScanSourceFingerprint.compute(directory: root, isCancelled: {
+            checks += 1; return checks > 34
+        })) { error in
             guard case ScanSourceFingerprint.Failure.invalid = error else { return XCTFail("Expected source-work budget, got \(error)") }
         }
+        XCTAssertLessThanOrEqual(checks, 34, "Reject the original collection before streaming its contents")
+    }
+
+    func testModelParticipatesInOriginalAggregatePreflight() throws {
+        let root = try sparseFixture(frameCount: 31, imageBytes: 260 * 1024 * 1024)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try FileHandle(forWritingTo: root.appendingPathComponent("model.obj"))
+        try model.truncate(atOffset: UInt64(132 * 1024 * 1024 + 1))
+        try model.close()
+        var checks = 0
+        XCTAssertThrowsError(try ScanSourceFingerprint.compute(directory: root, isCancelled: {
+            checks += 1; return checks > 32
+        })) { error in
+            guard case ScanSourceFingerprint.Failure.invalid = error else { return XCTFail("Expected aggregate including model, got \(error)") }
+        }
+        XCTAssertLessThanOrEqual(checks, 32, "The model size must be checked before any image stream")
+    }
+
+    func testExactlyEightGiBRemainsEligibleForStreaming() throws {
+        let root = try sparseFixture(frameCount: 31, imageBytes: 260 * 1024 * 1024)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try FileHandle(forWritingTo: root.appendingPathComponent("model.obj"))
+        try model.truncate(atOffset: UInt64(132 * 1024 * 1024))
+        try model.close()
+        var checks = 0
+        XCTAssertThrowsError(try ScanSourceFingerprint.compute(directory: root, isCancelled: {
+            checks += 1; return checks > 32
+        })) { error in
+            guard case ScanSourceFingerprint.Failure.cancelled = error else { return XCTFail("Exactly 8 GiB must pass the budget before cancellation, got \(error)") }
+        }
+    }
+
+    func testModelSizeChangeAfterPreflightIsRejected() throws {
+        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        var checks = 0
+        var writeError: Error?
+        XCTAssertThrowsError(try ScanSourceFingerprint.compute(directory: root, isCancelled: {
+            checks += 1
+            if checks == 2 {
+                do { try Data("v 10 0 0\n".utf8).write(to: root.appendingPathComponent("model.obj")) }
+                catch { writeError = error }
+            }
+            return false
+        })) { error in
+            guard case ScanSourceFingerprint.Failure.changed = error else { return XCTFail("Expected frozen model size change, got \(error)") }
+        }
+        XCTAssertNil(writeError)
     }
 
     func testCancellationDuringLargeOriginalStreamStopsEarly() throws {

@@ -4,6 +4,7 @@ import numpy as np
 import open3d as o3d
 import pytest
 from processing_pipeline import feature_extraction
+from processing_pipeline.keyframe_quality import SELECTION_VERSION
 from processing_pipeline.models import FeatureDatabase
 from processing_pipeline.optimized_pipeline import OptimizedPipeline
 
@@ -17,14 +18,14 @@ def test_mobile_profile_limits_are_explicit_and_do_not_mutate_legacy(monkeypatch
     OptimizedPipeline(processing_profile=profile, mobile_feature_limits=True).build_feature_database(None, [])
     mobile = calls[-1]
     assert mobile["max_keyframes"] == 80
-    assert mobile.get("keyframe_selection", "even") == "even"
+    assert mobile["keyframe_selection"] == SELECTION_VERSION
     assert mobile["orb_nfeatures"] == orb and mobile["bow_k"] == vocab
     assert mobile.get("max_akaze_features") == akaze
     assert mobile["extract_akaze"] == (profile == "quality")
     OptimizedPipeline(processing_profile=profile).build_feature_database(None, [])
     assert calls[-1]["max_keyframes"] == (None if profile == "quality" else 80)
     assert "max_akaze_features" not in calls[-1]
-    assert calls[-1].get("keyframe_selection", "even") == "even"
+    assert calls[-1]["keyframe_selection"] == SELECTION_VERSION
 
 
 def _fake_detectors(monkeypatch):

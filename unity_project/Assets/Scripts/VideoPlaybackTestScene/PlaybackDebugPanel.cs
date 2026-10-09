@@ -106,6 +106,9 @@ namespace VideoPlaybackTestScene
         {
             if (imagePreview == null) return;
             imagePreview.texture = texture;
+            // Optical row zero was uploaded into Unity's bottom texture row.
+            // Flip only display UVs; keep native image coordinates top-left.
+            imagePreview.uvRect = new Rect(0, 1, 1, -1);
         }
 
         /// <summary>初始化 seek 滑块范围</summary>

@@ -21,7 +21,12 @@ def _reconstruct_mesh(cloud: ProcessedCloud) -> o3d.geometry.TriangleMesh:
     pcd.normals = o3d.utility.Vector3dVector(cloud.normals)
     if cloud.colors is not None and len(cloud.colors) > 0:
         pcd.colors = o3d.utility.Vector3dVector(cloud.colors)
-    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=9)
+    # Open3D's automatic Poisson thread count can terminate the Python process
+    # on this macOS wheel; OMP_NUM_THREADS alone does not constrain this option.
+    # Keep the same reconstruction and point clouds while bounding fixture work.
+    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+        pcd, depth=9, n_threads=1
+    )
     # Crop low-density vertices
     densities_arr = np.asarray(densities)
     threshold = np.quantile(densities_arr, 0.01)

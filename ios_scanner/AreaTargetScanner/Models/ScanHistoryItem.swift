@@ -6,6 +6,9 @@ struct ScanHistoryItem: Identifiable, Comparable {
     let directoryPath: String
     let date: Date
     let formattedDate: String
+    var sceneName: String? = nil
+
+    var displayName: String { sceneName ?? "扫描 \(formattedDate)" }
 
     // 从文件系统读取的元数据（懒加载）
     var fileCount: Int = 0
