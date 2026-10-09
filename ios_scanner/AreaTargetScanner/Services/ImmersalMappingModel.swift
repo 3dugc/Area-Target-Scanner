@@ -1,6 +1,21 @@
 import Foundation
 import Combine
 
+enum ImmersalOperationStage: CaseIterable {
+    case login, preparingFrames, checkingWorkspace, clearingWorkspace, uploading, submittingMap
+
+    var title: String {
+        switch self {
+        case .login: return "正在登录"
+        case .preparingFrames: return "正在准备扫描图片"
+        case .checkingWorkspace: return "正在检查云端工作区"
+        case .clearingWorkspace: return "正在清空云端工作区"
+        case .uploading: return "正在上传图片"
+        case .submittingMap: return "正在提交建图"
+        }
+    }
+}
+
 struct ImmersalWorkspaceConfirmation: Equatable, Identifiable {
     let id = UUID()
     let jobID: UUID
@@ -18,6 +33,8 @@ final class ImmersalMappingModel: ObservableObject {
     @Published private(set) var jobs: [ImmersalMappingJob] = []
     @Published private(set) var isBusy = false
     @Published private(set) var activeJobID: UUID?
+    @Published private(set) var busyJobID: UUID?
+    @Published private(set) var operationStage: ImmersalOperationStage?
     @Published private(set) var progressText = ""
     @Published private(set) var isRefreshing = false
     @Published private(set) var workspaceConfirmation: ImmersalWorkspaceConfirmation?
@@ -68,11 +85,12 @@ final class ImmersalMappingModel: ObservableObject {
         guard email.contains("@"), !password.isEmpty else {
             errorMessage = "请输入邮箱和密码。"; return
         }
-        let operation = begin(jobID: nil)
+        let operation = begin(jobID: nil, stage: .login)
         progressText = "正在登录…"
         worker = Task {
             defer { finish(operation) }
             do {
+                try ensureCurrent(operation)
                 let result = try await api.login(email: email, password: password)
                 try ensureCurrent(operation)
                 try credentials.save(result)
@@ -130,11 +148,12 @@ final class ImmersalMappingModel: ObservableObject {
               let job = jobs.first(where: { $0.id == jobID }), job.canRestart else { return }
         // A read-only refresh must not change an uncertain capture or a workspace conflict
         // into a resumable upload if it is interrupted.
-        let operation = begin(jobID: nil)
+        let operation = begin(jobID: nil, stage: .checkingWorkspace, busyJobID: jobID)
         progressText = "正在检查云端工作区…"
         worker = Task {
             defer { finish(operation) }
             do {
+                try ensureCurrent(operation)
                 let status = try await api.status(token: credential.token)
                 try ensureCurrent(operation)
                 guard status.userID == credential.userID else { throw ImmersalAPIError.authentication }
@@ -170,13 +189,13 @@ final class ImmersalMappingModel: ObservableObject {
             } catch { errorMessage = error.localizedDescription }
         }
         operationID = nil; worker = nil; cancellation = nil
-        isBusy = false; activeJobID = nil; progressText = ""
+        isBusy = false; activeJobID = nil; busyJobID = nil; operationStage = nil; progressText = ""
     }
 
     func abandon(jobID: UUID) {
         guard jobs.first(where: { $0.id == jobID })?.canAbandon == true else { return }
         if workspaceConfirmation?.jobID == jobID { workspaceConfirmation = nil }
-        if activeJobID == jobID { pause() }
+        if busyJobID == jobID { pause() }
         do {
             try update(jobID) { job in
                 let constructionUnconfirmed = job.pendingOperation == .construct
@@ -185,6 +204,24 @@ final class ImmersalMappingModel: ObservableObject {
                     "本机任务已停止，已上传的工作区图片仍保留在云端。"
             }
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    @discardableResult
+    func deleteJob(jobID: UUID) -> Bool {
+        guard let credential,
+              jobs.contains(where: { $0.id == jobID && $0.userID == credential.userID }) else { return false }
+        // A read-only workspace check has no activeJobID, but still belongs to this job.
+        // pause() preserves any already-sent mutation intent if saving the deletion fails.
+        if busyJobID == jobID { pause() }
+        do {
+            try save(allJobs.filter { !($0.id == jobID && $0.userID == credential.userID) })
+            if workspaceConfirmation?.jobID == jobID { workspaceConfirmation = nil }
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = "无法删除本机任务记录：\(error.localizedDescription)"
+            return false
+        }
     }
 
     func blocksDeletion(of path: String) -> Bool {
@@ -235,7 +272,7 @@ final class ImmersalMappingModel: ObservableObject {
     private func launchUpload(jobID: UUID, clearConfirmation: ImmersalWorkspaceConfirmation? = nil) {
         guard let credential, !isBusy, !storageFailed, appActive,
               jobs.contains(where: { $0.id == jobID }) else { return }
-        let operation = begin(jobID: jobID)
+        let operation = begin(jobID: jobID, stage: .preparingFrames)
         let flag = ScanExportCancellation()
         cancellation = flag
         worker = Task {
@@ -261,19 +298,35 @@ final class ImmersalMappingModel: ObservableObject {
 
     private func upload(jobID: UUID, credential: ImmersalCredential, operation: UUID,
                         flag: ScanExportCancellation, clearConfirmation: ImmersalWorkspaceConfirmation?) async throws {
+        try ensureCurrent(operation)
         guard let job = jobs.first(where: { $0.id == jobID }) else { throw CancellationError() }
         progressText = "正在检查扫描图片与元数据…"
         let directory = documentsDirectory.appendingPathComponent(job.scanName)
         let frames = self.frames
-        let prepared = try await Task.detached(priority: .userInitiated) {
-            try frames.prepareUpload(scanDirectory: directory, isCancelled: { flag.isCancelled })
+        let frozen = try await Task.detached(priority: .userInitiated) {
+            let source = try? ScanSourceFingerprint.compute(directory: directory, isCancelled: { flag.isCancelled })
+            let prepared = try frames.prepareUpload(scanDirectory: directory, isCancelled: { flag.isCancelled })
+            if let source {
+                guard try ScanSourceFingerprint.compute(directory: directory, isCancelled: { flag.isCancelled }) == source else {
+                    throw ScanSourceFingerprint.Failure.changed
+                }
+            }
+            return (prepared, source)
         }.value
+        let prepared = frozen.0
         try ensureCurrent(operation)
+        if let source = job.sourceFingerprint, source != frozen.1 { throw ScanSourceFingerprint.Failure.changed }
         guard prepared.frameCount > 0, job.uploadedCount <= prepared.frameCount,
               job.fingerprint.isEmpty || job.fingerprint == prepared.fingerprint else {
             throw ImmersalMappingError.message("扫描源数据已改变，请停止本机任务并重新选择扫描。")
         }
-        try update(jobID) { $0.fingerprint = prepared.fingerprint; $0.frameCount = prepared.frameCount; $0.message = nil }
+        try update(jobID) {
+            // Old partially submitted journals retain unknown provenance rather than being backfilled.
+            if job.fingerprint.isEmpty || job.sourceFingerprint != nil { $0.sourceFingerprint = frozen.1 }
+            $0.fingerprint = prepared.fingerprint; $0.frameCount = prepared.frameCount; $0.message = nil
+        }
+        operationStage = .checkingWorkspace
+        progressText = "正在检查云端工作区…"
         var status = try await api.status(token: credential.token)
         try ensureCurrent(operation)
         guard status.userID == credential.userID else { throw ImmersalAPIError.authentication }
@@ -284,11 +337,15 @@ final class ImmersalMappingModel: ObservableObject {
             guard status.imageCount == confirmed.imageCount, prepared.frameCount == confirmed.frameCount else {
                 try presentWorkspaceConfirmation(jobID, imageCount: status.imageCount); return
             }
+            operationStage = .clearingWorkspace
+            progressText = "正在清空云端工作区…"
             try await mutate(jobID: jobID, kind: .clear, operation: operation) {
                 try await api.clear(token: credential.token)
             }
             try ensureCurrent(operation)
             try update(jobID) { $0.uploadedCount = 0; $0.pendingOperation = nil; $0.workspaceImageCount = nil }
+            operationStage = .checkingWorkspace
+            progressText = "正在检查云端工作区…"
             status = try await api.status(token: credential.token)
             try ensureCurrent(operation)
             guard status.userID == credential.userID else { throw ImmersalAPIError.authentication }
@@ -298,6 +355,7 @@ final class ImmersalMappingModel: ObservableObject {
         guard status.imageCount == startIndex else {
             try presentWorkspaceConfirmation(jobID, imageCount: status.imageCount); return
         }
+        if startIndex < prepared.frameCount { operationStage = .uploading }
         for index in startIndex..<prepared.frameCount {
             try ensureCurrent(operation)
             progressText = "正在上传第 \(index + 1)/\(prepared.frameCount) 帧"
@@ -311,10 +369,13 @@ final class ImmersalMappingModel: ObservableObject {
             try ensureCurrent(operation)
             try update(jobID) { $0.uploadedCount = index + 1; $0.pendingOperation = nil }
         }
+        operationStage = .checkingWorkspace
+        progressText = "正在核对云端图片数量…"
         status = try await api.status(token: credential.token)
         try ensureCurrent(operation)
         guard status.userID == credential.userID else { throw ImmersalAPIError.authentication }
         guard status.imageCount == prepared.frameCount else { try presentWorkspaceConfirmation(jobID, imageCount: status.imageCount); return }
+        operationStage = .submittingMap
         progressText = "正在提交建图…"
         let construction = try await mutate(jobID: jobID, kind: .construct, operation: operation) {
             try await api.construct(name: job.mapName, token: credential.token)
@@ -359,14 +420,17 @@ final class ImmersalMappingModel: ObservableObject {
         }
         workspaceConfirmation = confirmation
     }
-    private func begin(jobID: UUID?) -> UUID {
+    private func begin(jobID: UUID?, stage: ImmersalOperationStage, busyJobID: UUID? = nil) -> UUID {
         workspaceConfirmation = nil
         let id = UUID(); operationID = id; activeJobID = jobID; isBusy = true; errorMessage = nil
+        self.busyJobID = busyJobID ?? jobID
+        operationStage = stage
         return id
     }
     private func finish(_ operation: UUID) {
         guard operationID == operation else { return }
-        operationID = nil; worker = nil; cancellation = nil; isBusy = false; activeJobID = nil; progressText = ""
+        operationID = nil; worker = nil; cancellation = nil; isBusy = false; activeJobID = nil
+        busyJobID = nil; operationStage = nil; progressText = ""
     }
     private func ensureCurrent(_ operation: UUID) throws {
         try Task.checkCancellation()

@@ -143,6 +143,16 @@ namespace AreaTargetPlugin.Tests
         }
 
         [Test]
+        public void CoreWorldPose_IsNotComposedWithCameraAgain()
+        {
+            var result = MakeResult(TrackingState.TRACKING);
+            result.Pose = Matrix4x4.Translate(new Vector3(1, 2, 3));
+            InvokeHandleTracking(result, Matrix4x4.Translate(new Vector3(10, 20, 30)));
+            Assert.That(GetField<GameObject>(_manager, "_originCube").transform.position,
+                Is.EqualTo(new Vector3(1, 2, 3)));
+        }
+
+        [Test]
         public void HandleTrackingResult_Tracking_CubeIsGreen()
         {
             SetField(_manager, "_previousState", TrackingState.INITIALIZING);
@@ -167,7 +177,7 @@ namespace AreaTargetPlugin.Tests
         }
 
         [Test]
-        public void HandleTrackingResult_TrackingToLost_CubeRemainsVisible()
+        public void HandleTrackingResult_CoreInvalidatesAlignment_CubeIsHidden()
         {
             SetField(_manager, "_previousState", TrackingState.INITIALIZING);
             InvokeHandleTracking(MakeResult(TrackingState.TRACKING), Matrix4x4.identity);
@@ -175,7 +185,7 @@ namespace AreaTargetPlugin.Tests
             InvokeHandleTracking(MakeResult(TrackingState.LOST), Matrix4x4.identity);
 
             var cube = GetField<GameObject>(_manager, "_originCube");
-            Assert.IsTrue(cube.activeSelf, "OriginCube should remain visible after LOST");
+            Assert.IsFalse(cube.activeSelf, "Core-invalid alignment must not remain displayed");
         }
 
         [Test]

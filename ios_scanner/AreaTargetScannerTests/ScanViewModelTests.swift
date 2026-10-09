@@ -19,10 +19,10 @@ final class ScanViewModelTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        viewModel = ScanViewModel(cameraAuthorizationStatus: { .authorized })
         tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ScanVMTests_\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        viewModel = ScanViewModel(documentsDirectory: tempDir, cameraAuthorizationStatus: { .authorized })
     }
 
     override func tearDownWithError() throws {
@@ -208,8 +208,8 @@ final class ScanViewModelTests: XCTestCase {
 
     // MARK: - Initial State
 
-    func testInitialState_isRequestingPermission() {
-        XCTAssertEqual(viewModel.state, .requestingPermission)
+    func testInitialState_allowsBrowsingBeforeCameraPermission() {
+        XCTAssertEqual(viewModel.state, .ready)
     }
 
     func testInitialProgress_isZero() {
@@ -244,7 +244,7 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     func testHistoryResetWithUndeterminedCameraReturnsPermissionRequestState() {
-        let model = ScanViewModel(cameraAuthorizationStatus: { .notDetermined })
+        let model = ScanViewModel(documentsDirectory: tempDir, cameraAuthorizationStatus: { .notDetermined })
         model.state = .history
 
         model.resetToReady()
@@ -260,9 +260,13 @@ final class ScanViewModelTests: XCTestCase {
         ]
         for (status, expectedState) in cases {
             var authorizationReads = 0
+            var permissionRequests = 0
             let model = ScanViewModel(documentsDirectory: tempDir, cameraAuthorizationStatus: {
                 authorizationReads += 1
                 return status
+            }, requestCameraAccess: { _ in
+                // Keep the permission prompt pending; never query the host's real TCC state.
+                permissionRequests += 1
             })
             model.loadScanHistory()
             // A stale UI ready state cannot bypass a current denied permission.
@@ -272,6 +276,7 @@ final class ScanViewModelTests: XCTestCase {
             try await Task.sleep(nanoseconds: 20_000_000)
 
             XCTAssertGreaterThan(authorizationReads, 0)
+            XCTAssertEqual(permissionRequests, status == .notDetermined ? 1 : 0)
             XCTAssertEqual(model.state, expectedState)
             XCTAssertFalse(model.progress.isScanning)
             XCTAssertEqual(model.scanHistory.map(\.id), [fixture.item.id])
@@ -282,7 +287,7 @@ final class ScanViewModelTests: XCTestCase {
     func testReturningFromSettingsRefreshesCameraPermissionScreens() {
         var authorization = AVAuthorizationStatus.denied
         var reads = 0
-        let model = ScanViewModel(cameraAuthorizationStatus: {
+        let model = ScanViewModel(documentsDirectory: tempDir, cameraAuthorizationStatus: {
             reads += 1
             return authorization
         })
@@ -306,7 +311,7 @@ final class ScanViewModelTests: XCTestCase {
         let states: [ScanViewModel.State] = [.history, .preview("saved-scan"), .scanning, .processing("处理中"), .ready, .error("保留错误")]
         for state in states {
             var reads = 0
-            let model = ScanViewModel(cameraAuthorizationStatus: {
+            let model = ScanViewModel(documentsDirectory: tempDir, cameraAuthorizationStatus: {
                 reads += 1
                 return .authorized
             })
@@ -323,7 +328,7 @@ final class ScanViewModelTests: XCTestCase {
     // MARK: - resetToReady
 
     func testResetToReady_setsStateToReady() {
-        viewModel.state = .scanning
+        viewModel.state = .preview("/tmp/saved_scan")
         viewModel.resetToReady()
         XCTAssertEqual(viewModel.state, .ready)
     }

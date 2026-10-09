@@ -261,7 +261,7 @@ OpenCV_DIR="$PWD/build/opencv5/install/lib/cmake/opencv5" \
 bash native_visual_localizer/build_ios.sh --deploy
 ```
 
-项目固定 OpenCV / contrib 5.0.0，算法参数和 C 接口保持不变。默认构建输出隔离目录；`--deploy` 将重建产物复制到当前分支的 Unity 插件目录。旧 OpenCV 4 wrapper 不能与新框架混装。构建/集成检查和待完成的真实场景、设备验收见[升级记录](../../docs/opencv5-upgrade-validation.md)。
+项目固定 OpenCV / contrib 5.0.0，保留旧 C 接口和 PnP/Hamming 门槛；共享 Session 与恢复策略见[统一核心验收记录](../../docs/localization-quality-validation.md)。默认构建输出隔离目录；`--deploy` 将重建产物复制到当前分支的 Unity 插件目录。旧 OpenCV 4 wrapper 不能与新框架混装。OpenCV 构建记录及待完成的设备验收见[升级记录](../../docs/opencv5-upgrade-validation.md)。
 
 ### 阶段 1 验证
 
@@ -291,7 +291,7 @@ com.areatarget.tracking/
 │   ├── AreaTargetTracker.cs    # 主跟踪器
 │   ├── VisualLocalizationEngine.cs  # 视觉定位引擎
 │   ├── NativeLocalizerBridge.cs     # P/Invoke 桥接
-│   ├── KalmanPoseFilter.cs    # Kalman 姿态平滑
+│   ├── KalmanPoseFilter.cs    # 兼容入口，转调 C++ Session
 │   ├── AssetBundleLoader.cs   # 资产包加载
 │   ├── FeatureDatabaseReader.cs     # SQLite 特征库
 │   ├── LocalizationPipeline.cs      # 端到端管线
@@ -311,3 +311,49 @@ com.areatarget.tracking/
 ## 许可证
 
 Apache License 2.0
+
+
+### Shared native localization session
+
+Unity loads one combined `visual_localizer` library. Raw `vl_*` calls and versioned
+`atc_*` Session calls use the same C++ implementation. On iOS both imports use
+`__Internal`; the linked native image must include the combined exports and SQLite.
+Tracker and PointCloudLocalizer use the native Session for confirmation, residual
+rejection, time-based smoothing, recovery and expiry. XRSpace displays its output
+without a second Kalman pass. The old Kalman/AT helpers delegate to native APIs;
+legacy noise and frame-count settings are deprecated and do not change the profile.
+The caller's explicit `maxAgeNs` configures native `max_result_age_ns` for that
+Session; changing it resets alignment and in-flight work, then requires fresh native
+confirmation. Effective profile values are recorded in lifecycle diagnostics.
+An initialized Tracker rejects another Initialize call; use a fresh Tracker to load
+another map so a previous Session cannot carry its anchor into the new map.
+
+AR Foundation CPU image timestamps are exposure timestamps in seconds. Their
+clock origin is provider-dependent; the camera transform read in `frameReceived`
+is not documented as an exposure pose. The adapter snapshots pose and intrinsics
+before image conversion, checks CPU/event timestamp identity, and never increments
+a duplicate timestamp or replaces exposure with arrival. A host with verified
+provider contracts may inject `CaptureClockMapper` and set
+`PoseSampleIsFrameBound = true`. `FixedOffsetCaptureClockMapper` accepts an explicitly
+calibrated provider-to-`LocalizationClock` offset and epoch; it does not estimate one
+from delivery. Change the epoch when the calibration changes. Without both verified
+clock and same-exposure pose binding, raw recognition remains available and aligned
+content is suppressed. Physical-device clock/pose calibration and field localization
+benefits have not been validated by Editor or synthetic tests.
+
+The bridge converts right-handed optical/world matrices to Unity coordinates once.
+The bundled GLB loader reflects local Z, normals and triangle winding without moving
+or scaling the model origin. A glTF importer that already performs this reflection
+must not apply it again.
+
+EditorPlatformSupport stamps its generated synthetic image with its real generation
+clock. ImageSeqFrameSource keeps the recorded frame ID, exposure and camera pose,
+converts the AR/Unity basis and decoded bottom-left texture rows to optical top-left
+rows, and accepts an explicit fixed mapper per replay
+epoch. Video playback establishes an epoch at Play/Seek and resets the native
+Session; timer polls keep using the real host clock while paused. Playback does not
+rewrite per-frame exposure. Speeds incompatible with the recorded timing can
+therefore produce native future/old-exposure rejections instead of fresh alignment.
+Missing/ambiguous zero timestamps or invalid poses remain raw-only. This offline
+clock is a replay-host contract, not evidence for an AR device clock calibration.
+The preview flips display UVs to retain the source image's upright appearance.

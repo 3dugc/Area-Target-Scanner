@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-08T08:40:41.125068+00:00",
+  "feature": "Persistent phone video recording with paired localization replay and comparative reports",
+  "provenance": {
+    "productRepository": "git@github.com:3dugc/Area-Target-Scanner.git",
+    "productBaseCommit": "802e1bbe24fdb77792fc2a0866da1fda8140d121",
+    "dataRepository": "git@github.com:3dugc/Data.git",
+    "dataBaseCommit": "227a9247e335379a65560750aa0e26fb89d0a8ad",
+    "sourceBaseline": "plans/2026-10-08-recorded-localization-comparison/source-baseline.json",
+    "workingTree": "existing uncommitted work preserved; this feature is uncommitted; no commit or push performed",
+    "sourceSha256": {
+      "ios_scanner/AreaTargetScanner/ContentView.swift": "16386225d84e5f94ec96daf60592f61843d95d770c88ed5e4413b4a34ee2c611",
+      "ios_scanner/AreaTargetScanner/Models/ScannerWorkspace.swift": "64392817b14dbf3efffafeb6f8cd09ecffde016a4be45c83ad07a33e7958d48b",
+      "ios_scanner/AreaTargetScanner/Services/LocalizationComparison.swift": "a16924d71b1ba2af9edbc9480e11c5d7a87e96033b8b7dd4735fb3168356c35c",
+      "ios_scanner/AreaTargetScanner/Services/LocalizationEvaluation.swift": "226ddddeca001fd640a1260c9c59d076bc21045d74e882355036cc85f1ca22b1",
+      "ios_scanner/AreaTargetScanner/Services/LocalizationReportStore.swift": "b4d355e885a453d14594469ac7b5b830ef55f2d7b54ee3d8ff311ed2638934cf",
+      "ios_scanner/AreaTargetScanner/Views/AreaTargetProcessingView.swift": "b47460bd9f87a146bf98ccd2222f66a3fb7b94a6bf7a6658c9d1a168f08234ec",
+      "ios_scanner/AreaTargetScanner/Views/ScanProcessingView.swift": "07ef48be7c47de9fe5fe8aaec700db2cc75082cd8b2b29b21b36efe38f2009b7",
+      "ios_scanner/AreaTargetScanner/Services/LocalizationRecordingStore.swift": "0e7cc6c48abc246091163c34656c3ebdaf992666f38260d40deed60068c28cbf",
+      "ios_scanner/AreaTargetScanner/Services/LocalizationVideoRecorder.swift": "a19b2ccdade49e9cb914871b99dde0a6794dcee860775690b91dc923d6312063",
+      "ios_scanner/AreaTargetScanner/Services/LocalizationBenchmarkSession.swift": "2b033c116b53a9c14f3dba7efa02c3bf7c03581b971ae7748abdc84f67391fc9",
+      "ios_scanner/AreaTargetScanner/Services/LocalizationBenchmarkAnalysis.swift": "7bcb0bf2a7f62ec62c4f9b6eb5fb8935f9b1f90b6416bf977a223500c410e6d6",
+      "ios_scanner/AreaTargetScanner/Views/LocalizationBenchmarkView.swift": "45d171e71050d881461ba035eab7f603a3fff626cd889c6db480cff331490355",
+      "ios_scanner/AreaTargetScanner/Views/LocalizationBenchmarkAnalysisView.swift": "83d3e098501326e912e7c957b7515d48cb969e5c9ed3ccb49d94cc79a2f2b396",
+      "ios_scanner/AreaTargetScannerTests/LocalizationRecordingStoreTests.swift": "eb14942e0a37a4973bbe90be38e247c394ebfc6cbb68c62ab65effebfa393cc3",
+      "ios_scanner/AreaTargetScannerTests/LocalizationVideoRecorderTests.swift": "8accbb6c283530cdcdb39e0283a59f02bff55b864f89eb752e9798d7b106179e",
+      "ios_scanner/AreaTargetScannerTests/LocalizationBenchmarkSessionTests.swift": "1892bfd01e6c47c3b24eb35abcb8aae59bcb55fb413e87867afb74900e198333",
+      "ios_scanner/AreaTargetScannerTests/LocalizationBenchmarkAnalysisTests.swift": "f448e5b813f5a7bc4e3d794c083ea3634997a2cced2ed3c4a27c8d98b4029b40",
+      "ios_scanner/AreaTargetScannerTests/LocalizationBenchmarkEntryTests.swift": "6f702c2fabe862728b5e6d95c827d63c00ef37a2bde7ffa7a2b4f34139b1e750",
+      "ios_scanner/AreaTargetScannerTests/LocalizationComparisonTests.swift": "29e9b10c0a996ca80871ddc5ee1d14a327044f498916f8ce0621630bdbc09b4c",
+      "ios_scanner/AreaTargetScannerTests/LocalizationReportStoreTests.swift": "b4bffdd1906a98834b0c795066b4732f81264d8e0f15d4819239278381b1f1ab",
+      "ios_scanner/AreaTargetScanner.xcodeproj/project.pbxproj": "3f489f4277f2dd84f2a92067f474c7abe9bd678c21e65d31b12b3851c30dd908"
+    },
+    "baselinePreservation": {
+      "baselineFiles": 89,
+      "changed": [
+        "ios_scanner/AreaTargetScanner/ContentView.swift",
+        "ios_scanner/AreaTargetScanner/Models/ScannerWorkspace.swift",
+        "ios_scanner/AreaTargetScanner/Services/LocalizationComparison.swift",
+        "ios_scanner/AreaTargetScanner/Services/LocalizationEvaluation.swift",
+        "ios_scanner/AreaTargetScanner/Services/LocalizationReportStore.swift",
+        "ios_scanner/AreaTargetScanner/Views/AreaTargetProcessingView.swift",
+        "ios_scanner/AreaTargetScanner/Views/ScanProcessingView.swift"
+      ],
+      "missing": []
+    }
+  },
+  "validation": {
+    "fullRegression": {
+      "tests": 660,
+      "passed": 656,
+      "skipped": 4,
+      "failed": 0,
+      "seconds": 89.649,
+      "resultBundle": "/private/tmp/recorded-comparison-full-20261008.xcresult",
+      "scheme": "AreaTargetNativeSmoke",
+      "skips": [
+        "AreaTargetLiveAPITests.testDownloadedRealHallBundleSavesReopensAndLoadsNative: authorized real bundle opt-in",
+        "AreaTargetLiveAPITests.testRealHallScanUploadsProcessesDownloadsAndLoadsNative: live API and real fixture opt-in",
+        "AreaTargetLiveAPITests.testSyntheticScanUploadsProcessesAndDownloadsOnIOS: live smoke opt-in",
+        "AreaTargetScanArchiveTests.testRealCriticalProtectionArchiveWhenFixtureIsExplicitlyProvided: real capture fixture opt-in"
+      ]
+    },
+    "afterFinalGenerationGuardChange": {
+      "sessionTests": 7,
+      "failed": 0,
+      "seconds": 1.324,
+      "resultBundle": "/private/tmp/recorded-comparison-final-session-20261008.xcresult"
+    },
+    "uiRender": {
+      "tests": 3,
+      "failed": 0,
+      "resultBundle": "/private/tmp/recorded-comparison-render4-20261008.xcresult",
+      "verification": "native rendered pixels, Vision OCR, manual screenshot inspection at narrow width and large dynamic type",
+      "screenshots": [
+        {
+          "path": "results/recorded-localization-comparison/2026-10-08/screenshots/process-area-target.png",
+          "sha256": "1ad5b2efbe31cf2d4e073949462dd083251fb3fd3d9db9c12176d902bf13397a",
+          "source": "actual UIHostingController rendering on iOS Simulator; synthetic fixture data, not a physical device field result"
+        },
+        {
+          "path": "results/recorded-localization-comparison/2026-10-08/screenshots/process-immersal.png",
+          "sha256": "69fd34d89b78f6ff38a79e22c6cbec1fd3f0c55958ecd7ed2636411a5c15df64",
+          "source": "actual UIHostingController rendering on iOS Simulator; synthetic fixture data, not a physical device field result"
+        },
+        {
+          "path": "results/recorded-localization-comparison/2026-10-08/screenshots/comparison-recording-entry.png",
+          "sha256": "a021059ce3177cd8bf163791ee69318dab57f0695270a6875a0656c0d02997e8",
+          "source": "actual UIHostingController rendering on iOS Simulator; synthetic fixture data, not a physical device field result"
+        },
+        {
+          "path": "results/recorded-localization-comparison/2026-10-08/screenshots/comparison-analysis-320.png",
+          "sha256": "c257516d21ac354e1e8d1fc8e5b5184e3ad434336cc639d1469933a19b52b47b",
+          "source": "actual UIHostingController rendering on iOS Simulator; synthetic fixture data, not a physical device field result"
+        },
+        {
+          "path": "results/recorded-localization-comparison/2026-10-08/screenshots/comparison-analysis-large-text-320.png",
+          "sha256": "2d64477b9a4b9add1578aef2de823241ff050a9a741b0a9e97136d55efb21d27",
+          "source": "actual UIHostingController rendering on iOS Simulator; synthetic fixture data, not a physical device field result"
+        },
+        {
+          "path": "results/recorded-localization-comparison/2026-10-08/screenshots/comparison-analysis-insufficient.png",
+          "sha256": "af9a14b724fb1d203c736e22ba31de1b28d3d2fb1747df23b52f43953e9bd30b",
+          "source": "actual UIHostingController rendering on iOS Simulator; synthetic fixture data, not a physical device field result"
+        }
+      ]
+    },
+    "video": "real H.264 MP4 encoded/decoded and recorded frames saved/reloaded; paired workflow uses synthetic engines in tests",
+    "review": "independent spec and quality review completed; reported issues fixed; final guide consistency checked",
+    "diffCheck": "git diff --check passed"
+  },
+  "package": {
+    "path": "/private/tmp/area-target-phone-device-20261008/Build/Products/Debug-iphoneos/AreaTargetScanner.app",
+    "bundleIdentifier": "com.areatarget.scanner",
+    "version": "1.0",
+    "build": "4",
+    "signedDeviceBuild": "BUILD SUCCEEDED",
+    "signatureVerification": "codesign --verify --deep --strict --verbose=2 passed",
+    "executableSha256": "b373667ffb8f4c3115b91840349467aea527679f27f810f5b713df9923a67700",
+    "nativeFrameworkSha256": "cbc179fb0dd4e8bf13e0be91aaa23eb40c5d751e037fe02b7a7c0ca03bc59a47",
+    "confirmedIconSourceSha256": "cef7fb223f98c98d51da7f2ae6b840556e74fad33488d19b6dfab950acb3ab2f"
+  },
+  "device": {
+    "name": "邸锐的iPhone",
+    "model": "iPhone 15 Pro",
+    "coreDeviceIdentifier": "13AD5724-53C6-5790-A092-60AC59B35254",
+    "installOutcome": "success",
+    "verifiedInstalledVersion": "1.0",
+    "verifiedInstalledBuild": "4",
+    "installationURL": "file:///private/var/containers/Bundle/Application/3D7B98E2-1682-42A5-985A-3D39EB988934/AreaTargetScanner.app/",
+    "transientInstallError": "first attempt failed to allocate RSD (-402653181); device remained connected; retry succeeded",
+    "icon": {
+      "placeholder": false,
+      "pixelSize": [
+        180,
+        180
+      ],
+      "beforeSha256": "69e81c746f815daa88ed54354a0d0cb603538a806fc5ff6a0969e3f4b16fb84f",
+      "afterSha256": "69e81c746f815daa88ed54354a0d0cb603538a806fc5ff6a0969e3f4b16fb84f",
+      "unchanged": true
+    },
+    "documentsPreservation": {
+      "beforeFileCount": 598,
+      "afterFileCount": 598,
+      "beforeTotalBytes": 2402305596,
+      "afterTotalBytes": 2402305596,
+      "missing": [],
+      "added": [],
+      "changed": [],
+      "verification": "relative path, file size, last modification date; no device scan content copied or hashed"
+    },
+    "launch": {
+      "outcome": "blocked_by_device_lock",
+      "error": "FBSOpenApplicationErrorDomain 7 Locked",
+      "nextAction": "user unlocks phone; then launch and verify process",
+      "attempts": 2,
+      "latestArtifact": "build/recorded-comparison-20261008/launch-retry.json"
+    }
+  },
+  "limits": {
+    "fieldComparison": "not performed; user must record in original mapped space to obtain real comparative results",
+    "truth": "absolute localization accuracy and false recognition rate are not measured without independent ground truth",
+    "otherUnmeasured": [
+      "SDK confidence",
+      "CPU usage",
+      "memory usage",
+      "power usage"
+    ],
+    "fairness": "same frozen pixels/geometry/time supplied sequentially; order is fixed Area Target then Immersal, so thermal/order confounding remains",
+    "optimization": "report suggestions are evidence-based hypotheses; no algorithm improvement adopted; promotionEligible=false",
+    "independentCapture": "recording creates a new test capture; copies and repeat replay do not create additional independent captures"
+  },
+  "localArtifactSha256": {
+    "build/recorded-comparison-20261008/full-tests.log": "ff6b40e5d7cc9e54d4a57e7f008632a27f5a70d82d88236c681feca65d8f1d81",
+    "build/recorded-comparison-20261008/final-session-tests.log": "3404fe06808ddf5c927e7cc683002f31bd557dbc36ed0c72326acb323380af59",
+    "build/recorded-comparison-20261008/final-device-build.log": "9193134c309ecf5bdaef6fbc4762b465ff8069531be756faea0245cb420b29da",
+    "build/recorded-comparison-20261008/render-tests.log": "e8e546b1f39c9037a0028d48b07c2d969faaab9b6949dabb3852c5c9b372d5ea",
+    "build/recorded-comparison-20261008/install-retry.json": "9f17145fc04f4929178da3c51aad2a76f086080e72c836e7c96f8f6aae8bd64b",
+    "build/recorded-comparison-20261008/apps-after.json": "b9df81f1d1655f929cc9e86e85da018ac06c0a8ffb08c33ab6e51f10e7121601",
+    "build/recorded-comparison-20261008/icon-after.json": "bf4640168bb114319c54faceb6142196042a3205541209124b1dce96c36e0559",
+    "build/recorded-comparison-20261008/documents-preservation.json": "aed227b8b79d8926bf0e5afa9d7f39577681fa761686873e5f11ea1d23ffc18c",
+    "build/recorded-comparison-20261008/launch.json": "e7cdeef26f07f2e78fa404ffbfb120ba504a9e9495821cec19909a5dc8cb2cb1",
+    "build/recorded-comparison-20261008/launch-retry.json": "53b94319275a61b3b2fe5544ef5f9ef598e8cf843ca2001580247a259e030dfd"
+  }
+}

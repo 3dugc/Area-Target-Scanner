@@ -11,4 +11,13 @@ struct ScanProgress: Equatable {
     let keyframeCount: Int
     /// Whether the scan is currently active
     let isScanning: Bool
+    let rejectedKeyframeCount: Int
+    let qualityFeedback: String?
+
+    init(pointCount: Int, coverageArea: Float, keyframeCount: Int, isScanning: Bool,
+         rejectedKeyframeCount: Int = 0, qualityFeedback: String? = nil) {
+        self.pointCount = pointCount; self.coverageArea = coverageArea
+        self.keyframeCount = keyframeCount; self.isScanning = isScanning
+        self.rejectedKeyframeCount = rejectedKeyframeCount; self.qualityFeedback = qualityFeedback
+    }
 }

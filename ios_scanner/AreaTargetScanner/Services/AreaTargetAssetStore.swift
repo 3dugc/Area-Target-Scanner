@@ -118,8 +118,11 @@ final class AreaTargetAssetStore: AreaTargetAssetStoring {
     }
 
     private func savedAsset(_ descriptor: Descriptor, directory: URL) -> AreaTargetSavedAsset {
-        let content = directory.appendingPathComponent("content", isDirectory: true)
-        return AreaTargetSavedAsset(jobID: descriptor.jobID, bundleURL: directory.appendingPathComponent("bundle.zip"),
+        // Both callers have validated and published this generation. Normalize only
+        // its returned identity; resolving the unvalidated cache root would hide links.
+        let canonicalDirectory = directory.resolvingSymlinksInPath()
+        let content = canonicalDirectory.appendingPathComponent("content", isDirectory: true)
+        return AreaTargetSavedAsset(jobID: descriptor.jobID, bundleURL: canonicalDirectory.appendingPathComponent("bundle.zip"),
             directoryURL: content, modelURL: content.appendingPathComponent("optimized.glb"),
             featuresURL: content.appendingPathComponent("features.db"), manifestURL: content.appendingPathComponent("manifest.json"), savedAt: descriptor.savedAt)
     }

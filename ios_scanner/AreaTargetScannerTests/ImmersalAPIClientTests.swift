@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import AreaTargetScanner
 
 final class ImmersalAPIClientTests: XCTestCase {
@@ -15,6 +16,119 @@ final class ImmersalAPIClientTests: XCTestCase {
     override func tearDown() {
         session.invalidateAndCancel()
         ImmersalURLProtocol.handler = nil
+    }
+
+    func testDownloadMapUsesAuthenticatedPOSTAndVerifiesDecodedBytes() async throws {
+        let bytes = Data([0, 1, 2, 3, 255])
+        ImmersalURLProtocol.handler = { request, body in
+            XCTAssertEqual(request.url?.absoluteString, "https://api.immersal.com/mapb64")
+            XCTAssertNil(request.url?.query)
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["token"] as? String, "fixture-token")
+            XCTAssertEqual(json["id"] as? Int, 123)
+            return (200, try Self.mapResponse(bytes))
+        }
+        let result = try await client.downloadMap(mapID: 123, token: "fixture-token")
+        XCTAssertEqual(result, bytes)
+    }
+
+    func testDownloadAcceptsUppercaseSHA256Hex() async throws {
+        let bytes = Data([7, 8, 9])
+        ImmersalURLProtocol.handler = { _, _ in
+            (200, try Self.mapResponse(bytes, hash: Self.hash(bytes).uppercased()))
+        }
+        let downloaded = try await client.downloadMap(mapID: 123, token: "fixture-token")
+        XCTAssertEqual(downloaded, bytes)
+    }
+
+    func testDownloadRejectsMissingOrMalformedBase64HashAndMismatchedDigest() async throws {
+        let bytes = Data([255])
+        let validHash = Self.hash(bytes)
+        let cases: [[String: Any]] = [
+            ["error": "none"],
+            ["error": "none", "b64": "", "sha256_al": Self.hash(Data())],
+            ["error": "none", "b64": "###", "sha256_al": validHash],
+            ["error": "none", "b64": "/w==\n", "sha256_al": validHash],
+            ["error": "none", "b64": "/x==", "sha256_al": validHash],
+            ["error": "none", "b64": bytes.base64EncodedString(), "sha256_al": "abc"],
+            ["error": "none", "b64": bytes.base64EncodedString(), "sha256_al": String(repeating: "g", count: 64)],
+            ["error": "none", "b64": bytes.base64EncodedString(), "sha256_al": String(repeating: "0", count: 64)]
+        ]
+        for json in cases {
+            ImmersalURLProtocol.handler = { _, _ in (200, try JSONSerialization.data(withJSONObject: json)) }
+            do {
+                _ = try await client.downloadMap(mapID: 123, token: "fixture-token")
+                XCTFail("Invalid map payload must fail")
+            } catch { XCTAssertEqual(error as? ImmersalAPIError, .invalidResponse) }
+        }
+    }
+
+    func testDownloadEnforcesDecodedMapSizeLimit() async throws {
+        let smallClient = ImmersalAPIClient(session: session, maximumMapBytes: 3)
+        ImmersalURLProtocol.handler = { _, _ in (200, try Self.mapResponse(Data([1, 2, 3, 4]))) }
+        do {
+            _ = try await smallClient.downloadMap(mapID: 123, token: "fixture-token")
+            XCTFail("Oversized map must fail")
+        } catch { XCTAssertEqual(error as? ImmersalAPIError, .invalidResponse) }
+        ImmersalURLProtocol.handler = { _, _ in (200, try Self.mapResponse(Data([1, 2, 3]))) }
+        let downloaded = try await smallClient.downloadMap(mapID: 123, token: "fixture-token")
+        XCTAssertEqual(downloaded, Data([1, 2, 3]))
+    }
+
+    func testDownloadRejectsInvalidMapIdentityBeforeNetworkRequest() async {
+        ImmersalURLProtocol.handler = { _, _ in
+            XCTFail("Invalid map ID must never make a request")
+            return (200, Data())
+        }
+        for mapID in [0, -1] {
+            do {
+                _ = try await client.downloadMap(mapID: mapID, token: "fixture-token")
+                XCTFail("Invalid map ID must fail")
+            } catch { XCTAssertEqual(error as? ImmersalAPIError, .invalidResponse) }
+        }
+    }
+
+    func testMapDownloadPropagatesAuthenticationAndHTTPFailures() async {
+        for (status, payload, expected) in [
+            (200, Data(#"{"error":"auth"}"#.utf8), ImmersalAPIError.authentication),
+            (503, Data("unavailable".utf8), ImmersalAPIError.http(503))
+        ] {
+            ImmersalURLProtocol.handler = { _, _ in (status, payload) }
+            do {
+                _ = try await client.downloadMap(mapID: 123, token: "fixture-token")
+                XCTFail("Rejected download must fail")
+            } catch { XCTAssertEqual(error as? ImmersalAPIError, expected) }
+        }
+    }
+
+    func testDownloadCancellationDoesNotReturnLateMapBytes() async {
+        let started = expectation(description: "download request started")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        ImmersalURLProtocol.handler = { _, _ in
+            started.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 3)
+            return (200, try Self.mapResponse(Data([1, 2, 3])))
+        }
+        let download = Task { try await client.downloadMap(mapID: 123, token: "fixture-token") }
+        await fulfillment(of: [started], timeout: 3)
+        download.cancel()
+        releaseResponse.signal()
+        do {
+            _ = try await download.value
+            XCTFail("Cancelled download must not publish map bytes")
+        } catch {
+            XCTAssertTrue(error is CancellationError || (error as? URLError)?.code == .cancelled)
+        }
+    }
+
+    private static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func mapResponse(_ bytes: Data, hash: String? = nil) throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["error": "none", "b64": bytes.base64EncodedString(), "sha256_al": hash ?? Self.hash(bytes)])
     }
 
     func testLoginUsesEmailPasswordAndDecodesToken() async throws {

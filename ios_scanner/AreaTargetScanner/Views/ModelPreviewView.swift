@@ -33,13 +33,26 @@ struct ModelPreviewView: View {
             })
             .ignoresSafeArea()
 
+            if loadError != nil {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+                    Text("模型暂时无法预览").font(.headline)
+                    Text("扫描数据仍已保存，可以关闭预览后继续导出或处理。")
+                        .font(.body).multilineTextAlignment(.center)
+                }
+                .foregroundStyle(.white).padding(28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Button(action: { dismiss() }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 36))
                         .foregroundStyle(.white, .black.opacity(0.6))
                 }
-                .padding(.top, 56)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("关闭模型预览")
+                .padding(.top, 12)
 
                 #if DEBUG
                 if isDebugOverlayEnabled {

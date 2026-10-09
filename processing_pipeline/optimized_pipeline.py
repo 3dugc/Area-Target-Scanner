@@ -364,6 +364,8 @@ class OptimizedPipeline:
         feature_options = dict(FEATURE_PROFILE_OPTIONS[self.processing_profile])
         if self.map_clahe:
             feature_options["map_clahe"] = True
+        from processing_pipeline.keyframe_quality import SELECTION_VERSION
+        feature_options["keyframe_selection"] = SELECTION_VERSION
         if self.mobile_feature_limits or mobile_v2:
             feature_options["max_keyframes"] = None if mobile_v2 else 80
             if feature_options["extract_akaze"]:

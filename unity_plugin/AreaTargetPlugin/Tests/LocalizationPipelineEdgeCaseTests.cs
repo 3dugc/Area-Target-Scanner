@@ -81,9 +81,13 @@ namespace AreaTargetPlugin.Tests
             public event Action<int[]> OnSuccessfulLocalizations;
             public ILocalizationResult ResultToReturn { get; set; }
             public bool StopCalled { get; private set; }
+            public bool LocalizeCalled { get; private set; }
 
             public Task<ILocalizationResult> Localize(ICameraData cameraData)
-                => Task.FromResult(ResultToReturn);
+            {
+                LocalizeCalled = true;
+                return Task.FromResult(ResultToReturn);
+            }
             public Task StopAndCleanUp() { StopCalled = true; return Task.CompletedTask; }
         }
 
@@ -255,24 +259,17 @@ namespace AreaTargetPlugin.Tests
         }
 
         [Test]
-        public async Task TrackingQualityThreshold_SetTo100_RejectsQuality99()
+        public async Task LegacyThreshold_DoesNotSkipRawLocalization()
         {
             var platform = new ConfigurablePlatform
             {
-                Result = new PlatformUpdateResult
-                {
-                    Success = true,
-                    TrackingQuality = 99,
-                    CameraData = new StubCameraData()
-                }
+                Result = new PlatformUpdateResult { Success = true, TrackingQuality = 99, CameraData = new StubCameraData() }
             };
-            var pipeline = new LocalizationPipeline(
-                platform, new ConfigurableLocalizer(), new StubSceneUpdater());
+            var localizer = new ConfigurableLocalizer { ResultToReturn = LocalizationResult.Failed() };
+            var pipeline = new LocalizationPipeline(platform, localizer, new StubSceneUpdater());
             pipeline.TrackingQualityThreshold = 100;
-
-            var result = await pipeline.RunFrame();
-
-            Assert.IsFalse(result.Success);
+            await pipeline.RunFrame();
+            Assert.That(localizer.LocalizeCalled, Is.True);
         }
 
         [Test]

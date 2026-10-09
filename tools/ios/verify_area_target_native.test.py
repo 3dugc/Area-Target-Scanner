@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 from build_area_target_native import license_resources, verify_license_resources
-from verify_area_target_native import verify_framework
+from verify_area_target_native import verify_framework, REQUIRED
 
 BUILDER = Path(__file__).with_name("build_area_target_native.py")
 
@@ -34,7 +34,7 @@ class NativeFrameworkSigningTests(unittest.TestCase):
                     build = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                     self.assertEqual(build.returncode, 0, build.stdout)
                     framework = output / "AreaTargetNative.framework"
-                    self.assertEqual(verify_framework(framework, platform)["exportedCFunctions"], 11)
+                    self.assertEqual(verify_framework(framework, platform)["exportedCFunctions"], len(REQUIRED))
                     metadata = json.loads((framework / "dependency.json").read_text())
                     self.assertEqual(metadata["version"], "5.0.0")
                     self.assertEqual(metadata["binarySHA256"], hashlib.sha256((framework / "AreaTargetNative").read_bytes()).hexdigest())

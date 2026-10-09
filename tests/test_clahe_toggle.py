@@ -184,7 +184,8 @@ def test_web_cache_two_states_and_job_echo(api, tmp_path, texture_compression):
     payload = scan_zip()
     zip_hash = hashlib.sha256(payload).hexdigest()
     from processing_pipeline.scan_preparation import POLICY_V2
-    old_payload = f'{zip_hash}:fast:0:{int(texture_compression)}:{server.PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}'
+    from processing_pipeline.keyframe_quality import SELECTION_VERSION
+    old_payload = f'{zip_hash}:fast:0:{int(texture_compression)}:{server.PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}:{SELECTION_VERSION}'
     old_hash = hashlib.sha256(old_payload.encode()).hexdigest()
     assert server._make_input_hash(zip_hash, 'fast', False, texture_compression=texture_compression, map_clahe=False) == old_hash
     assert server._make_input_hash(zip_hash, 'fast', False, texture_compression=texture_compression, map_clahe=True) != old_hash

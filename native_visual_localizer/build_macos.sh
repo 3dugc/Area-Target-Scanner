@@ -51,6 +51,7 @@ fi
 
 echo "=== Verifying native contract ==="
 "$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$BUILT_LIBRARY"
+"$SCRIPT_DIR/../tools/phase0/check_native_symbols.sh" "$BUILT_LIBRARY" "$SCRIPT_DIR/../tools/phase0/required_combined_native_symbols.txt"
 if [[ "$OUTPUT_LIBRARY" != "$BUILT_LIBRARY" ]]; then
     mkdir -p "$(dirname "$OUTPUT_LIBRARY")"
     cp "$BUILT_LIBRARY" "$OUTPUT_LIBRARY"

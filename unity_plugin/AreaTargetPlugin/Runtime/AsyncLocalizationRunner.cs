@@ -195,6 +195,25 @@ namespace AreaTargetPlugin
         }
 
         /// <summary>
+        /// Active Session consumers take the raw outcome without duplicating C++
+        /// age/order gates. Worker publication already isolates lifecycle generations.
+        /// </summary>
+        internal bool TryTakeLatestForSession(out LocalizationFrameResult result)
+        {
+            result = default;
+            lock (_inputLock)
+            {
+                lock (_outputLock)
+                {
+                    if (!_latestResult.HasValue) return false;
+                    result = _latestResult.Value;
+                    _latestResult = null;
+                    return true;
+                }
+            }
+        }
+
+        /// <summary>
         /// Returns the latest result rejected by <see cref="TryDequeueLatest"/> once.
         /// The tracker consumes it only to record why a frame was not applied.
         /// </summary>
@@ -617,7 +636,8 @@ namespace AreaTargetPlugin
                 source.Intrinsics,
                 source.Orientation,
                 source.UnityWorldFromCamera,
-                source.MapId);
+                source.MapId,
+                source.TrackingMetadata);
         }
 
         private static string GetRejectionReason(

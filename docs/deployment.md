@@ -38,6 +38,10 @@ Before publishing, the workflow runs Python pipeline/web/authentication tests an
 
 ## Portainer stack
 
+The production management endpoint is https://port.at.3dugc.com, environment `local` (ID 3), stack `area-target` (ID 9).
+
+On 2026-10-08, both services were re-pulled and redeployed from publish revision `f096061f5e0dd3cac1553b2fe3a2c32b12c8e404`. Both containers are healthy; their runtime v2 configuration returns capacity tier 100 and `maxFrames: 100` for fast and quality profiles, including critical-frame protection. The existing completed job and all three named volumes were retained. See [deployment evidence](validation/cloud-100-2026-10-08/deployment.json) and [runtime verification](validation/cloud-100-2026-10-08/runtime-100.jpg). Authenticated public v2 HTTP response and a new phone task have not yet been verified. Existing prepared tasks retain their original policy; create a new task to negotiate v2.
+
 1. Confirm the target Docker host has the external `proxy` network, and Traefik uses the `websecure` entry point and `letsencrypt` certificate resolver. Point `at.3dugc.com` DNS at that host.
 2. Add Tencent Container Registry to Portainer using a credential that can pull both images.
 3. Generate a password hash as described in [service login](service-login.md). Create or update an `area-target` stack from `docker-compose.portainer.yml`. Set `AREA_TARGET_USERNAME` and `AREA_TARGET_PASSWORD_HASH`; Compose rejects empty credentials. Both image references use `latest`; an old `AREA_TARGET_IMAGE_TAG` stack variable does not override them. For a development deployment, change both image references to `develop`. The host defaults to `at.3dugc.com`. For an existing live stack, preserve its configured routes, resource limits and volumes when adding authentication variables.

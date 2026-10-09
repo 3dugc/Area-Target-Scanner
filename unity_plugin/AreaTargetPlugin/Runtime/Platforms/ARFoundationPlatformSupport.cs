@@ -19,8 +19,16 @@ namespace AreaTargetPlugin.PointCloudLocalization
         private bool _configured;
         private bool _disposed;
         private long _nextFrameId;
-        private long _latestCaptureTimestampNs = -1;
-        private long _lastEmittedCaptureTimestampNs = -1;
+        private CapturePoseSnapshot _latestPoseSnapshot;
+        private Vector4 _latestIntrinsics;
+        private ulong _trackingEpoch;
+        private uint _lastTrackingQuality;
+        private Camera _captureCamera;
+        private ulong _cameraIdentity;
+        /// <summary>Explicit provider-to-LocalizationClock calibration; never inferred from arrival.</summary>
+        public ICaptureClockMapper CaptureClockMapper { get; set; }
+        /// <summary>Set only after the host verifies camera transform represents the event exposure.</summary>
+        public bool PoseSampleIsFrameBound { get; set; }
 
         /// <summary>Stable map identifier attached to each acquired AR frame.</summary>
         public string MapId { get; set; } = "default-map";
@@ -115,19 +123,25 @@ namespace AreaTargetPlugin.PointCloudLocalization
 
         private void OnCameraFrameReceived(UnityEngine.XR.ARFoundation.ARCameraFrameEventArgs args)
         {
-            if (!args.timestampNs.HasValue)
-                return;
+            if (_xrOrigin == null || _xrOrigin.Camera == null) return;
+            uint quality = EvaluateTrackingQuality() == 100 ? 2u : 1u;
+            if (_lastTrackingQuality == 2 && quality != 2) _trackingEpoch++;
+            _lastTrackingQuality = quality;
+            if (_captureCamera != _xrOrigin.Camera) { _captureCamera = _xrOrigin.Camera; _cameraIdentity++; }
+            var cameraTransform = _captureCamera.transform;
+            _latestPoseSnapshot = new CapturePoseSnapshot(args.timestampNs, LocalizationClock.NowTimestampNs,
+                cameraTransform.localToWorldMatrix, _trackingEpoch, quality, PoseSampleIsFrameBound);
+            if (_cameraManager.subsystem != null && _cameraManager.subsystem.TryGetIntrinsics(out var k))
+                _latestIntrinsics = new Vector4(k.focalLength.x, k.focalLength.y, k.principalPoint.x, k.principalPoint.y);
 
-            _latestCaptureTimestampNs = Math.Max(
-                _latestCaptureTimestampNs,
-                args.timestampNs.Value);
         }
 
         private async Task<IPlatformUpdateResult> AcquireFrameFromARFoundation()
         {
             // 1. Acquire latest CPU image from ARCameraManager
             //    This API is provider-agnostic: works with ARKit XR Plugin and OpenXR Plugin
-            if (!_cameraManager.TryAcquireLatestCpuImage(out var cpuImage))
+            if (_cameraManager == null || _xrOrigin == null || _xrOrigin.Camera == null
+                || !_cameraManager.TryAcquireLatestCpuImage(out var cpuImage))
             {
                 return new PlatformUpdateResult { Success = false, TrackingQuality = 0, CameraData = null };
             }
@@ -144,17 +158,20 @@ namespace AreaTargetPlugin.PointCloudLocalization
 
                 // 3. Get tracking pose from XROrigin camera
                 //    XROrigin.Camera provides the tracked camera transform in Unity world space
-                var cameraTransform = _xrOrigin.Camera.transform;
-                var position = cameraTransform.position;
-                var rotation = cameraTransform.rotation;
+                var snapshot = _latestPoseSnapshot;
+                if (!CaptureFrameBinding.TryBind(cpuImage.timestamp, snapshot, CaptureClockMapper,
+                    _cameraIdentity, out var binding))
+                    return new PlatformUpdateResult { Success = false, TrackingQuality = 0, CameraData = null };
+                var position = binding.UnityWorldFromCamera.GetColumn(3);
+                var rotation = binding.UnityWorldFromCamera.rotation;
 
                 // 4. Convert CPU image to byte array (grayscale preferred for feature extraction)
-                var conversionParams = new UnityEngine.XR.ARFoundation.XRCpuImage.ConversionParams
+                var conversionParams = new UnityEngine.XR.ARSubsystems.XRCpuImage.ConversionParams
                 {
                     inputRect = new RectInt(0, 0, cpuImage.width, cpuImage.height),
                     outputDimensions = new Vector2Int(cpuImage.width, cpuImage.height),
                     outputFormat = UnityEngine.TextureFormat.R8,
-                    transformation = UnityEngine.XR.ARFoundation.XRCpuImage.Transformation.None
+                    transformation = UnityEngine.XR.ARSubsystems.XRCpuImage.Transformation.None
                 };
 
                 int bufferSize = cpuImage.GetConvertedDataSize(conversionParams);
@@ -179,21 +196,22 @@ namespace AreaTargetPlugin.PointCloudLocalization
 
                 // 6. Assess tracking quality from ARSession state
                 int trackingQuality = EvaluateTrackingQuality();
-                long captureTimestampNs = NextCaptureTimestampNs();
+                long captureTimestampNs = binding.CaptureTimestampNs;
 
                 var cameraData = new ARFoundationCameraData(
                     imageBytes,
                     cpuImage.width,
                     cpuImage.height,
                     channels: 1, // grayscale
-                    new Vector4(intrinsics.focalLength.x, intrinsics.focalLength.y,
+                    _latestIntrinsics.x > 0 ? _latestIntrinsics : new Vector4(intrinsics.focalLength.x, intrinsics.focalLength.y,
                                 intrinsics.principalPoint.x, intrinsics.principalPoint.y),
                     position,
                     rotation,
                     _nextFrameId++,
                     captureTimestampNs,
                     ImageOrientation.LandscapeRight,
-                    MapId
+                    MapId,
+                    binding.TrackingMetadata
                 );
 
                 return new PlatformUpdateResult
@@ -235,22 +253,10 @@ namespace AreaTargetPlugin.PointCloudLocalization
             _xrOrigin = null;
         }
 
-        private long NextCaptureTimestampNs()
-        {
-            long candidate = _latestCaptureTimestampNs >= 0
-                ? _latestCaptureTimestampNs
-                : _lastEmittedCaptureTimestampNs + 1;
-            if (candidate <= _lastEmittedCaptureTimestampNs)
-                candidate = _lastEmittedCaptureTimestampNs + 1;
-
-            _lastEmittedCaptureTimestampNs = candidate;
-            return candidate;
-        }
-
         /// <summary>
         /// Internal ICameraData implementation for AR Foundation frames.
         /// </summary>
-        private class ARFoundationCameraData : ICameraData
+        private class ARFoundationCameraData : ICameraData, ILocalizationTrackingMetadataSource
         {
             private readonly byte[] _bytes;
             public int Width { get; }
@@ -263,12 +269,13 @@ namespace AreaTargetPlugin.PointCloudLocalization
             public long CaptureTimestampNs { get; }
             public ImageOrientation Orientation { get; }
             public string MapId { get; }
+            public LocalizationTrackingMetadata TrackingMetadata { get; }
 
             public ARFoundationCameraData(
                 byte[] bytes, int width, int height, int channels,
                 Vector4 intrinsics, Vector3 position, Quaternion rotation,
                 long frameId, long captureTimestampNs,
-                ImageOrientation orientation, string mapId)
+                ImageOrientation orientation, string mapId, LocalizationTrackingMetadata trackingMetadata)
             {
                 _bytes = bytes;
                 Width = width;
@@ -281,6 +288,7 @@ namespace AreaTargetPlugin.PointCloudLocalization
                 CaptureTimestampNs = captureTimestampNs;
                 Orientation = orientation;
                 MapId = mapId;
+                TrackingMetadata = trackingMetadata;
             }
 
             public byte[] GetBytes() => _bytes;

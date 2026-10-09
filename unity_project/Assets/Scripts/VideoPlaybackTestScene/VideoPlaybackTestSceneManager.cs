@@ -36,6 +36,10 @@ namespace VideoPlaybackTestScene
         private GameObject _glbModelObj;
         private GltfImport _gltfImport;
         private bool _initialized;
+        private ulong _replayClockEpoch;
+        private int _pendingReplayFrameIndex = -1;
+        private Task _replayResetTask;
+        private const long MaxResultAgeNs = 3000000000L;
 
         // 当前帧的 Texture2D 预览（复用避免频繁 GC）
         private Texture2D _previewTex;
@@ -79,14 +83,14 @@ namespace VideoPlaybackTestScene
             debugPanel?.SetAssetInfo(m.name, m.version, m.keyframeCount);
 
             // Step 4: 初始化 AreaTargetTracker（后台线程）
-            AreaTargetTracker tracker = null;
+            // Unity environment diagnostics are captured on the main thread.
+            AreaTargetTracker tracker = new AreaTargetTracker();
             string initError = null;
 
             await Task.Run(() =>
             {
                 try
                 {
-                    tracker = new AreaTargetTracker();
                     if (!tracker.Initialize(assetPath))
                     {
                         initError = "Tracker 初始化失败";
@@ -109,14 +113,24 @@ namespace VideoPlaybackTestScene
             }
 
             _tracker = tracker;
+            _frameSource.MapId = tracker.MapId;
 
             // Step 5: 订阅调试面板事件
             if (debugPanel != null)
             {
-                debugPanel.OnPlayClicked   += () => _playbackController?.Play();
+                debugPanel.OnPlayClicked += () =>
+                {
+                    BeginReplayClockEpoch(_playbackController.CurrentFrameIndex);
+                    _playbackController.Play();
+                    _playbackController.SeekTo(_playbackController.CurrentFrameIndex);
+                };
                 debugPanel.OnPauseClicked  += () => _playbackController?.Pause();
                 debugPanel.OnStepClicked   += () => _playbackController?.StepForward();
-                debugPanel.OnSeekChanged   += idx => _playbackController?.SeekTo(idx);
+                debugPanel.OnSeekChanged += idx =>
+                {
+                    BeginReplayClockEpoch(idx);
+                    _playbackController.SeekTo(idx);
+                };
                 debugPanel.OnSpeedChanged  += fps => { if (_playbackController != null) _playbackController.PlaybackFPS = fps; };
             }
 
@@ -132,29 +146,53 @@ namespace VideoPlaybackTestScene
         {
             if (!_initialized || _playbackController == null) return;
 
+            // Consume UI Step/Seek requests before Tick clears HasNewFrame.
+            bool pendingFrame = _playbackController.HasNewFrame;
             _playbackController.Tick(Time.deltaTime);
+            if (pendingFrame || _playbackController.HasNewFrame)
+            {
+                _pendingReplayFrameIndex = _playbackController.CurrentFrameIndex;
+                if (_replayClockEpoch == 0 || (_frameSource.CaptureClockMapper == null
+                    && _frameSource.TryGetOriginalExposureTimestampNs(_pendingReplayFrameIndex, out _)))
+                    BeginReplayClockEpoch(_pendingReplayFrameIndex);
+            }
+            if (_pendingReplayFrameIndex >= 0 && (_replayResetTask == null || _replayResetTask.IsCompleted))
+            {
+                if (_replayResetTask != null && _replayResetTask.IsFaulted)
+                {
+                    Debug.LogError("[VideoPlayback] Replay reset failed: " + _replayResetTask.Exception.Message);
+                    _pendingReplayFrameIndex = -1;
+                    return;
+                }
+                int idx = _pendingReplayFrameIndex;
+                CameraFrame frame = _frameSource.GetFrame(idx);
+                if (_tracker.SubmitFrame(frame)) _pendingReplayFrameIndex = -1;
+                if (frame.TrackingMetadata.HasValue && frame.TrackingMetadata.Value.ExtrinsicsValid && mainCamera != null)
+                    mainCamera.transform.SetPositionAndRotation(frame.UnityWorldFromCamera.Value.GetColumn(3), frame.UnityWorldFromCamera.Value.rotation);
+                string state = _playbackController.CurrentState == PlaybackController.State.Playing ? "Playing" : "Paused";
+                debugPanel?.SetFrameInfo(idx, _frameSource.FrameCount, state);
+                debugPanel?.UpdateSeekSlider(idx);
+                UpdatePreviewTexture(frame);
+            }
+            // Delivery and polls use real host time, including paused/no-new-frame
+            // intervals. Never rewrite recorded exposure to make a result fresh.
+            if (_tracker.TryGetLatestTrackingResult(LocalizationClock.NowTimestampNs, MaxResultAgeNs, out var result))
+            {
+                HandleTrackingResult(result, Matrix4x4.identity);
+                debugPanel?.SetTrackingInfo(result.MatchedFeatures, result.Confidence);
+            }
+        }
 
-            if (!_playbackController.HasNewFrame) return;
-
-            int idx = _playbackController.CurrentFrameIndex;
-
-            // 获取当前帧并送入 Tracker
-            CameraFrame frame = _frameSource.GetFrame(idx);
-            TrackingResult result = _tracker.ProcessFrame(frame);
-
-            // 获取 camera-to-world 位姿
-            Matrix4x4 cameraPose = _frameSource.GetPose(idx);
-
-            HandleTrackingResult(result, cameraPose);
-
-            // 更新调试面板
-            string stateStr = _playbackController.CurrentState == PlaybackController.State.Playing ? "Playing" : "Paused";
-            debugPanel?.SetFrameInfo(idx, _frameSource.FrameCount, stateStr);
-            debugPanel?.SetTrackingInfo(result.MatchedFeatures, result.Confidence);
-            debugPanel?.UpdateSeekSlider(idx);
-
-            // 更新图像预览
-            UpdatePreviewTexture(frame);
+        private void BeginReplayClockEpoch(int frameIndex)
+        {
+            _replayClockEpoch++;
+            _pendingReplayFrameIndex = frameIndex;
+            _replayResetTask = _tracker?.ResetAsync();
+            if (_frameSource.TryGetOriginalExposureTimestampNs(frameIndex, out long sourceExposure))
+                _frameSource.CaptureClockMapper = new FixedOffsetCaptureClockMapper(
+                    checked(LocalizationClock.NowTimestampNs - sourceExposure), _replayClockEpoch);
+            else
+                _frameSource.CaptureClockMapper = null;
         }
 
         private void UpdatePreviewTexture(CameraFrame frame)
@@ -191,8 +229,9 @@ namespace VideoPlaybackTestScene
             // TRACKING 状态：更新 Cube 和 GLB 位置
             if (result.State == TrackingState.TRACKING && _originCube != null)
             {
-                // scanToWorld = cameraPose (camera-to-world) * result.Pose (world-to-camera)
-                Matrix4x4 scanToWorld = cameraPose * result.Pose;
+                // Shared Session already returns Unity-world-from-Unity-scan.
+                // cameraPose is retained only for the legacy method signature.
+                Matrix4x4 scanToWorld = result.Pose;
 
                 Vector3 pos = new Vector3(scanToWorld.m03, scanToWorld.m13, scanToWorld.m23);
                 Quaternion rot = scanToWorld.rotation;
@@ -214,6 +253,12 @@ namespace VideoPlaybackTestScene
             if (toLost)
             {
                 SetCubeColor(Color.red);
+                if (_glbModelObj != null) _glbModelObj.SetActive(false);
+            }
+
+            if (result.State != TrackingState.TRACKING)
+            {
+                if (_originCube != null) _originCube.SetActive(false);
                 if (_glbModelObj != null) _glbModelObj.SetActive(false);
             }
 

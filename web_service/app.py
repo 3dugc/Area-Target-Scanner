@@ -608,9 +608,10 @@ def _make_input_hash(zip_hash, profile, uv_unwrap, texture_compression=False, *,
     import cv2
 
     digest = hashlib.sha256()
-    # Include both the descriptor producer and preparation policy in cache identity.
+    # Keep texture, descriptor producer, preparation and frame selection identities.
     from processing_pipeline.scan_preparation import POLICY_V2
-    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{int(texture_compression)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}"
+    from processing_pipeline.keyframe_quality import SELECTION_VERSION
+    payload = f"{zip_hash}:{profile}:{int(uv_unwrap)}:{int(texture_compression)}:{PIPELINE_CACHE_VERSION}:{cv2.__version__}:{POLICY_V2}:{SELECTION_VERSION}"
     if map_clahe:
         payload += MAP_CLAHE_FINGERPRINT
     digest.update(payload.encode("utf-8"))
@@ -754,6 +755,7 @@ def run_pipeline(job_id, zip_path, uv_unwrap=False, profile="fast", map_clahe=Fa
             prepared_dir = tempfile.mkdtemp(prefix='prepared_', dir=os.path.join(UPLOAD_DIR, job_id))
             preparation = prepare_scan(scan_root, os.path.join(prepared_dir, 'scan'),
                                        profile=profile, uv_unwrap=uv_unwrap,
+                                       keyframe_selection="quality-coverage-v1",
                                        policy=mobile_policy, capacity=mobile_capacity)
             scan_root = str(preparation.root)
             validate_scan(scan_root, uv_unwrap, prepare_uv=True,

@@ -15,9 +15,16 @@ def api_boundary(request):
     return request.getfixturevalue("api")
 
 
-def many_frame_zip(count=73, size=(1920, 1440)):
+def many_frame_zip(count=73, size=(1920, 1440), *, textured=False):
     image = io.BytesIO()
-    Image.new('RGB', size, 'gray').save(image, format='JPEG')
+    if textured:
+        import numpy as np
+        width, height = size
+        tile = np.random.default_rng(42).integers(24, 232, (32, 32), dtype=np.uint8)
+        pixels = np.tile(tile, ((height + 31) // 32, (width + 31) // 32))[:height, :width]
+        Image.fromarray(pixels).convert('RGB').save(image, format='JPEG', quality=90)
+    else:
+        Image.new('RGB', size, 'gray').save(image, format='JPEG')
     width, height = size
     frames = [{'index': index, 'timestamp': index * .5, 'imageFile': f'images/{index}.jpg',
                'transform': [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, index * .1, 0, 0, 1],
@@ -96,7 +103,7 @@ def install_worker_boundary_fakes(monkeypatch, tmp_path, *, fail_optimization=Fa
 
 def test_mobile_worker_prepares_before_uv_and_exports_actual_policy_without_mutating_raw(api_boundary, monkeypatch, tmp_path):
     server, client, submissions = api_boundary
-    payload = many_frame_zip(count=100)
+    payload = many_frame_zip(count=100, textured=True)
     assert submit(client, payload).status_code == 202
     calls = install_worker_boundary_fakes(monkeypatch, tmp_path)
     from pathlib import Path
@@ -130,9 +137,76 @@ def test_mobile_worker_prepares_before_uv_and_exports_actual_policy_without_muta
     assert preparation['preparedBy'] == 'server'
 
 
+def test_mobile_bundle_retains_full_source_quality_report_after_derivative_cleanup(api_boundary, monkeypatch, tmp_path):
+    server, client, submissions = api_boundary
+    # Distinct source IDs expose accidental substitution with derivative ordinals.
+    payload = many_frame_zip(count=84, size=(80, 60), textured=True)
+    uniform = io.BytesIO()
+    Image.new('RGB', (80, 60), 'gray').save(uniform, format='JPEG')
+    modified = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(payload)) as source, zipfile.ZipFile(modified, 'w', zipfile.ZIP_DEFLATED) as output:
+        for entry in source.infolist():
+            data = source.read(entry)
+            if entry.filename == 'manifest.json':
+                manifest = json.loads(data)
+                for ordinal, frame in enumerate(manifest['frames']):
+                    frame['index'] = 1000 + 17 * ordinal
+                data = json.dumps(manifest).encode()
+            elif entry.filename == 'model.obj':
+                data = b'mtllib model.mtl\n' + data
+            elif entry.filename in ('images/5.jpg', 'images/41.jpg'):
+                data = uniform.getvalue()
+            output.writestr(entry.filename, data)
+        output.writestr('model.mtl', 'newmtl surface\nmap_Kd texture.jpg\n')
+        output.writestr('texture.jpg', uniform.getvalue())
+    payload = modified.getvalue()
+    response = submit(client, payload, uv_unwrap='0')
+    assert response.status_code == 202, response.json
+    calls = install_worker_boundary_fakes(monkeypatch, tmp_path)
+
+    from pathlib import Path
+    import processing_pipeline.scan_preparation as preparation_module
+    real_prepare = preparation_module.prepare_scan
+    def record_preparation(*args, **kwargs):
+        prepared = real_prepare(*args, **kwargs)
+        calls['sourceSelection'] = json.loads((prepared.root / 'manifest.json').read_text())['sourceKeyframeSelection']
+        return prepared
+    monkeypatch.setattr(preparation_module, 'prepare_scan', record_preparation)
+
+    import processing_pipeline.optimized_pipeline as optimized
+    real_export = optimized.OptimizedPipeline.export_asset_bundle
+    def export_with_derivative_report(self, glb, mesh, features, directory):
+        real_export(self, glb, mesh, features, directory)
+        report = {'version': 'quality-coverage-v1', 'inputCount': len(calls['images']),
+                  'eligibleCount': len(calls['images']), 'rejected': [], 'budgetDiscardedCount': 0,
+                  'selectedImageIds': [image['source_image_id'] for image in calls['images']]}
+        calls['derivativeSelection'] = report
+        path = Path(directory) / 'manifest.json'
+        manifest = json.loads(path.read_text())
+        manifest['producer'] = {'keyframeSelection': report}
+        path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(optimized.OptimizedPipeline, 'export_asset_bundle', export_with_derivative_report)
+
+    server.run_pipeline(*submissions[0])
+    job = server.job_store.get(submissions[0][0])
+    assert job['status'] == 'completed', job.get('error')
+    assert not Path(calls['root']).exists()
+    assert Path(submissions[0][1]).read_bytes() == payload
+    with zipfile.ZipFile(job['result_zip']) as bundle:
+        manifest = json.loads(bundle.read('manifest.json'))
+    report = manifest['sourceKeyframeSelection']
+    assert report == calls['sourceSelection']
+    assert report['inputCount'] == 84 and report['eligibleCount'] == 82
+    assert report['rejected'] == [{'imageId': 1085, 'reason': 'texture'}, {'imageId': 1697, 'reason': 'texture'}]
+    assert report['budgetDiscardedCount'] == 2 and len(report['selectedImageIds']) == 80
+    assert report['selectedImageIds'] == [image['source_image_id'] for image in calls['images']]
+    assert manifest['producer']['keyframeSelection'] == calls['derivativeSelection']
+    assert manifest['producer']['keyframeSelection']['inputCount'] == 80
+
+
 def test_worker_failure_cleans_derivative_but_retains_original_upload(api_boundary, monkeypatch, tmp_path):
     server, client, submissions = api_boundary
-    payload = many_frame_zip(count=1, size=(32, 24))
+    payload = many_frame_zip(count=1, size=(32, 24), textured=True)
     assert submit(client, payload).status_code == 202
     calls = install_worker_boundary_fakes(monkeypatch, tmp_path, fail_optimization=True)
     # No texture is needed until validation, so synthesize only the external UV boundary.
@@ -148,6 +222,20 @@ def test_worker_failure_cleans_derivative_but_retains_original_upload(api_bounda
     assert not Path(calls['root']).exists()
     assert Path(submissions[0][1]).read_bytes() == payload
     assert (Path(server.UPLOAD_DIR) / job['id'] / 'extracted' / 'model.obj').is_file()
+
+
+def test_mobile_worker_rejects_uniform_capture_without_mutating_original(api_boundary, monkeypatch, tmp_path):
+    server, client, submissions = api_boundary
+    payload = many_frame_zip(count=3, size=(80, 60))
+    assert submit(client, payload).status_code == 202
+    calls = install_worker_boundary_fakes(monkeypatch, tmp_path)
+    server.run_pipeline(*submissions[0])
+    job = server.job_store.get(submissions[0][0])
+    assert job['status'] == 'failed'
+    assert 'No usable keyframes' in job['error']
+    assert 'root' not in calls
+    from pathlib import Path
+    assert Path(submissions[0][1]).read_bytes() == payload
 
 
 def with_client_metadata(payload, **changes):

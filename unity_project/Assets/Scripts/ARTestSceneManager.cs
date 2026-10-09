@@ -45,6 +45,12 @@ public class ARTestSceneManager : MonoBehaviour
     private float _fpsTimer;
     private int _fpsFrameCount;
     private long _lastCaptureTimestampNs = -1;
+    public ICaptureClockMapper CaptureClockMapper { get; set; }
+    public bool PoseSampleIsFrameBound { get; set; }
+    private ulong _trackingEpoch;
+    private uint _lastPlatformTrackingQuality;
+    private Camera _captureCamera;
+    private ulong _cameraIdentity;
 
     private const long MaxLocalizationResultAgeNs = 1_000_000_000L;
 
@@ -204,9 +210,10 @@ public class ARTestSceneManager : MonoBehaviour
 
     void Update()
     {
+        if (_initialized) ObservePlatformTracking();
         if (_initialized && _tracker != null
             && _tracker.TryGetLatestTrackingResult(
-                _lastCaptureTimestampNs,
+                LocalizationClock.NowTimestampNs,
                 MaxLocalizationResultAgeNs,
                 out TrackingResult trackingResult))
         {
@@ -225,14 +232,41 @@ public class ARTestSceneManager : MonoBehaviour
         }
     }
 
+    private uint ObservePlatformTracking()
+    {
+        uint quality = ARSession.state == ARSessionState.SessionTracking ? 2u : 1u;
+        if (_lastPlatformTrackingQuality == 2 && quality != 2)
+        {
+            _trackingEpoch++;
+            // Platform lifecycle loss is explicit even when no CPU image arrives.
+            _tracker?.Reset();
+        }
+        _lastPlatformTrackingQuality = quality;
+        return quality;
+    }
+
     private void OnCameraFrameReceived(ARCameraFrameEventArgs args)
     {
         if (!_initialized) return;
+        Camera captureCamera = Camera.main;
+        if (captureCamera == null) return;
+        if (_captureCamera != captureCamera) { _captureCamera = captureCamera; _cameraIdentity++; }
+        uint captureQuality = ObservePlatformTracking();
+        var capturePose = new CapturePoseSnapshot(args.timestampNs, LocalizationClock.NowTimestampNs,
+            captureCamera.transform.localToWorldMatrix, _trackingEpoch, captureQuality, PoseSampleIsFrameBound);
 
         _frameCount++;
 
         if (!arCameraManager.TryAcquireLatestCpuImage(out XRCpuImage cpuImage))
             return;
+
+        if (!CaptureFrameBinding.TryBind(cpuImage.timestamp, capturePose, CaptureClockMapper,
+            _cameraIdentity, out var captureBinding))
+        {
+            cpuImage.Dispose();
+            return;
+        }
+        Matrix4x4 captureIntrinsics = BuildIntrinsicsMatrix(cpuImage.width, cpuImage.height);
 
         var conversionParams = new XRCpuImage.ConversionParams
         {
@@ -257,7 +291,7 @@ public class ARTestSceneManager : MonoBehaviour
         int height = cpuImage.height;
         cpuImage.Dispose();
 
-        Matrix4x4 intrinsics = BuildIntrinsicsMatrix(width, height);
+        Matrix4x4 intrinsics = captureIntrinsics;
 
         Camera arCamera = Camera.main;
         if (arCamera == null)
@@ -266,6 +300,7 @@ public class ARTestSceneManager : MonoBehaviour
             return;
         }
 
+        _lastCaptureTimestampNs = captureBinding.CaptureTimestampNs;
         var frame = new CameraFrame
         {
             ImageData = grayscaleData,
@@ -273,27 +308,22 @@ public class ARTestSceneManager : MonoBehaviour
             Height = height,
             Intrinsics = intrinsics,
             FrameId = _frameCount,
-            CaptureTimestampNs = GetMonotonicCaptureTimestampNs(args),
+            CaptureTimestampNs = captureBinding.CaptureTimestampNs,
+            TrackingMetadata = captureBinding.TrackingMetadata,
             Orientation = ImageOrientation.LandscapeRight,
-            UnityWorldFromCamera = arCamera.transform.localToWorldMatrix,
+            UnityWorldFromCamera = captureBinding.UnityWorldFromCamera,
             MapId = _tracker.MapId
         };
 
         _tracker.SubmitFrame(frame);
     }
 
-    private long GetMonotonicCaptureTimestampNs(ARCameraFrameEventArgs args)
-    {
-        long candidate = args.timestampNs ?? ((long)_frameCount * 1_000_000L);
-        if (candidate <= _lastCaptureTimestampNs)
-            candidate = _lastCaptureTimestampNs + 1;
 
-        _lastCaptureTimestampNs = candidate;
-        return candidate;
-    }
 
     private void HandleTrackingResult(TrackingResult result)
     {
+        if (result.State != AreaTargetPlugin.TrackingState.TRACKING && areaTargetOrigin != null)
+            areaTargetOrigin.gameObject.SetActive(false);
         switch (result.State)
         {
             case AreaTargetPlugin.TrackingState.TRACKING:
@@ -302,8 +332,7 @@ public class ARTestSceneManager : MonoBehaviour
                     areaTargetOrigin.gameObject.SetActive(true);
                     Vector3 pos = new Vector3(result.Pose.m03, result.Pose.m13, result.Pose.m23);
                     Quaternion rot = result.Pose.rotation;
-                    areaTargetOrigin.position = Vector3.Lerp(areaTargetOrigin.position, pos, 0.3f);
-                    areaTargetOrigin.rotation = Quaternion.Slerp(areaTargetOrigin.rotation, rot, 0.3f);
+                    areaTargetOrigin.SetPositionAndRotation(pos, rot);
                 }
 
                 if (lostIndicatorUI != null) lostIndicatorUI.SetActive(false);

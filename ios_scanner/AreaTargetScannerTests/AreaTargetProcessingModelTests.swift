@@ -34,11 +34,42 @@ final class AreaTargetProcessingModelTests: XCTestCase {
     func testNewJobPersistsDefaultDisabledMapCLAHE() throws {
         let job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(),
             scanDirectoryPath: scan.path, displayName: "默认关闭光照增强", createdAt: Date())
-        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
+        let encoded = try JSONEncoder().encode(job)
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         XCTAssertEqual(document["mapCLAHE"] as? Bool, false,
-            "New jobs must persist the disabled map CLAHE choice before submission")
-        XCTAssertEqual(job.profile, "fast", "The remote develop default must remain unchanged")
-        XCTAssertTrue(job.uvUnwrap)
+            "New jobs must persist the default disabled map CLAHE option before submission")
+    }
+
+    func testDisabledMapCLAHEKeepsHistoricalBuildIdentityAndRestoresReports() throws {
+        let job = AreaTargetProcessingJob(id: "original-map", scanDirectoryPath: scan.path,
+            displayName: "原关闭地图", createdAt: Date(timeIntervalSince1970: 1))
+        let oldConfiguration = "profile=quality;uv_unwrap=1;client_preparation=unrecorded"
+        XCTAssertEqual(Array(job.localizationBuildConfiguration.utf8), Array(oldConfiguration.utf8))
+        var document = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
+        document.removeValue(forKey: "mapCLAHE")
+        let historical = try JSONDecoder().decode(AreaTargetProcessingJob.self,
+            from: JSONSerialization.data(withJSONObject: document))
+        XCTAssertFalse(historical.mapCLAHE)
+        XCTAssertEqual(Array(historical.localizationBuildConfiguration.utf8), Array(oldConfiguration.utf8))
+        func identity(_ configuration: String) -> LocalizationAssetIdentity {
+            LocalizationAssetIdentity(provider: .areaTarget, assetID: job.id,
+                sourceFingerprint: String(repeating: "a", count: 64), engineVersion: "existing-engine",
+                assetDigest: String(repeating: "b", count: 64),
+                buildConfiguration: LocalizationCoreMetadata.liveBuildConfiguration(base: configuration))
+        }
+        let oldReport = LocalizationEvaluationAccumulator(identity: identity(oldConfiguration))
+            .report(date: Date(timeIntervalSince1970: 2))
+        let reportDirectory = root.appendingPathComponent("existing-map-reports", isDirectory: true)
+        _ = try LocalizationReportStore(rootDirectory: reportDirectory).save(report: oldReport)
+        let restored = LocalizationReportStore(rootDirectory: reportDirectory)
+        XCTAssertEqual(try restored.latest(identity: identity(job.localizationBuildConfiguration)), oldReport)
+        XCTAssertEqual(try restored.latest(identity: identity(historical.localizationBuildConfiguration)), oldReport)
+        var enabled = job
+        enabled.mapCLAHE = true
+        let enabledConfiguration = oldConfiguration + ";map_clahe=1;map_clahe_clip_limit=2.0;map_clahe_tile_grid=8x8"
+        XCTAssertEqual(enabled.localizationBuildConfiguration, enabledConfiguration)
+        XCTAssertNotEqual(identity(enabled.localizationBuildConfiguration), oldReport.identity)
+        XCTAssertNil(try restored.latest(identity: identity(enabled.localizationBuildConfiguration)))
     }
 
     private func setMapCLAHECapability(_ enabled: Bool) async {
@@ -59,6 +90,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
             var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
                 displayName: "原关闭地图", createdAt: Date())
             job.clientPreparation = preparation
+            job.profile = "fast"
             let historical = "profile=fast;uv_unwrap=1;" + (preparation?.identityConfiguration ?? "client_preparation=unrecorded")
             XCTAssertEqual(Array(job.localizationBuildConfiguration.utf8), Array(historical.utf8))
             job.mapCLAHE = true
@@ -73,6 +105,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         let url = root.appendingPathComponent("persist/map-jobs.json")
         var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
             displayName: "增强地图", createdAt: Date(timeIntervalSince1970: 1), serverOrigin: .current)
+        job.profile = "fast"
         job.mapCLAHE = true
         job.phase = .stopped
         job.accepted = true
@@ -142,8 +175,10 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertTrue(job.mapCLAHE)
         XCTAssertEqual(journal.jobs.first?.mapCLAHE, true)
         XCTAssertEqual(job.remote?.mapCLAHE, true)
-        XCTAssertEqual(job.profile, "fast")
+        XCTAssertEqual(job.profile, "quality")
         XCTAssertTrue(job.uvUnwrap)
+        XCTAssertEqual(archive.profilesSeen, ["quality"])
+        XCTAssertEqual(archive.uvUnwrapSeen, [true])
         XCTAssertTrue(job.localizationBuildConfiguration.contains("map_clahe=1"))
         let submitted = await api.submittedMapCLAHE
         XCTAssertEqual(submitted, [true])
@@ -336,15 +371,389 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         let model = model()
         await model.start(scanDirectory: scan, displayName: "原配置")
         let original = try XCTUnwrap(model.selectedJob)
-        await api.setRemoteProfileOverride("quality")
+        await api.setRemoteProfileOverride(original.profile == "quality" ? "fast" : "quality")
         await model.refresh(jobID: original.id)
-        XCTAssertEqual(model.selectedJob?.profile, "fast")
+        XCTAssertEqual(model.selectedJob?.profile, original.profile)
         XCTAssertEqual(model.selectedJob?.remote, original.remote)
         await api.setRemoteProfileOverride(nil)
         await api.setRemoteUVUnwrapOverride(false)
         await model.refresh(jobID: original.id)
         XCTAssertEqual(model.selectedJob?.uvUnwrap, true)
         XCTAssertEqual(model.selectedJob?.remote, original.remote)
+    }
+
+    func testStoppedFrozenTaskAllowsNewExplicitSettingsWithoutChangingOldJournal() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "原快速无纹理任务", profile: .fast, uvUnwrap: false)
+        let first = try XCTUnwrap(model.selectedJob)
+        model.stopLocalTracking(jobID: first.id)
+        let stopped = try XCTUnwrap(model.selectedJob)
+        XCTAssertEqual(stopped.phase, .stopped)
+        XCTAssertEqual(stopped.profile, "fast")
+        XCTAssertFalse(stopped.uvUnwrap)
+        XCTAssertFalse(stopped.mapCLAHE)
+        XCTAssertFalse(model.deletionBlocked(scanPath: scan.path))
+        await model.start(scanDirectory: scan, displayName: "新质量任务", profile: .quality, uvUnwrap: true)
+        let replacement = try XCTUnwrap(model.selectedJob)
+        XCTAssertNotEqual(replacement.id, first.id)
+        XCTAssertEqual(replacement.profile, "quality")
+        XCTAssertTrue(replacement.uvUnwrap)
+        XCTAssertFalse(replacement.mapCLAHE)
+        XCTAssertEqual(model.jobs.first(where: { $0.id == first.id }), stopped)
+        XCTAssertEqual(journal.jobs.first(where: { $0.id == first.id }), stopped)
+        XCTAssertEqual(archive.profilesSeen, ["fast", "quality"])
+        XCTAssertEqual(archive.uvUnwrapSeen, [false, true])
+        let profiles = await api.submittedProfiles
+        XCTAssertEqual(profiles, ["fast", "quality"])
+    }
+
+    func testNewTaskDefaultsToQualityAcrossJournalArchiveAndSubmission() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "默认质量建图")
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertEqual(job.profile, "quality")
+        XCTAssertTrue(job.uvUnwrap)
+        XCTAssertEqual(journal.jobs.first?.profile, "quality")
+        XCTAssertEqual(journal.jobs.first?.uvUnwrap, true)
+        XCTAssertEqual(archive.profilesSeen, ["quality"])
+        XCTAssertEqual(archive.uvUnwrapSeen, [true])
+        let profiles = await api.submittedProfiles
+        XCTAssertEqual(profiles, ["quality"])
+        let uvUnwrap = await api.submittedUVUnwrap
+        XCTAssertEqual(uvUnwrap, [true])
+        XCTAssertEqual(job.remote?.profile, "quality")
+        XCTAssertEqual(job.remote?.uvUnwrap, true)
+        XCTAssertEqual(job.phase, .processing)
+    }
+
+    func testExplicitUVUnwrapFalseReachesJournalArchiveAndSubmission() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "关闭 UV 展开", uvUnwrap: false)
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertFalse(job.uvUnwrap)
+        XCTAssertEqual(job.profile, "quality")
+        XCTAssertEqual(journal.jobs.first?.uvUnwrap, false)
+        XCTAssertEqual(archive.uvUnwrapSeen, [false])
+        let uvUnwrap = await api.submittedUVUnwrap
+        XCTAssertEqual(uvUnwrap, [false])
+        XCTAssertEqual(job.remote?.uvUnwrap, false)
+        XCTAssertTrue(job.localizationBuildConfiguration.contains("uv_unwrap=0"))
+        XCTAssertEqual(job.phase, .processing)
+    }
+
+    func testPendingTaskKeepsFrozenUVWhenChangedSettingIsRequested() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "原开启 UV 任务")
+        let original = try XCTUnwrap(model.selectedJob)
+        let token = try XCTUnwrap(tokens.values[original.id])
+        await model.start(scanDirectory: scan, displayName: "关闭 UV 展开", uvUnwrap: false)
+        XCTAssertEqual(model.selectedJobID, original.id)
+        XCTAssertEqual(model.jobs, [original])
+        XCTAssertEqual(tokens.values[original.id], token)
+        XCTAssertEqual(tokens.values.count, 1)
+        XCTAssertEqual(archive.calls, 1)
+        let uvUnwrap = await api.submittedUVUnwrap
+        XCTAssertEqual(uvUnwrap, [true])
+        XCTAssertTrue(model.message?.contains("已有未完成任务") == true)
+        XCTAssertTrue(model.message?.contains("UV 与纹理重建已开启") == true)
+    }
+
+    func testRestoredPausedFalseUVTaskResumesSameArchiveAndSetting() async throws {
+        await api.setRejectBeforeAccepting(true)
+        let originalModel = model()
+        await originalModel.start(scanDirectory: scan, displayName: "关闭 UV 的暂停任务", uvUnwrap: false)
+        let original = try XCTUnwrap(originalModel.selectedJob)
+        let token = try XCTUnwrap(tokens.values[original.id])
+        let zip = try XCTUnwrap(original.archiveURL)
+        XCTAssertEqual(original.phase, .paused)
+        XCTAssertFalse(original.uvUnwrap)
+        let restored = model()
+        await restored.start(scanDirectory: scan, displayName: "默认开启 UV")
+        XCTAssertEqual(restored.selectedJobID, original.id)
+        XCTAssertEqual(restored.selectedJob?.uvUnwrap, false)
+        XCTAssertEqual(restored.selectedJob?.archiveURL, zip)
+        XCTAssertEqual(restored.selectedJob?.archiveSHA256, original.archiveSHA256)
+        XCTAssertTrue(restored.message?.contains("UV 与纹理重建已关闭") == true)
+        await api.setRejectBeforeAccepting(false)
+        await restored.resume(jobID: original.id)
+        XCTAssertEqual(restored.jobs.count, 1)
+        XCTAssertEqual(restored.selectedJob?.uvUnwrap, false)
+        XCTAssertEqual(restored.selectedJob?.remote?.uvUnwrap, false)
+        XCTAssertEqual(restored.selectedJob?.phase, .processing)
+        XCTAssertEqual(restored.selectedJob?.localizationBuildConfiguration, original.localizationBuildConfiguration)
+        XCTAssertEqual(tokens.values[original.id], token)
+        XCTAssertEqual(archive.uvUnwrapSeen, [false], "Resuming must reuse the original ZIP and UV setting")
+        let uvUnwrap = await api.submittedUVUnwrap
+        XCTAssertEqual(uvUnwrap, [false, false])
+        let events = await api.events
+        XCTAssertTrue(events.allSatisfy { $0.1 == original.id && $0.2 == token })
+    }
+
+    func testDownloadedTrueUVMapIsRetainedWhenNewTaskDisablesUV() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "开启 UV 的旧地图")
+        let firstID = try XCTUnwrap(model.selectedJobID)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: firstID)
+        await model.download(jobID: firstID)
+        let original = try XCTUnwrap(model.selectedJob)
+        let asset = try XCTUnwrap(original.savedAsset)
+        XCTAssertEqual(original.phase, .downloaded)
+        XCTAssertTrue(original.uvUnwrap)
+        await api.setRemoteStatus(.queued)
+        await model.start(scanDirectory: scan, displayName: "关闭 UV 的新地图", uvUnwrap: false)
+        let rebuilt = try XCTUnwrap(model.selectedJob)
+        XCTAssertNotEqual(rebuilt.id, firstID)
+        XCTAssertFalse(rebuilt.uvUnwrap)
+        XCTAssertEqual(rebuilt.remote?.uvUnwrap, false)
+        XCTAssertEqual(rebuilt.phase, .processing)
+        XCTAssertEqual(model.jobs.count, 2)
+        XCTAssertEqual(model.jobs.first(where: { $0.id == firstID }), original)
+        XCTAssertEqual(journal.jobs.first(where: { $0.id == firstID }), original)
+        XCTAssertEqual(assets.values[firstID], asset)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: asset.bundleURL.path))
+        let uvUnwrap = await api.submittedUVUnwrap
+        XCTAssertEqual(uvUnwrap, [true, false])
+        XCTAssertEqual(archive.uvUnwrapSeen, [true, false])
+    }
+
+    func testFalseUVTaskRejectsRemoteTrueConfiguration() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "关闭 UV 配置核对", uvUnwrap: false)
+        let original = try XCTUnwrap(model.selectedJob)
+        XCTAssertFalse(original.uvUnwrap)
+        await api.setRemoteUVUnwrapOverride(true)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: original.id)
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertFalse(job.uvUnwrap)
+        XCTAssertEqual(job.phase, .processing)
+        XCTAssertEqual(job.remote, original.remote)
+        XCTAssertNil(job.savedAsset)
+        XCTAssertEqual(model.message, AreaTargetAPIError.invalidResponse.localizedDescription)
+    }
+
+    func testJournalRoundTripKeepsExplicitUVChoices() throws {
+        let store = AreaTargetJobStore(url: root.appendingPathComponent("persist/uv-jobs.json"))
+        let enabled = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "开启 UV", createdAt: Date(timeIntervalSince1970: 100))
+        var disabled = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "关闭 UV", createdAt: Date(timeIntervalSince1970: 200))
+        disabled.uvUnwrap = false
+        try store.save([enabled, disabled])
+        XCTAssertEqual(try store.load(), [enabled, disabled])
+        XCTAssertEqual(try store.load().map(\.uvUnwrap), [true, false])
+    }
+
+    func testExplicitFastReachesJournalArchiveAndSubmission() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "快速建图", profile: .fast)
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertEqual(job.profile, "fast")
+        XCTAssertEqual(journal.jobs.first?.profile, "fast")
+        XCTAssertEqual(archive.profilesSeen, ["fast"])
+        let profiles = await api.submittedProfiles
+        XCTAssertEqual(profiles, ["fast"])
+        XCTAssertEqual(job.remote?.profile, "fast")
+        XCTAssertEqual(job.phase, .processing)
+    }
+
+    func testPendingFastTaskKeepsFrozenProfileWhenQualityIsRequested() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "原快速任务", profile: .fast)
+        let original = try XCTUnwrap(model.selectedJob)
+        let token = try XCTUnwrap(tokens.values[original.id])
+        await model.start(scanDirectory: scan, displayName: "质量建图", profile: .quality)
+        XCTAssertEqual(model.selectedJobID, original.id)
+        XCTAssertEqual(model.jobs, [original])
+        XCTAssertEqual(tokens.values[original.id], token)
+        XCTAssertEqual(tokens.values.count, 1)
+        XCTAssertEqual(archive.calls, 1)
+        let profiles = await api.submittedProfiles
+        XCTAssertEqual(profiles, ["fast"])
+        XCTAssertTrue(model.message?.contains("Fast") == true)
+        XCTAssertTrue(model.message?.contains("已有未完成任务") == true)
+    }
+
+    func testRestoredPausedFastTaskResumesSameArchiveIdentityAndProfile() async throws {
+        await api.setRejectBeforeAccepting(true)
+        let originalModel = model()
+        await originalModel.start(scanDirectory: scan, displayName: "暂停的快速任务", profile: .fast)
+        let original = try XCTUnwrap(originalModel.selectedJob)
+        let token = try XCTUnwrap(tokens.values[original.id])
+        let zip = try XCTUnwrap(original.archiveURL)
+        XCTAssertEqual(original.phase, .paused)
+        let restored = model()
+        await restored.start(scanDirectory: scan, displayName: "质量建图", profile: .quality)
+        XCTAssertEqual(restored.selectedJobID, original.id)
+        XCTAssertEqual(restored.selectedJob?.profile, "fast")
+        XCTAssertEqual(restored.selectedJob?.archiveURL, zip)
+        XCTAssertEqual(restored.selectedJob?.archiveSHA256, original.archiveSHA256)
+        await api.setRejectBeforeAccepting(false)
+        await restored.resume(jobID: original.id)
+        XCTAssertEqual(restored.jobs.count, 1)
+        XCTAssertEqual(restored.selectedJob?.profile, "fast")
+        XCTAssertEqual(restored.selectedJob?.remote?.profile, "fast")
+        XCTAssertEqual(restored.selectedJob?.phase, .processing)
+        XCTAssertEqual(restored.selectedJob?.localizationBuildConfiguration, original.localizationBuildConfiguration)
+        XCTAssertEqual(tokens.values[original.id], token)
+        XCTAssertEqual(archive.profilesSeen, ["fast"], "Resuming must reuse the frozen ZIP")
+        let profiles = await api.submittedProfiles
+        XCTAssertEqual(profiles, ["fast", "fast"])
+        let events = await api.events
+        XCTAssertTrue(events.allSatisfy { $0.1 == original.id && $0.2 == token })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: zip.path), "Accepted upload releases its retained ZIP")
+    }
+
+    func testHistoricalFastJournalIsNotMigratedToQualityBeforeResume() async throws {
+        let store = AreaTargetJobStore(url: root.appendingPathComponent("legacy/profile-jobs.json"))
+        var historical = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "历史快速任务", createdAt: Date(timeIntervalSince1970: 100))
+        historical.profile = "fast"
+        historical.phase = .paused
+        try store.save([historical])
+        let bytes = try Data(contentsOf: store.url)
+        tokens.values[historical.id] = String(repeating: "b", count: 64)
+        let model = AreaTargetProcessingModel(api: api, archiver: archive, jobStore: store,
+            tokenStore: tokens, assetStore: assets, uploadDirectory: root.appendingPathComponent("uploads"))
+        await model.start(scanDirectory: scan, displayName: "默认质量任务")
+        XCTAssertEqual(model.selectedJobID, historical.id)
+        XCTAssertEqual(model.selectedJob?.profile, "fast")
+        XCTAssertEqual(try Data(contentsOf: store.url), bytes, "Restoration and selection must retain the historical journal")
+        await model.resume(jobID: historical.id)
+        XCTAssertEqual(model.selectedJob?.profile, "fast")
+        XCTAssertEqual(model.selectedJob?.remote?.profile, "fast")
+        XCTAssertEqual(archive.profilesSeen, ["fast"])
+        XCTAssertEqual(try store.load().first?.profile, "fast")
+    }
+
+    func testDownloadedFastMapIsRetainedWhenRebuildingWithQuality() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "快速地图", profile: .fast)
+        let firstID = try XCTUnwrap(model.selectedJobID)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: firstID)
+        await model.download(jobID: firstID)
+        let original = try XCTUnwrap(model.selectedJob)
+        let asset = try XCTUnwrap(original.savedAsset)
+        XCTAssertEqual(original.phase, .downloaded)
+        await api.setRemoteStatus(.queued)
+        await model.start(scanDirectory: scan, displayName: "质量地图")
+        let rebuilt = try XCTUnwrap(model.selectedJob)
+        XCTAssertNotEqual(rebuilt.id, firstID)
+        XCTAssertEqual(rebuilt.profile, "quality")
+        XCTAssertEqual(rebuilt.phase, .processing)
+        XCTAssertEqual(model.jobs.count, 2)
+        XCTAssertEqual(model.jobs.first(where: { $0.id == firstID }), original)
+        XCTAssertEqual(journal.jobs.first(where: { $0.id == firstID }), original)
+        XCTAssertEqual(assets.values[firstID], asset)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: asset.bundleURL.path))
+        let profiles = await api.submittedProfiles
+        XCTAssertEqual(profiles, ["fast", "quality"])
+        XCTAssertEqual(archive.profilesSeen, ["fast", "quality"])
+    }
+
+    func testQualityDoesNotFallBackToFastWhenCloudRequirementsLackQuality() async throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(AreaFlowAPI.legacyRequirements)) as? [String: Any])
+        var profiles = try XCTUnwrap(object["profiles"] as? [String: Any])
+        profiles.removeValue(forKey: "quality")
+        object["profiles"] = profiles
+        await api.setRequirements(try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: object)))
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "质量建图")
+        XCTAssertEqual(model.selectedJob?.profile, "quality")
+        XCTAssertEqual(model.selectedJob?.phase, .failed)
+        XCTAssertTrue(model.selectedJob?.detail.contains("未提供 Quality") == true)
+        XCTAssertEqual(model.message, model.selectedJob?.detail)
+        XCTAssertNil(model.selectedJob?.archiveURL)
+        XCTAssertEqual(archive.calls, 0)
+        let submitted = await api.submittedProfiles
+        XCTAssertTrue(submitted.isEmpty)
+    }
+
+    func testUnsupportedQualityTaskAllowsExplicitFastNewTaskAndKeepsOriginal() async throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(AreaFlowAPI.legacyRequirements)) as? [String: Any])
+        var profiles = try XCTUnwrap(object["profiles"] as? [String: Any])
+        profiles.removeValue(forKey: "quality")
+        object["profiles"] = profiles
+        await api.setRequirements(try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: object)))
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "未提供的质量建图")
+        let original = try XCTUnwrap(model.selectedJob)
+        XCTAssertEqual(original.phase, .failed)
+        XCTAssertEqual(original.profile, "quality")
+        await model.start(scanDirectory: scan, displayName: "选择快速建图", profile: .fast)
+        let fast = try XCTUnwrap(model.selectedJob)
+        XCTAssertNotEqual(fast.id, original.id)
+        XCTAssertEqual(fast.profile, "fast")
+        XCTAssertEqual(fast.phase, .processing)
+        XCTAssertEqual(model.jobs.count, 2)
+        XCTAssertEqual(model.jobs.first(where: { $0.id == original.id }), original)
+        XCTAssertEqual(journal.jobs.first(where: { $0.id == original.id }), original)
+        XCTAssertEqual(archive.profilesSeen, ["fast"])
+        let submitted = await api.submittedProfiles
+        XCTAssertEqual(submitted, ["fast"])
+    }
+
+    func testInvalidQualityPolicyRemainsPausedWithoutSilentFastFallback() async throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(AreaFlowAPI.legacyRequirements)) as? [String: Any])
+        var profiles = try XCTUnwrap(object["profiles"] as? [String: Any])
+        var quality = try XCTUnwrap(profiles["quality"] as? [String: Any])
+        quality["maxFrames"] = 0
+        profiles["quality"] = quality
+        object["profiles"] = profiles
+        await api.setRequirements(try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: JSONSerialization.data(withJSONObject: object)))
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "等待有效质量策略")
+        XCTAssertEqual(model.selectedJob?.profile, "quality")
+        XCTAssertEqual(model.selectedJob?.phase, .paused)
+        XCTAssertNil(model.selectedJob?.archiveURL)
+        XCTAssertEqual(archive.calls, 0)
+        let submitted = await api.submittedProfiles
+        XCTAssertTrue(submitted.isEmpty)
+    }
+
+    func testJournalRoundTripKeepsEachTasksExplicitProfile() throws {
+        let store = AreaTargetJobStore(url: root.appendingPathComponent("persist/profile-jobs.json"))
+        var fast = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "Fast 地图", createdAt: Date(timeIntervalSince1970: 100))
+        fast.profile = "fast"
+        let quality = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "Quality 地图", createdAt: Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(quality.profile, "quality")
+        try store.save([fast, quality])
+        XCTAssertEqual(try store.load(), [fast, quality])
+        XCTAssertEqual(try store.load().map(\.profile), ["fast", "quality"])
+    }
+
+    func testRefreshRejectsRemoteProfileDifferentFromFrozenTask() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "处理模式核对")
+        let original = try XCTUnwrap(model.selectedJob)
+        await api.setRemoteProfileOverride(original.profile == "fast" ? "quality" : "fast")
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: original.id)
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertEqual(job.profile, original.profile)
+        XCTAssertEqual(job.phase, .processing)
+        XCTAssertEqual(job.remote, original.remote)
+        XCTAssertNil(job.savedAsset)
+        XCTAssertEqual(model.message, AreaTargetAPIError.invalidResponse.localizedDescription)
+    }
+
+    func testRefreshRejectsRemoteUVUnwrapDifferentFromFrozenTask() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "纹理配置核对")
+        let original = try XCTUnwrap(model.selectedJob)
+        await api.setRemoteUVUnwrapOverride(!original.uvUnwrap)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: original.id)
+        let job = try XCTUnwrap(model.selectedJob)
+        XCTAssertEqual(job.uvUnwrap, original.uvUnwrap)
+        XCTAssertEqual(job.phase, .processing)
+        XCTAssertEqual(job.remote, original.remote)
+        XCTAssertNil(job.savedAsset)
+        XCTAssertEqual(model.message, AreaTargetAPIError.invalidResponse.localizedDescription)
     }
 
     func testSignedOutStartDoesNotCreateTaskTokenOrArchive() async throws {
@@ -594,6 +1003,111 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertNil(model.jobs.first?.savedAsset)
     }
 
+    func testOlderProcessingStatusCannotRegressDownloadedAssetAfterNewerCompletion() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "乱序状态回包")
+        let id = try XCTUnwrap(model.selectedJobID)
+        await api.setRemoteStatus(.processing)
+        await api.setHoldNextStatusSnapshot(true)
+        let oldStatusHeld = expectation(description: "The older processing response has been captured")
+        await api.setOnStatusHeld { oldStatusHeld.fulfill() }
+        let oldRefresh = Task { await model.refresh(jobID: id) }
+        await fulfillment(of: [oldStatusHeld], timeout: 5)
+
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: id)
+        XCTAssertEqual(model.jobs.first?.phase, .ready)
+        await model.download(jobID: id)
+        let downloaded = model.jobs.first
+        XCTAssertEqual(downloaded?.phase, .downloaded)
+        XCTAssertNotNil(downloaded?.savedAsset)
+
+        await api.setHoldNextStatusSnapshot(false)
+        await oldRefresh.value
+        XCTAssertEqual(model.jobs.first, downloaded, "An older status must not replace a verified downloaded record")
+        XCTAssertEqual(journal.jobs.first, downloaded)
+        XCTAssertNil(model.message)
+    }
+
+    func testDownloadStatusSupersedesAnOlderProcessingRefresh() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "下载完成后不回退")
+        let id = try XCTUnwrap(model.selectedJobID)
+        await api.setRemoteStatus(.processing)
+        await api.setHoldNextStatusSnapshot(true)
+        let oldStatusHeld = expectation(description: "The processing refresh is waiting while download proceeds")
+        await api.setOnStatusHeld { oldStatusHeld.fulfill() }
+        let oldRefresh = Task { await model.refresh(jobID: id) }
+        await fulfillment(of: [oldStatusHeld], timeout: 5)
+
+        await api.setRemoteStatus(.completed)
+        await model.download(jobID: id)
+        let downloaded = model.jobs.first
+        XCTAssertEqual(downloaded?.phase, .downloaded)
+        XCTAssertNotNil(downloaded?.savedAsset)
+        await api.setHoldNextStatusSnapshot(false)
+        await oldRefresh.value
+        XCTAssertEqual(model.jobs.first, downloaded, "The download's newer status must supersede an in-flight refresh")
+        XCTAssertEqual(journal.jobs.first, downloaded)
+        XCTAssertNil(model.message)
+    }
+
+    func testOlderExpiredStatusCannotOverrideANewerCompletedResult() async throws {
+        let model = model()
+        await model.start(scanDirectory: scan, displayName: "迟到的过期回包")
+        let id = try XCTUnwrap(model.selectedJobID)
+        await api.setExpired(true)
+        await api.setHoldNextStatusSnapshot(true)
+        let oldStatusHeld = expectation(description: "The older expired response has been captured")
+        await api.setOnStatusHeld { oldStatusHeld.fulfill() }
+        let oldRefresh = Task { await model.refresh(jobID: id) }
+        await fulfillment(of: [oldStatusHeld], timeout: 5)
+
+        await api.setExpired(false)
+        await api.setRemoteStatus(.completed)
+        await model.refresh(jobID: id)
+        let completed = model.jobs.first
+        XCTAssertEqual(completed?.phase, .ready)
+        await api.setHoldNextStatusSnapshot(false)
+        await oldRefresh.value
+        XCTAssertEqual(model.jobs.first, completed, "An obsolete error must not fail a newer completed result")
+        XCTAssertEqual(journal.jobs.first, completed)
+        XCTAssertNil(model.message)
+    }
+
+    func testRefreshCannotSupersedeExplicitResumeOfAnUnacceptedTask() async throws {
+        var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
+            displayName: "后台刷新不能丢掉手动重试", createdAt: Date(), serverOrigin: .current)
+        job.phase = .submissionUnknown
+        journal.jobs = [job]
+        let token = String(repeating: "a", count: 64)
+        try tokens.save(token, jobID: job.id)
+        let model = model()
+        XCTAssertTrue(model.deletionBlocked(scanPath: scan.path))
+        await api.setHoldNextStatusSnapshot(true)
+        let resumeStatusHeld = expectation(description: "Explicit resume captured its job-not-found response")
+        await api.setOnStatusHeld { resumeStatusHeld.fulfill() }
+        let resume = Task { await model.resume(jobID: job.id) }
+        await fulfillment(of: [resumeStatusHeld], timeout: 5)
+
+        await model.refresh(jobID: job.id)
+        XCTAssertEqual(model.jobs.first?.phase, .submissionUnknown)
+        XCTAssertTrue(model.deletionBlocked(scanPath: scan.path))
+        await api.setHoldNextStatusSnapshot(false)
+        await resume.value
+
+        XCTAssertEqual(model.jobs.first?.id, job.id)
+        XCTAssertEqual(model.jobs.first?.phase, .processing)
+        XCTAssertEqual(model.jobs.first?.accepted, true)
+        XCTAssertEqual(journal.jobs.first?.phase, .processing)
+        XCTAssertEqual(archive.calls, 1)
+        let events = await api.events
+        XCTAssertEqual(events.map { $0.0 }, ["status", "submit"], "Refresh must yield while explicit resume reconciles the task")
+        XCTAssertTrue(events.allSatisfy { $0.1 == job.id && $0.2 == token }, "Retry must retain the durable job ID and capability")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: scan.path))
+        XCTAssertNil(model.message)
+    }
+
     func testLateMissingStatusCannotResubmitAfterLocalStop() async throws {
         var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
             displayName: "停止后不重传旧任务", createdAt: Date(), serverOrigin: .current)
@@ -658,11 +1172,15 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertTrue(events.isEmpty)
     }
 
-    func testProductionUIAndPersistentQAResolveTheSameOwner() {
+    func testProductionUIAndPersistentQAResolveTheSameOwner() throws {
+        #if targetEnvironment(simulator)
         let ui = AreaTargetProcessingModel.shared
         let persistentQA = AreaTargetProcessingModel.shared
         XCTAssertTrue(ui === persistentQA, "UI and persistent QA must share one journal-writing owner")
         XCTAssertFalse(model() === ui, "Explicit injected/isolated models remain independent")
+        #else
+        throw XCTSkip("Avoid starting the production persistent owner and restoring real device jobs during unit tests")
+        #endif
     }
 
     func testSharedConsumersKeepPendingGuardAndDownloadedJobsInOneJournal() async throws {
@@ -695,6 +1213,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         let store = AreaTargetJobStore(url: root.appendingPathComponent("legacy/jobs.json"))
         var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
             displayName: "旧服务器失败任务", createdAt: Date(timeIntervalSince1970: 100))
+        job.profile = "fast"
         job.phase = .failed
         try store.save([job])
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: store.url))
@@ -738,6 +1257,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         try FileManager.default.createDirectory(at: legacyScan, withIntermediateDirectories: true)
         var legacy = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: legacyScan.path,
             displayName: "旧上传", createdAt: Date(timeIntervalSince1970: 10))
+        legacy.profile = "fast"
         legacy.phase = .paused
         journal.jobs = [legacy]
         tokens.values[legacy.id] = String(repeating: "b", count: 64)
@@ -835,7 +1355,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
             processedPixelCount: 3_840_000, resizedFrameCount: 2, maximumOutputLongEdge: 1600, scaleDigest: String(repeating: "d", count: 64))
         archive.preparation = preparation
         let model = model()
-        await model.start(scanDirectory: scan, displayName: "完整原扫描")
+        await model.start(scanDirectory: scan, displayName: "完整原扫描", profile: .fast)
         let requestCount = await api.requirementsCallCount()
         XCTAssertEqual(requestCount, 1)
         XCTAssertEqual(archive.requirementsSeen, requirements)
@@ -891,7 +1411,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
     func testNewTaskRequestsV2AndDisplaysReturnedLegacyCapacityWhilePreparing() async throws {
         let requirements = try JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: Data(#"{"schemaVersion":1,"policy":"mobile-scan-preparation-v1","policyVersion":1,"profiles":{"fast":{"maxFrames":80,"maximumLongEdge":1600,"maximumTotalPixels":200000000}},"safety":{"maximumRequestBytes":536870912,"maximumExpandedBytes":524288000,"maximumArchiveEntries":10000,"maximumSourceFrameCount":10000,"maximumImagePixels":32000000,"maximumImageDimension":8192,"maximumMetadataBytes":8388608}}"#.utf8))
         await api.setRequirements(requirements)
-        await model().start(scanDirectory: scan, displayName: "旧服务器扫描")
+        await model().start(scanDirectory: scan, displayName: "旧服务器扫描", profile: .fast)
         let requested = await api.requestedPreparationPolicy()
         XCTAssertEqual(requested, "mobile-scan-preparation-v2")
         XCTAssertTrue(journal.details.contains { $0.contains("80") && $0.contains("旧") })
@@ -918,7 +1438,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
             receivedFrameCount: 2, capacityTier: 100, selectionVersion: "upload-all-v2", selectionDigest: digest)
         archive.preparation = preparation
         await api.setRejectBeforeAccepting(true)
-        let model = model(); await model.start(scanDirectory: scan, displayName: "全帧扫描")
+        let model = model(); await model.start(scanDirectory: scan, displayName: "全帧扫描", profile: .fast)
         let job = try XCTUnwrap(model.jobs.first)
         XCTAssertEqual(job.phase, .paused)
         XCTAssertEqual(job.clientPreparation, preparation)
@@ -948,7 +1468,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         XCTAssertEqual(preparation.identityConfiguration, legacyIdentity + ";critical_frame_protection=critical-frame-protection-v1;critical_frame_risk=gray-quality-risk-v1;protected_indices=1;candidate_frames=2")
         archive.preparation = preparation
         await api.setRejectBeforeAccepting(true)
-        let model = model(); await model.start(scanDirectory: scan, displayName: "保护扫描")
+        let model = model(); await model.start(scanDirectory: scan, displayName: "保护扫描", profile: .fast)
         let job = try XCTUnwrap(model.jobs.first)
         XCTAssertEqual(job.clientPreparation, preparation)
         await api.setRequirements(AreaFlowAPI.legacyRequirements)
@@ -1178,16 +1698,21 @@ final class AreaTargetProcessingModelTests: XCTestCase {
 
     func testInterruptedServerJobShowsFailureAndAllowsExplicitNewSubmission() async throws {
         let model = model()
-        await model.start(scanDirectory: scan, displayName: "测试")
+        await model.start(scanDirectory: scan, displayName: "测试", profile: .fast)
         let oldID = try XCTUnwrap(model.jobs.first?.id)
         await api.setRemoteStatus(.failed)
         await model.refresh(jobID: oldID)
         XCTAssertEqual(model.jobs.first?.phase, .failed)
         XCTAssertFalse(model.deletionBlocked(scanPath: scan.path))
+        let original = try XCTUnwrap(model.selectedJob)
         await api.setRemoteStatus(.queued)
         await model.start(scanDirectory: scan, displayName: "重新处理")
         XCTAssertEqual(model.jobs.count, 2)
         XCTAssertNotEqual(model.selectedJobID, oldID)
+        XCTAssertEqual(model.selectedJob?.profile, "quality")
+        XCTAssertEqual(model.jobs.first(where: { $0.id == oldID }), original)
+        let profiles = await api.submittedProfiles
+        XCTAssertEqual(profiles, ["fast", "quality"])
     }
 
     func testServerFailureMessagesDistinguishInvalidScanWithoutExposingDiagnostics() async throws {
@@ -1320,6 +1845,7 @@ final class AreaTargetProcessingModelTests: XCTestCase {
         let store = AreaTargetJobStore(url: root.appendingPathComponent("persist/critical-jobs.json"))
         var job = AreaTargetProcessingJob(id: UUID().uuidString.lowercased(), scanDirectoryPath: scan.path,
             displayName: "保护任务", createdAt: Date())
+        job.profile = "fast"
         job.clientPreparation = .init(schemaVersion: 1, policy: "mobile-scan-preparation-v2", policyVersion: 2,
             profile: "fast", preparedBy: "client", originalFrameCount: 2, selectedFrameCount: 2, selectedIndices: [0, 1],
             processedPixelCount: 20_000, resizedFrameCount: 0, maximumOutputLongEdge: 100, scaleDigest: String(repeating: "a", count: 64),
@@ -1371,17 +1897,21 @@ final class AreaFlowArchive: AreaTargetArchiving, @unchecked Sendable {
     var error: AreaTargetScanArchive.ArchiveError?
     var preparation: AreaTargetClientPreparation?
     private var capturedRequirements: AreaTargetProcessingRequirements?
+    private var capturedProfiles: [String] = []
+    private var capturedUVUnwrap: [Bool] = []
+    var profilesSeen: [String] { lock.lock(); defer { lock.unlock() }; return capturedProfiles }
+    var uvUnwrapSeen: [Bool] { lock.lock(); defer { lock.unlock() }; return capturedUVUnwrap }
     var requirementsSeen: AreaTargetProcessingRequirements? { lock.lock(); defer { lock.unlock() }; return capturedRequirements }
     func archive(scanDirectory: URL, uvUnwrap: Bool, profile: String, requirements: AreaTargetProcessingRequirements?,
                  progress: @escaping @Sendable (String) -> Void, isCancelled: @escaping @Sendable () -> Bool) throws -> URL {
-        lock.lock(); capturedRequirements = requirements; lock.unlock()
+        lock.lock(); capturedRequirements = requirements; capturedProfiles.append(profile); lock.unlock()
         return try archive(scanDirectory: scanDirectory, uvUnwrap: uvUnwrap, progress: progress, isCancelled: isCancelled)
     }
     var calls: Int { lock.lock(); defer { lock.unlock() }; return count }
     init(url: URL) { self.url = url }
     func archive(scanDirectory: URL, uvUnwrap: Bool, progress: @escaping @Sendable (String) -> Void,
                  isCancelled: @escaping @Sendable () -> Bool) throws -> URL {
-        lock.lock(); count += 1; lock.unlock()
+        lock.lock(); count += 1; capturedUVUnwrap.append(uvUnwrap); lock.unlock()
         if let error { throw error }
         if isCancelled() { throw CancellationError() }
         progress("正在打包扫描数据…")
@@ -1425,10 +1955,16 @@ final class AreaFlowAssets: AreaTargetAssetStoring {
 
 actor AreaFlowAPI: AreaTargetAPI {
     static var legacyRequirements: AreaTargetProcessingRequirements {
-        try! JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: Data(#"{"schemaVersion":1,"policy":"mobile-scan-preparation-v1","policyVersion":1,"profiles":{"fast":{"maxFrames":80,"maximumLongEdge":1600,"maximumTotalPixels":200000000}},"safety":{"maximumRequestBytes":536870912,"maximumExpandedBytes":524288000,"maximumArchiveEntries":10000,"maximumSourceFrameCount":10000,"maximumImagePixels":32000000,"maximumImageDimension":8192,"maximumMetadataBytes":8388608}}"#.utf8))
+        try! JSONDecoder().decode(AreaTargetProcessingRequirements.self, from: Data(#"{"schemaVersion":1,"policy":"mobile-scan-preparation-v1","policyVersion":1,"profiles":{"fast":{"maxFrames":80,"maximumLongEdge":1600,"maximumTotalPixels":200000000},"quality":{"maxFrames":80,"maximumLongEdge":1600,"maximumTotalPixels":200000000}},"safety":{"maximumRequestBytes":536870912,"maximumExpandedBytes":524288000,"maximumArchiveEntries":10000,"maximumSourceFrameCount":10000,"maximumImagePixels":32000000,"maximumImageDimension":8192,"maximumMetadataBytes":8388608}}"#.utf8))
     }
     let root: URL
     var events: [(String, String, String)] = []
+    var submittedProfiles: [String] = []
+    var submittedUVUnwrap: [Bool] = []
+    var submittedMapCLAHE: [Bool] = []
+    private var jobProfiles: [String: String] = [:]
+    private var jobUVUnwrap: [String: Bool] = [:]
+    private var jobMapCLAHE: [String: Bool] = [:]
     var requirements: AreaTargetProcessingRequirements?
     var requirementsCalls = 0
     var requestedPolicy: String?
@@ -1450,13 +1986,6 @@ actor AreaFlowAPI: AreaTargetAPI {
         guard let requirements else { throw AreaTargetAPIError.transport("requirements offline") }
         return requirements
     }
-    var submittedMapCLAHE: [Bool] = []
-    private var jobProfiles: [String: String] = [:]
-    private var jobUVUnwrap: [String: Bool] = [:]
-    private var jobMapCLAHE: [String: Bool] = [:]
-    private var remoteMapCLAHEOverride: Bool?
-    private var remoteProfileOverride: String?
-    private var remoteUVUnwrapOverride: Bool?
     func setRemoteMapCLAHEOverride(_ value: Bool?) { remoteMapCLAHEOverride = value }
     func setRemoteProfileOverride(_ value: String?) { remoteProfileOverride = value }
     func setRemoteUVUnwrapOverride(_ value: Bool?) { remoteUVUnwrapOverride = value }
@@ -1464,6 +1993,9 @@ actor AreaFlowAPI: AreaTargetAPI {
 
     var remoteStatus: AreaTargetRemoteStatus = .queued
     var remoteProblem: AreaTargetAPIProblem?
+    var remoteProfileOverride: String?
+    var remoteUVUnwrapOverride: Bool?
+    var remoteMapCLAHEOverride: Bool?
     var lostResponse = false
     var rejectBeforeAccepting = false
     var holdUpload = false
@@ -1472,11 +2004,17 @@ actor AreaFlowAPI: AreaTargetAPI {
     var expired = false
     private var holdStatus = false
     private var statusContinuation: CheckedContinuation<Void, Never>?
+    private var holdNextStatusSnapshot = false
+    private var statusSnapshotContinuation: CheckedContinuation<Void, Never>?
     private var onStatusHeld: (@Sendable () -> Void)?
     func setOnStatusHeld(_ callback: @escaping @Sendable () -> Void) { onStatusHeld = callback }
     func setHoldStatus(_ value: Bool) {
         holdStatus = value
         if !value { statusContinuation?.resume(); statusContinuation = nil }
+    }
+    func setHoldNextStatusSnapshot(_ value: Bool) {
+        holdNextStatusSnapshot = value
+        if !value { statusSnapshotContinuation?.resume(); statusSnapshotContinuation = nil }
     }
     init(root: URL) { self.root = root; requirements = Self.legacyRequirements }
     func setRemoteStatus(_ value: AreaTargetRemoteStatus) { remoteStatus = value }
@@ -1488,6 +2026,8 @@ actor AreaFlowAPI: AreaTargetAPI {
     func submit(archiveURL: URL, jobID: String, token: String, profile: String, uvUnwrap: Bool, mapCLAHE: Bool = false,
                 progress: @escaping @Sendable (Double) -> Void) async throws -> AreaTargetRemoteJob {
         events.append(("submit", jobID, token))
+        submittedProfiles.append(profile)
+        submittedUVUnwrap.append(uvUnwrap)
         submittedMapCLAHE.append(mapCLAHE)
         jobProfiles[jobID] = profile
         jobUVUnwrap[jobID] = uvUnwrap
@@ -1508,12 +2048,24 @@ actor AreaFlowAPI: AreaTargetAPI {
     }
     func status(jobID: String, token: String) async throws -> AreaTargetRemoteJob {
         events.append(("status", jobID, token))
+        if holdNextStatusSnapshot {
+            holdNextStatusSnapshot = false
+            let snapshot = Result { try statusSnapshot(jobID: jobID) }
+            await withCheckedContinuation {
+                statusSnapshotContinuation = $0
+                onStatusHeld?()
+            }
+            return try snapshot.get()
+        }
         if holdStatus {
             await withCheckedContinuation {
                 statusContinuation = $0
                 onStatusHeld?()
             }
         }
+        return try statusSnapshot(jobID: jobID)
+    }
+    private func statusSnapshot(jobID: String) throws -> AreaTargetRemoteJob {
         if !accepted.contains(jobID) {
             throw AreaTargetAPIError.server(statusCode: 404,
                 problem: .init(code: "job_not_found", message: "任务不存在", retryable: false), retryAfter: nil)

@@ -6,6 +6,8 @@ namespace AreaTargetPlugin
     /// <summary>
     /// A successful coordinate pair for one frame. The names make both source and
     /// destination spaces explicit and prevent raw T_C_S poses being treated as T_U_S.
+    /// Both inputs must already use Unity camera/scan bases. Do not pass native
+    /// AR/right-handed raw directly; active raw conversion belongs only to NativeSessionBridge.
     /// </summary>
     internal readonly struct LocalizationFramePair
     {
@@ -36,44 +38,14 @@ namespace AreaTargetPlugin
     internal static class AlignmentTransformCalculator
     {
         /// <summary>
-        /// Selects the T_U_S sample whose translation is nearest the translation
-        /// centroid. The result is always composed through CoordinateTransform.
+        /// Delegates already-successful named pairs to the shared C++ rigid consensus.
+        /// No managed medoid, confirmation, or smoothing implementation exists.
         /// </summary>
         public static bool TryCompute(
             IReadOnlyList<LocalizationFramePair> successfulFramePairs,
             out Matrix4x4 unityWorldFromScan)
         {
-            unityWorldFromScan = Matrix4x4.identity;
-
-            if (successfulFramePairs == null || successfulFramePairs.Count == 0)
-                return false;
-
-            Vector3 centroid = Vector3.zero;
-            for (int index = 0; index < successfulFramePairs.Count; index++)
-            {
-                Matrix4x4 pose = successfulFramePairs[index].UnityWorldFromScan;
-                if (!CoordinateTransform.IsFiniteRigidTransform(pose))
-                    return false;
-                centroid += ExtractTranslation(pose);
-            }
-            centroid /= successfulFramePairs.Count;
-
-            int medianIndex = 0;
-            float minimumDistance = float.MaxValue;
-            for (int index = 0; index < successfulFramePairs.Count; index++)
-            {
-                Vector3 translation = ExtractTranslation(
-                    successfulFramePairs[index].UnityWorldFromScan);
-                float squaredDistance = (translation - centroid).sqrMagnitude;
-                if (squaredDistance < minimumDistance)
-                {
-                    minimumDistance = squaredDistance;
-                    medianIndex = index;
-                }
-            }
-
-            unityWorldFromScan = successfulFramePairs[medianIndex].UnityWorldFromScan;
-            return CoordinateTransform.IsFiniteRigidTransform(unityWorldFromScan);
+            return NativeSessionBridge.TryConsensus(successfulFramePairs, out unityWorldFromScan);
         }
 
         /// <summary>

@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pytest
 
 from tests.test_mobile_api import api as mobile_api_fixture
@@ -131,7 +132,11 @@ def test_worker_forwards_reloaded_texture_selection_to_pipeline(api, monkeypatch
 
 def test_mobile_omission_persists_and_forwards_default_false(api, monkeypatch, tmp_path):
     server, client, submissions = api
-    response = submit(client, uv_unwrap='0')
+    # Exercise worker option forwarding with a frame eligible for V1 quality selection.
+    pixels = np.random.default_rng(42).integers(24, 232, (24, 32), dtype=np.uint8)
+    encoded, image = cv2.imencode('.png', pixels)
+    assert encoded
+    response = submit(client, scan_zip(extra={'images/f.png': image.tobytes()}), uv_unwrap='0')
     assert response.status_code == 202
     assert server.job_store.get(response.json['job_id'])['texture_compression'] is False
     calls = install_worker_boundary_fakes(monkeypatch, tmp_path)

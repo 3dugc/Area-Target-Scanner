@@ -36,31 +36,47 @@ enum ScanSourceFingerprint {
         guard let frames = metadata["frames"] as? [[String: Any]], !frames.isEmpty, frames.count <= 10_000 else {
             throw Failure.invalid
         }
+        // Reject oversized collections before hashing any original. Keep the
+        // sizes frozen so a file changed after preflight cannot expand the work.
+        var total: Int64 = 0
+        func reserveFile(_ path: String) throws -> Int64 {
+            let expected = try size(file(path, root: root))
+            guard expected <= maximumOriginalSourceBytes - total else { throw Failure.invalid }
+            total += expected
+            return expected
+        }
+        let imageSizes = try frames.map { frame -> Int64 in
+            if isCancelled() { throw Failure.cancelled }
+            guard let path = frame["imageFile"] as? String, path.hasPrefix("images/") else { throw Failure.invalid }
+            return try reserveFile(path)
+        }
+        let modelSize = try reserveFile("model.obj")
         var hash = SHA256()
         hash.update(data: Data("area-target-source-v1\n".utf8))
-        var total: Int64 = 0
         var previousTime = -Double.infinity
         var seen = Set<Int>()
-        func addFile(_ path: String) throws {
+        func addFile(_ path: String, expected: Int64) throws {
             let url = try file(path, root: root)
-            let expected = try size(url)
-            total += expected
-            guard total <= maximumOriginalSourceBytes else { throw Failure.invalid }
+            guard try size(url) == expected else { throw Failure.changed }
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
             var contents = SHA256()
             var consumed: Int64 = 0
-            while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            // Foundation may bridge reads through autoreleased NSData. Bound
+            // those temporary objects to one chunk even for a valid large source.
+            while try autoreleasepool(invoking: { () throws -> Bool in
+                guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else { return false }
                 if isCancelled() { throw Failure.cancelled }
                 consumed += Int64(chunk.count)
                 guard consumed <= expected else { throw Failure.changed }
                 contents.update(data: chunk)
-            }
+                return true
+            }) {}
             guard consumed == expected, try size(url) == expected else { throw Failure.changed }
             hash.update(data: Data("\(expected):".utf8))
             hash.update(data: Data(contents.finalize()))
         }
-        for frame in frames {
+        for (frame, expectedImageSize) in zip(frames, imageSizes) {
             if isCancelled() { throw Failure.cancelled }
             guard let index = number(frame["index"]), index >= 0, index.rounded() == index, index < Double(Int.max),
                   seen.insert(Int(index)).inserted,
@@ -84,10 +100,10 @@ enum ScanSourceFingerprint {
             ]
             let data = try JSONSerialization.data(withJSONObject: canonical, options: [.sortedKeys])
             hash.update(data: Data("\(data.count):".utf8)); hash.update(data: data)
-            try addFile(path)
+            try addFile(path, expected: expectedImageSize)
         }
         hash.update(data: Data("model:".utf8))
-        try addFile("model.obj")
+        try addFile("model.obj", expected: modelSize)
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 

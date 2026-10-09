@@ -242,17 +242,17 @@ namespace AreaTargetPlugin.Tests
                     Matrix4x4.TRS(new Vector3(1f, 0f, 0f), Quaternion.identity, Vector3.one),
                     Matrix4x4.TRS(new Vector3(10f, 0f, 0f), Quaternion.identity, Vector3.one)),
                 new LocalizationFramePair(
-                    Matrix4x4.TRS(new Vector3(2f, 0f, 0f), Quaternion.identity, Vector3.one),
+                    Matrix4x4.TRS(new Vector3(1.05f, 0f, 0f), Quaternion.identity, Vector3.one),
                     Matrix4x4.TRS(new Vector3(10f, 0f, 0f), Quaternion.identity, Vector3.one)),
                 new LocalizationFramePair(
-                    Matrix4x4.TRS(new Vector3(3f, 0f, 0f), Quaternion.identity, Vector3.one),
+                    Matrix4x4.TRS(new Vector3(1.1f, 0f, 0f), Quaternion.identity, Vector3.one),
                     Matrix4x4.TRS(new Vector3(10f, 0f, 0f), Quaternion.identity, Vector3.one))
             };
 
             bool success = AlignmentTransformCalculator.TryCompute(pairs, out Matrix4x4 alignment);
 
             Assert.That(success, Is.True);
-            Assert.That(alignment.m03, Is.EqualTo(12f).Within(0.00001f));
+            Assert.That(alignment.m03, Is.EqualTo(11.05f).Within(0.00001f));
             Assert.That(alignment.m03, Is.Not.EqualTo(10f).Within(0.00001f));
         }
 

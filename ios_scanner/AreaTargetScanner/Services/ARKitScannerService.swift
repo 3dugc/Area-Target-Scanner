@@ -7,7 +7,7 @@ import simd
 /// Manages ARKit session lifecycle, captures LiDAR point cloud data and RGB keyframes,
 /// and records camera intrinsics/extrinsics for each keyframe.
 ///
-/// Keyframe capture strategy: every 0.5 seconds OR camera movement > 10cm.
+/// The shared C++ core decides view novelty and image quality before JPEG capture.
 ///
 /// ## Privacy Policy
 /// All scan data is stored locally only. No network upload functionality is included.
@@ -22,10 +22,12 @@ final class ARKitScannerService: NSObject, ScannerService {
 
     // MARK: - Constants
 
-    /// Minimum time interval between keyframe captures (seconds)
-    private static let keyframeTimeInterval: TimeInterval = 0.5
-    /// Minimum camera movement to trigger keyframe capture (meters)
-    private static let keyframeDistanceThreshold: Float = 0.10
+    /// Thin state and bridge to the shared C++ capture policy.
+    private var keyframePolicy = ScanKeyframePolicy()
+    private var lastCaptureRun: Int?
+    private var rejectedKeyframeCount = 0
+    private var qualityFeedback: String?
+    private var lastQualityCheck: TimeInterval = -.infinity
     /// Maximum point count before automatic downsampling
     private static let maxPointCount = 5_000_000
     /// JPEGs are encoded from ARKit's captured-image buffer without rotating pixels.
@@ -46,10 +48,6 @@ final class ARKitScannerService: NSObject, ScannerService {
     /// Camera intrinsics recorded from the latest frame
     private var currentIntrinsics: CameraIntrinsics?
 
-    /// Timestamp of the last captured keyframe
-    private var lastKeyframeTime: TimeInterval = 0
-    /// Transform of the last captured keyframe (for distance check)
-    private var lastKeyframeTransform: simd_float4x4?
     /// Session start time for relative timestamps
     private var sessionStartTime: TimeInterval = 0
     /// Running keyframe index for filename generation
@@ -72,8 +70,8 @@ final class ARKitScannerService: NSObject, ScannerService {
         capturedImages = []
         cameraPoses = []
         currentIntrinsics = nil
-        lastKeyframeTime = 0
-        lastKeyframeTransform = nil
+        keyframePolicy.reset(); lastCaptureRun = nil; rejectedKeyframeCount = 0
+        qualityFeedback = nil; lastQualityCheck = -.infinity
         keyframeIndex = 0
         meshAnchors = []
         trackingRun.start()
@@ -148,46 +146,20 @@ final class ARKitScannerService: NSObject, ScannerService {
             pointCount: pointCloudVertices.count,
             coverageArea: estimateCoverageArea(),
             keyframeCount: capturedImages.count,
-            isScanning: isScanning
+            isScanning: isScanning,
+            rejectedKeyframeCount: rejectedKeyframeCount,
+            qualityFeedback: qualityFeedback
         )
     }
 
 
     // MARK: - Keyframe Capture Strategy
 
-    /// Determines whether a new keyframe should be captured based on time and distance criteria.
-    ///
-    /// Captures a keyframe when:
-    /// - At least 0.5 seconds have elapsed since the last keyframe, OR
-    /// - The camera has moved more than 10cm since the last keyframe
+    /// Calls the canonical core policy without duplicating view thresholds.
     ///
     /// - Requirements: 1.2
     private func shouldCaptureKeyframe(currentTime: TimeInterval, currentTransform: simd_float4x4) -> Bool {
-        // Always capture the first keyframe
-        guard let lastTransform = lastKeyframeTransform else {
-            return true
-        }
-
-        // Time-based criterion: >= 0.5 seconds since last keyframe
-        let timeSinceLastKeyframe = currentTime - lastKeyframeTime
-        if timeSinceLastKeyframe >= Self.keyframeTimeInterval {
-            return true
-        }
-
-        // Distance-based criterion: camera moved > 10cm
-        let distance = translationDistance(from: lastTransform, to: currentTransform)
-        if distance > Self.keyframeDistanceThreshold {
-            return true
-        }
-
-        return false
-    }
-
-    /// Computes the Euclidean distance between the translation components of two 4x4 transforms.
-    private func translationDistance(from a: simd_float4x4, to b: simd_float4x4) -> Float {
-        let posA = simd_float3(a.columns.3.x, a.columns.3.y, a.columns.3.z)
-        let posB = simd_float3(b.columns.3.x, b.columns.3.y, b.columns.3.z)
-        return simd_length(posB - posA)
+        keyframePolicy.shouldCapture(at: currentTime, transform: currentTransform)
     }
 
     // MARK: - Camera Intrinsics Recording
@@ -345,19 +317,29 @@ extension ARKitScannerService: ARSessionDelegate {
             downsamplePointCloudIfNeeded()
         }
 
-        // Keyframe capture: every 0.5s or camera movement > 10cm (Requirement 1.2)
+        // Keep pixels, calibration and pose bound to this exact ARFrame.
         let cameraTransform = frame.camera.transform
 
         // Skip keyframe capture if ARKit tracking is not fully established.
         // Early frames often have identity transforms (no real pose data),
         // which corrupt downstream texture mapping.
         guard let run = trackingRun.runForFrame(isTrackingNormal: frame.camera.trackingState == .normal) else {
+            qualityFeedback = "等待相机稳定追踪后继续采集"
             return
+        }
+        if lastCaptureRun != run {
+            keyframePolicy.reset(); lastCaptureRun = run; lastQualityCheck = -.infinity
         }
 
         guard shouldCaptureKeyframe(currentTime: currentTime, currentTransform: cameraTransform) else {
             return
         }
+        // Device-side work scheduling only; quality and view decisions live in C++.
+        guard currentTime - lastQualityCheck >= 0.2 else { return }
+        lastQualityCheck = currentTime
+        let quality = ScanFrameQuality.assess(pixelBuffer: frame.capturedImage)
+        qualityFeedback = quality.feedback
+        guard quality.rejection == nil else { rejectedKeyframeCount += 1; return }
 
         // Capture keyframe image
         guard let imageData = captureKeyframeImage(from: frame) else {
@@ -387,8 +369,7 @@ extension ARKitScannerService: ARSessionDelegate {
         cameraPoses.append(pose)
 
         // Update keyframe tracking state
-        lastKeyframeTime = currentTime
-        lastKeyframeTransform = cameraTransform
+        keyframePolicy.recordCapture(at: currentTime, transform: cameraTransform)
         keyframeIndex += 1
     }
 

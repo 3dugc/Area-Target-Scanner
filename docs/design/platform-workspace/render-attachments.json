@@ -1,0 +1,155 @@
+[
+  {
+    "file": "scene-rename-editor-light.png",
+    "test": "WorkspaceRenderTests/testImmersalAccountTasksAndSceneNameEditorRenderOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "immersal-tasks-light.png",
+    "test": "WorkspaceRenderTests/testImmersalAccountTasksAndSceneNameEditorRenderOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "immersal-account-light.png",
+    "test": "WorkspaceRenderTests/testImmersalAccountTasksAndSceneNameEditorRenderOffline()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "workspace-switched-back-to-area-target.png",
+    "test": "WorkspaceRenderTests/testRenderedPlatformSwitchPreservesSceneAndStartsPollingOnlyForImmersal()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "workspace-switched-to-immersal.png",
+    "test": "WorkspaceRenderTests/testRenderedPlatformSwitchPreservesSceneAndStartsPollingOnlyForImmersal()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "records-with-saved-preview-state.png",
+    "test": "WorkspaceRenderTests/testRenderedRecordsTabDoesNotJumpToProcessingForExistingPreviewState()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "scan-home-large-text.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "records-large-text.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "immersal-process-dark.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "immersal-process-large-text.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "process-large-text.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "area-process-dark.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "process-empty.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "records-light.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "scan-home-light.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "immersal-process-light.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  },
+  {
+    "file": "area-process-light.png",
+    "test": "WorkspaceRenderTests/testWorkspacePagesRenderWithSharedSceneInLightDarkAndLargeText()",
+    "viewport": [
+      393,
+      852
+    ],
+    "fixture": "offline sample scan / fake Immersal API"
+  }
+]

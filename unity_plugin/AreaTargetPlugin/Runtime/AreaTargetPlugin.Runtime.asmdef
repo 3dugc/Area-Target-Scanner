@@ -2,7 +2,10 @@
   "name": "AreaTargetPlugin.Runtime",
   "rootNamespace": "AreaTargetPlugin",
   "references": [
-    "Gilzoide.SqliteNet"
+    "Gilzoide.SqliteNet",
+    "Unity.XR.ARFoundation",
+    "Unity.XR.ARSubsystems",
+    "Unity.XR.CoreUtils"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
@@ -11,6 +14,12 @@
   "precompiledReferences": [],
   "autoReferenced": true,
   "defineConstraints": [],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.xr.arfoundation",
+      "expression": "6.0.0",
+      "define": "UNITY_AR_FOUNDATION"
+    }
+  ],
   "noEngineReferences": false
 }

@@ -34,12 +34,12 @@ struct ScanFrameQuality {
     private static func assess(base: UnsafePointer<UInt8>?, width: Int, height: Int, stride: Int) -> ScanFrameQuality {
         guard width > 0, height > 0, stride >= width else { return unreadable }
         var frame = ATCFrameV2()
-        frame.struct_size = UInt32(MemoryLayout<ATCFrameV2>.size); frame.api_version = atc_default_config_v2().api_version
+        frame.struct_size = UInt32(MemoryLayout<ATCFrameV2>.size); frame.api_version = atc_get_api_version()
         frame.width = UInt32(width); frame.height = UInt32(height); frame.row_stride = UInt64(stride)
         frame.data = base; frame.byte_length = UInt64(stride) * UInt64(height - 1) + UInt64(width)
         frame.pixel_format = UInt32(ATC_PIXEL_FORMAT_GRAY8)
         var quality = ATCGrayQualityV2()
-        quality.struct_size = UInt32(MemoryLayout<ATCGrayQualityV2>.size); quality.api_version = atc_default_config_v2().api_version
+        quality.struct_size = UInt32(MemoryLayout<ATCGrayQualityV2>.size); quality.api_version = atc_get_api_version()
         guard atc_assess_gray_quality(&frame, &quality) == ATC_OK else { return unreadable }
         let rejection: Rejection?
         switch quality.rejection_reason {

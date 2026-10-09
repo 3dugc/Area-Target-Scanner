@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-REQUIRED = tuple((ROOT / "tools/phase0/required_native_symbols.txt").read_text().split())
+REQUIRED = tuple((ROOT / "tools/phase0/required_combined_native_symbols.txt").read_text().split())
 
 def run(*args):
     try:
@@ -30,6 +30,8 @@ def verify_framework(framework, platform):
         raise ValueError("framework module map is missing")
     if (framework / "Headers/AreaTargetNative.h").read_bytes() != (ROOT / "native_visual_localizer/include/visual_localizer.h").read_bytes():
         raise ValueError("framework header does not match native C ABI")
+    if (framework / "Headers/area_target_runtime.h").read_bytes() != (ROOT / "native_visual_localizer/include/area_target_runtime.h").read_bytes():
+        raise ValueError("framework shared runtime header does not match C ABI")
     with (framework / "Info.plist").open("rb") as stream:
         info = plistlib.load(stream)
     if info.get("CFBundleExecutable") != "AreaTargetNative":
@@ -51,8 +53,15 @@ def verify_framework(framework, platform):
             raise ValueError("framework Info.plist SDK/toolchain field is missing: " + key)
     if info["DTPlatformBuild"] != info["DTSDKBuild"]:
         raise ValueError("framework Info.plist SDK/platform builds disagree")
-    from build_area_target_native import VERSION, SOURCE_SHA256, CONTRIB_SHA256, digest, license_resources, verify_license_resources
+    from build_area_target_native import VERSION, SOURCE_SHA256, CONTRIB_SHA256, SOURCES, digest, license_resources, verify_license_resources
     metadata = json.loads((framework / "dependency.json").read_text())
+    if metadata.get("runtimeApiVersion") != 2:
+        raise ValueError("framework shared runtime API version mismatch")
+    runtime_inputs = [*SOURCES, *sorted((ROOT / "native_visual_localizer/include").glob("*.h")),
+                      *sorted((ROOT / "native_visual_localizer/src").glob("*.h"))]
+    source_hashes = {str(path.relative_to(ROOT)): digest(path) for path in runtime_inputs}
+    if metadata.get("runtimeSourceSHA256s") != source_hashes:
+        raise ValueError("framework shared core source provenance mismatch")
     for key, expected in (("version", VERSION), ("sourceSHA256", SOURCE_SHA256),
                           ("contribSHA256", CONTRIB_SHA256), ("platform", platform), ("architecture", "arm64")):
         if metadata.get(key) != expected:
@@ -98,7 +107,7 @@ def verify_composite_link(framework, library, work, sdk_directory=None):
     work.mkdir(parents=True, exist_ok=True)
     header = (Path(sdk_directory) if sdk_directory else ROOT / "ios_scanner/AreaTargetScanner/ThirdParty/Immersal") / "ImmersalNative.h"
     names = list(REQUIRED) + ["icvLoadMap", "icvFreeMap", "icvPointsGetCount", "icvLocalize"]
-    code = '#include "AreaTargetNative.h"\n#include "ImmersalNative.h"\n'
+    code = '#include "AreaTargetNative.h"\n#include "area_target_runtime.h"\n#include "ImmersalNative.h"\n'
     code += '_Static_assert(sizeof(VLResult)==76,"VLResult ABI");\n_Static_assert(sizeof(VLDebugInfo)==48,"VLDebugInfo ABI");\n'
     code += 'const void *api[]={' + ','.join('(const void *)&' + name for name in names) + '};\n'
     code += 'int main(void) { return api[0] == 0; }\n'

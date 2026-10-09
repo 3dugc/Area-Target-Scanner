@@ -1,5 +1,25 @@
 import Foundation
 
+enum AreaTargetProcessingProfile: String, CaseIterable, Identifiable {
+    case quality, fast
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .quality: return "Quality"
+        case .fast: return "Fast"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .quality: return "质量优先，保留更多定位特征，处理时间和资产体积可能增加。"
+        case .fast: return "快速处理，定位特征较少，适合先检查处理流程。"
+        }
+    }
+}
+
 enum AreaTargetTaskPhase: String, Codable {
     case preparing, uploading, submissionUnknown, processing, ready, downloading, downloaded, paused, failed, stopped
 
@@ -27,7 +47,7 @@ struct AreaTargetProcessingJob: Identifiable, Codable, Equatable {
     private let persistedServerOrigin: AreaTargetServerOrigin?
     var serverOrigin: AreaTargetServerOrigin { persistedServerOrigin ?? .legacy }
     var phase: AreaTargetTaskPhase = .preparing
-    var profile = "fast"
+    var profile = "quality"
     var uvUnwrap = true
     var mapCLAHE = false
     var accepted = false
@@ -69,6 +89,7 @@ struct AreaTargetProcessingJob: Identifiable, Codable, Equatable {
     var scanDirectory: URL { URL(fileURLWithPath: scanDirectoryPath, isDirectory: true) }
     var archiveURL: URL? { archivePath.map { URL(fileURLWithPath: $0) } }
 }
+
 
 extension AreaTargetProcessingJob {
     init(from decoder: Decoder) throws {

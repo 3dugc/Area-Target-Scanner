@@ -167,6 +167,25 @@ namespace AreaTargetPlugin.Tests
             Object.DestroyImmediate(tex);
         }
 
+        [Test]
+        public void SetPreviewImage_MapsOpticalTopRowToDisplayTop()
+        {
+            var tex = new Texture2D(2, 2, TextureFormat.R8, false);
+            try
+            {
+                // Uploaded optical top/bottom rows occupy Unity bottom/top rows.
+                tex.LoadRawTextureData(new byte[] { 255, 0, 76, 149 });
+                tex.Apply();
+                _panel.SetPreviewImage(tex);
+                Rect uv = _imagePreview.uvRect;
+                Assert.That(uv.x, Is.Zero);
+                Assert.That(uv.width, Is.EqualTo(1));
+                Assert.That(uv.y + uv.height, Is.Zero, "Display top must sample optical row zero.");
+                Assert.That(uv.y, Is.EqualTo(1), "Display bottom must sample the last optical row.");
+            }
+            finally { Object.DestroyImmediate(tex); }
+        }
+
         // --- SetupSeekSlider / UpdateSeekSlider ---
 
         [Test]

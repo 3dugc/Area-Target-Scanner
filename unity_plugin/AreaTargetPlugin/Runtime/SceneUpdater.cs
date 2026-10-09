@@ -9,7 +9,9 @@ namespace AreaTargetPlugin.PointCloudLocalization
             var data = new SceneUpdateData
             {
                 Pose = result.Pose,
-                Ignore = !result.Success
+                Ignore = !result.Success,
+                SetVisibility = true,
+                Visible = result.Success
             };
             await entry.SceneParent.SceneUpdate(data);
         }

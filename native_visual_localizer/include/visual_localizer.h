@@ -81,6 +81,11 @@ VL_API void vl_process_frame_out(VLHandle handle,
 /* State management */
 VL_API void vl_reset(VLHandle handle);
 
+/* Per-handle recovery: 0=standard (default), 1=enhanced. Returns 1 on success,
+ * 0 for null handles/unsupported modes. Invalid requests leave the choice
+ * unchanged; reset preserves it. Geometry checks apply in both modes. */
+VL_API int vl_set_recovery_mode(VLHandle handle, int mode);
+
 /* Legacy alignment hook. It never changes the canonical T_C_S VLResult.pose;
  * runtime ownership of T_U_S composition is introduced in phase-1 task 4. */
 VL_API void vl_set_alignment_transform(VLHandle handle, const float* at_4x4);
